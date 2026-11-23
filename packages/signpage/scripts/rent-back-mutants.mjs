@@ -103,7 +103,7 @@ export const M = [
   // delta review 7 of 08290868, item 1: W's buy mint (the buy's record) holds the pass while W holds any of it
   ["review 7 A1 the buy record not read into the pass", SELL, T, "const x: RentBack = buy ? { ...given, mints: mintsOf(given.mints, [buy]), buy } :", "const x: RentBack = buy ? { ...given, buy } :"],
   ["review 7 A2 no buy record: the pass runs", SELL, T, '    if (!x.buy && x.bare !== true) return end("holds", "no buy of W\'s is recorded", x.unproven !== "again");\n', ""],
-  ["review 7 A3 a buy record read as none", SELL, T, "const x: RentBack = buy ? { ...given, mints: mintsOf(given.mints, [buy]), buy } : { ...given, buy: null,", "const x: RentBack = { ...given, buy: null,"],
+  ["review 7 A3 a buy record read as none", SELL, T, "const x: RentBack = buy ? { ...given, mints: mintsOf(given.mints, [buy]), buy } : found ?", "const x: RentBack = found ?"],
   ["review 7 A5 the buy writes no record", BUY, TB, "      await h.bought?.put(w.address, { mint: venue.mint, program: venue.tokenProgram });\n", ""],
   ["review 7 A6 the buy's record written after its send", BUY, TB, "      await h.bought?.put(w.address, { mint: venue.mint, program: venue.tokenProgram });\n      return await sendAndSettle(h, r, release, pool, signed, bh.lastHeight, wait, { token, minOut, tell, bound, decimals, early }, before);", "      try { return await sendAndSettle(h, r, release, pool, signed, bh.lastHeight, wait, { token, minOut, tell, bound, decimals, early }, before); } finally { await h.bought?.put(w.address, { mint: venue.mint, program: venue.tokenProgram }); }"],
   // delta review 8 of 5697d7a1: with no buy record the pass holds; the record through the page's store
@@ -171,16 +171,22 @@ export const M = [
   // review of 359f71639, M1: the strand's record naming the tap's mint, or a found pass naming the record's mints, holds a
   // stranded W on a stranger's unit of that mint
   ["a17c a strand names the tap's mint", SELL, T, "mints: had?.mints ?? [], found: true });", "mints: [...(had?.mints ?? []).filter((m) => m.mint !== r.mint), { mint: r.mint, program: r.program }], found: true });"],
-  ["a17d a found pass names its record's mints", SELL, T, "(o.found === true ? { bare: true as const, mints: [] } :", "(o.found === true ? { bare: true as const } :"],
+  ["a17d a found pass names its record's mints", SELL, T, "found ? { ...given, buy: null, bare: true, mints: [] } :", "found ? { ...given, buy: null, bare: true } :"],
   // review of 359f71639, L4: both RPCs' heights far apart before round 1, not refused (round 1 pays into a sure refusal)
   ["a17e heights far apart give a floor", BUY, TB, "return Math.abs(a - b) > HEIGHT_APART_MAX ? null : Math.min(a, b);", "return Math.min(a, b);", "a-found-wallet-sweeps"],
   // re-review of 696e71176, LOW 1: the floor the greater of both heights (one RPC alone lifts the buy round's bound)
   ["a17g floor the greater height", BUY, TB, "return Math.abs(a - b) > HEIGHT_APART_MAX ? null : Math.min(a, b);", "return Math.abs(a - b) > HEIGHT_APART_MAX ? null : Math.max(a, b);", "a-found-wallet-sweeps"],
+  // card a-found-wallet-old-strand-records-sweep: a record whose notes at W's (l, j) are all UNSPENT or HELD is a found W
+  ["osr1 an old strand record never found", SELL, T, "const found = o.found === true || (await notesOpen(given.store, given.scope, given.w));", "const found = o.found === true;", "stranger's unit of a stranded W|record from before .found|a found W: held with no"],
+  ["osr2 one open note of W's is enough", SELL, T, "return mine.length > 0 && mine.every((n) => n.state === \"UNSPENT\" || n.state === \"HELD\");", "return mine.length > 0 && mine.some((n) => n.state === \"UNSPENT\" || n.state === \"HELD\");", "stranger's unit of a stranded W|record from before .found|a found W: held with no"],
+  ["osr3 a W with no note of its own found", SELL, T, "return mine.length > 0 && mine.every((n) =>", "return mine.every((n) =>"],
+  ["osr4 a SPENT note read as open", SELL, T, "mine.every((n) => n.state === \"UNSPENT\" || n.state === \"HELD\");", "mine.every((n) => n.state !== \"RESERVED\");", "stranger's unit of a stranded W|record from before .found|a found W: held with no"],
+  ["osr5 a recorded buy whose note is open keeps its mint", SELL, T, "let buy: SolanaBuy | undefined = !found && ev.rec && ev.rec.rebuilt !== true ?", "let buy: SolanaBuy | undefined = ev.rec && ev.rec.rebuilt !== true ?", "stranger's unit of a stranded W|record from before .found|a found W: held with no"],
   ["a17f no floor refuses nothing before round 1", BUY, TB, "      if (landed === null && floor === null) return { error: \"failed\" };\n", "", "a-found-wallet-sweeps"],
   ["a18 the proven buy not kept on the record", SELL, T, ", ...(kept.buy === undefined ? {} : { buy: kept.buy })", ""],
   ["a19 the record's proven buy proven again", SELL, T, "  let proven = o.buy;\n", "  let proven: SolanaBuy | null | undefined = undefined;\n"],
   ["a20 a sale's rent back keeps no seen", SELL, T, "owedRec, hold, await seenOf(h, w.address, owedRec.mints))));", "owedRec, hold, undefined)));"],
-  ["a21 a plain release's W read again on every load", SELL, T, "const x: RentBack = buy ? { ...given, mints: mintsOf(given.mints, [buy]), buy } : { ...given, buy: null, ...(o.found === true ? { bare: true as const, mints: [] } : unproven ? { unproven } : {}) };", "const x: RentBack = buy ? { ...given, mints: mintsOf(given.mints, [buy]), buy } : { ...given, buy: null, ...(o.found === true ? { bare: true as const, mints: [] } : { unproven: \"again\" as const }) };"],
+  ["a21 a plain release's W read again on every load", SELL, T, ": { ...given, buy: null, ...(unproven ? { unproven } : {}) };", ": { ...given, buy: null, unproven: \"again\" as const };"],
   // inverted 13 Nov 09:31Z (card every-lamport-can-move T3): a leftover is counted in the balance
   ["c16 a W that ended at the floor carries no amount", SELL, T, 'e === "floor" ? kept.lamports?.toString() :', 'e === "floor" ? undefined :'],
   ["c17 a found W kept by a stranger's holding account alone keeps its seen", SELL, T, "r.steady && x.bare !== true ? seen", "r.steady ? seen"],

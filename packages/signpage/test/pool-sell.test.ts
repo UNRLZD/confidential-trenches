@@ -120,6 +120,11 @@ async function foundW(w: World, rec: OwedRentBack = { address: W.address, l: L.t
   if (!(await w.ns.list()).some((n) => n.ref.kind === "deposit" && n.ref.i === 70)) await w.ns.add({ ref: W_NOTE, scope: SCOPE, precommitment: noteSecrets(SEED64, W_NOTE).precommitment, state: "UNSPENT", leaf: { value: AMOUNT, label: L, commitment: noteCommitment(AMOUNT, L, noteSecrets(SEED64, W_NOTE).precommitment), leafIndex: 9_999n } });
   await w.host.owed!.put(rec);
 }
+/** W's own note (W_NOTE) SPENT in the store: its tag 3 landed (a buy) as the device settled it. */
+async function wNoteSpent(w: World): Promise<void> {
+  const n = (await w.ns.list()).find((x) => x.ref.kind === "deposit" && x.ref.i === 70)!;
+  await w.ns.move(n.id, "UNSPENT", "SPENT");
+}
 /** The settle a state read runs (review L6: the sweep's verdict is the next read's, not the sell lock's). */
 const settle = (w: World) => settlePoolSells(w.host, fakeLocks());
 const ours = async (ns: NoteStore) => (await ns.list()).filter((n) => n.scope === SCOPE).map((n) => ({ ref: n.ref, state: n.state, value: n.leaf?.value, leafIndex: n.leaf?.leafIndex }));
@@ -2588,8 +2593,10 @@ const around = (w: World, p: 0 | 1, f: (m: string, params: readonly unknown[], r
 };
 
 test("a found W: held with no `found`, with one RPC failing, answering out of shape or listing a token account (a zero-balance one included) the other does not; held while a transaction signed before W's latest can still land (past its height + 151 on one RPC only, the two naming different latest transactions, one not reading it)", async () => {
-  const cases: [string, (w: World) => void, Plant?][] = [
-    ["no found", (w) => void w.owed.set(W.address, { ...w.owed.get(W.address)!, found: undefined })],
+  const cases: [string, (w: World) => void | Promise<void>, Plant?][] = [
+    // card a-found-wallet-old-strand-records-sweep: with no `found`, a W whose own note is SPENT (a buy or a sale's) is
+    // never found; one whose notes are all UNSPENT or HELD is (the old strand record's test)
+    ["no found, W's note SPENT", async (w) => (w.owed.set(W.address, { ...w.owed.get(W.address)!, found: undefined }), await wNoteSpent(w))],
     ["RPC 1 fails", (w) => {
       const r = w.host.rpcs[1];
       w.host.rpcs = [w.host.rpcs[0], (async (m: string, p: readonly unknown[]) => (m === "getTokenAccountsByOwner" ? Promise.reject(new Error("HTTP 503")) : r(m, p))) as SolanaRpc];
@@ -2617,7 +2624,7 @@ test("a found W: held with no `found`, with one RPC failing, answering out of sh
     const w = await world({ buy: null, ...chainPlant }, []);
     w.c.accounts.delete(VF.pump.ata);
     await foundW(w);
-    plant(w);
+    await plant(w);
     const before = w.c.accounts.get(W.address)?.lamports;
     await resumeRentBacks(w.host, fakeLocks());
     assert.equal(w.c.deposits.filter((d) => d.sweep).length, 0, name);
@@ -2697,14 +2704,17 @@ test("a buy of pieces refused at the round gap, or its first round not landed wh
 // Review of 359f71639, M1: the strand's record named the tap's buy mint, so a unit of that mint anyone sends to W (a
 // stranger's: no buy of the user's ever landed) held W's SOL on this device for good, read as "a token it traded". A
 // stranded W never traded it: its record names no mint, and only a buy recorded or proven puts the mint back.
-test("a stranger's unit of a stranded W's buy mint never holds its SOL: swept, the unit left on W, a record before the strand naming it too; a buy of that mint recorded on this device still holds W", async () => {
+test("a stranger's unit of a stranded W's buy mint never holds its SOL: swept, the unit left on W, a record before the strand naming it too, or a buy of it recorded that never landed; a landed buy of that mint still holds W", async () => {
   const H = 10;
-  for (const [recorded, before] of [[false, false], [false, true], [true, false]] as const) {
-    const plant = { ...(recorded ? {} : { buy: null }), wLastHeight: H, finalHeight: H + 151 + FOUND_ROUND_GAP + 1 };
+  // [a buy recorded on this device, a record of W's before the strand, that buy landed (W's note SPENT on the store and
+  // the pool)]; card a-found-wallet-old-strand-records-sweep: a buy recorded but never landed names no coin of W's
+  for (const [recorded, before, landed] of [[false, false, false], [false, true, false], [true, false, false], [true, false, true]] as const) {
+    const plant = { ...(recorded ? {} : { buy: null }), ...(landed ? { wNote: "spent" as const } : {}), wLastHeight: H, finalHeight: H + 151 + FOUND_ROUND_GAP + 1 };
     const w = await world(plant, []);
     // W's account of the pump coin holds AMOUNT: a stranger's (no buy of the user's), or the recorded buy's own
     w.c.accounts.set(VF.pump.ata, { owner: TOKEN_PROGRAM, lamports: Number(TOKEN_RENT), data: tokenAccount(AMOUNT) });
     await foundW(w);
+    if (landed) await wNoteSpent(w);
     await w.host.owed!.drop(W.address);
     // a record of W's before the strand (a pass a load ran on W once round 1's SOL was on it) naming the coin
     const had = before ? [{ mint: VF.pump.mint, program: TOKEN_PROGRAM }] : [];
@@ -2713,17 +2723,43 @@ test("a stranger's unit of a stranded W's buy mint never holds its SOL: swept, t
     const rec: OwedPieces = { address: W.address, l: L.toString(), j: J, primary: "own", pieces: ["p1"], lastHeight: String(H + 151), mint: VF.pump.mint, program: TOKEN_PROGRAM, spend: { program: PROGRAM, feePayer: W.address, context: "0", nullifier: "1" } };
     const kept = [rec];
     const owed = { list: async () => [...kept], put: async () => {}, drop: async (a: string) => void kept.splice(kept.findIndex((r) => r.address === a), 1) } as unknown as PiecesOwed;
-    assert.equal(await resumePieces({ owed, state: async (id) => states[id], owner: async () => assert.fail("a freed note's owner is never read"), strand: (r) => strandOwed(w.host.owed!, r) }), 1);
-    assert.deepEqual((await w.host.owed!.list()).find((r) => r.address === W.address)?.mints, had, "the strand adds no mint");
+    // a landed buy strands nothing: W's own record, no `found`, its coin the recorded buy's
+    if (landed) await w.host.owed!.put({ address: W.address, l: L.toString(), j: J, mints: [], passes: 0 });
+    else {
+      assert.equal(await resumePieces({ owed, state: async (id) => states[id], owner: async () => assert.fail("a freed note's owner is never read"), strand: (r) => strandOwed(w.host.owed!, r) }), 1);
+      assert.deepEqual((await w.host.owed!.list()).find((r) => r.address === W.address)?.mints, had, "the strand adds no mint");
+    }
     await resumeRentBacks(w.host, fakeLocks());
     const told = JSON.stringify(w.told.map((t) => [t.state, t.detail]));
-    if (recorded) {
+    if (landed) {
       assert.equal(w.c.deposits.filter((d) => d.sweep).length, 0, told);
       assert.equal(w.told.at(-1)?.state, "holds", told);
     } else {
       assert.equal(w.c.deposits.filter((d) => d.sweep).length, 1, told);
       assert.equal(new DataView(w.c.accounts.get(VF.pump.ata)!.data.buffer).getBigUint64(64, true), AMOUNT, "the stranger's unit left on W");
     }
+  }
+});
+
+// Card a-found-wallet-old-strand-records-sweep (re-review of 696e71176, L2): main's strand wrote W's record with the buy's
+// mint and no `found`, and findHeldWs passes over a W with a record, so on a device that ran it W held for good as "no buy
+// of W's is recorded". A record whose notes at W's (l, j) are all UNSPENT or HELD is a found W, its pass naming no mint;
+// a W the helper lists after a buy or a sale (its note SPENT) is held as before.
+test("a stranded W's record from before `found` (the buy mint named, W's note UNSPENT) is swept on the found rule, the stranger's unit left; a listed W whose note is SPENT is held, a refund note UNSPENT on the same W beside it too", async () => {
+  const H = 10;
+  for (const [listed, refund] of [[false, false], [true, false], [true, true]] as const) {
+    const w = await world({ buy: null, wLastHeight: H, finalHeight: H + 151 + FOUND_ROUND_GAP + 1, ...(listed ? { wNote: "spent" as const } : {}) }, []);
+    w.c.accounts.set(VF.pump.ata, { owner: TOKEN_PROGRAM, lamports: Number(TOKEN_RENT), data: tokenAccount(1n) });
+    await foundW(w, { address: W.address, l: L.toString(), j: J, mints: [{ mint: VF.pump.mint, program: TOKEN_PROGRAM }], passes: 0 });
+    if (listed) await wNoteSpent(w);
+    // a refund of W's deposit lands on the same W (its l and j), UNSPENT: one open note of W's is no found W
+    const REFUND: NoteRef = { kind: "refund", l: L, j: J };
+    if (refund) await w.ns.add({ ref: REFUND, scope: SCOPE, precommitment: noteSecrets(SEED64, REFUND).precommitment, state: "UNSPENT", leaf: { value: AMOUNT, label: L, commitment: noteCommitment(AMOUNT, L, noteSecrets(SEED64, REFUND).precommitment), leafIndex: 9_998n } });
+    await resumeRentBacks(w.host, fakeLocks());
+    const told = JSON.stringify(w.told.map((t) => [t.state, t.detail]));
+    assert.equal(w.c.deposits.filter((d) => d.sweep).length, listed ? 0 : 1, told);
+    if (listed) assert.equal(w.told.at(-1)?.state, "holds", told);
+    else assert.equal(new DataView(w.c.accounts.get(VF.pump.ata)!.data.buffer).getBigUint64(64, true), 1n, "the stranger's unit left on W");
   }
 });
 

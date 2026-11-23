@@ -1601,8 +1601,9 @@ const heldRpcs = () => [moveOutRpc(NEAR_NETWORKS[PAGE_NETWORK].fastnear[0]), mov
 // each asked again after a throttle (archivalRpc)
 const heldArchival = () => NEAR_NETWORKS[PAGE_NETWORK].archival.map((u) => archivalRpc(u));
 const heldSeedLock = <T,>(fn: () => Promise<T>): Promise<T> => (navigator.locks ? (navigator.locks.request(WALLET_SEED_LOCK, { mode: "shared" }, fn) as Promise<T>) : fn());
-// U's own lock, the deposit follow's (deposit-follow.ts FOLLOW_LOCK/<network>/<U>), only if free: while a follow of U runs
-// (it may bind U's USDC), no move of U is signed (review of d791adda, M1)
+// U's own lock, the deposit follow's (deposit-follow.ts FOLLOW_LOCK/<network>/<U>), only if free: while a round of U's
+// follow runs (it may bind U's USDC), no move of U is signed (review of d791adda, M1); the follow holds it only around
+// each round, so a tap between rounds moves (held-move-follow-resume, review M1 of 4723424c4)
 const heldULock = (u: string) => <T,>(fn: () => Promise<T>): Promise<T | null> =>
   navigator.locks ? (navigator.locks.request(`${FOLLOW_LOCK}${PAGE_NETWORK}/${u}`, { mode: "exclusive", ifAvailable: true }, (lock) => (lock === null ? null : fn())) as Promise<T | null>) : fn();
 async function heldOpFor(u: string): Promise<string | null> {
@@ -1622,7 +1623,13 @@ function heldDeps(opId: string): HeldDeps {
     moveOut: async (to) => {
       const ops = await open();
       const u = ((await ops.get("ops", opId)) as DepositOp | undefined)?.follow?.u ?? "";
-      return moveOutHeld(opId, to, { ops, rpcs, archival: heldArchival(), seed64: () => openSeed64(), seedLock: heldSeedLock, uLock: heldULock(u) });
+      // the page's notes, read as stored (readNotes: no note lock taken, nothing written): the tap waits while U's bind call
+      // is out (moveout.ts MoveOutDeps.notes, re-review FIX FIRST 2)
+      const o = await moveOutHeld(opId, to, { ops, rpcs, archival: heldArchival(), seed64: () => openSeed64(), notes: { list: () => readNotes(ops) }, seedLock: heldSeedLock, uLock: heldULock(u) });
+      // U empty while the op's money is still on its way to U (card held-move-follow-resume): U's follow is resumed and
+      // the tap reads again later, never Nothing to move. "unread" draws withdraw/form.ts's WITHDRAW_WORDS.busy (form.ts:63,
+      // picked 8 Nov 07:55Z, kept) through withdraw/held.ts's outcome line (held.ts:152): no new words
+      return o.kind === "empty" && (await follows?.resume(opId)) === true ? { kind: "unread" } : o;
     },
   };
 }

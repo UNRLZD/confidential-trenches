@@ -21,7 +21,7 @@ const { openWalletStore, WALLET_SEED_LOCK } = await import("@blindfill/wallet/st
 const { SIGNPAGE_RESULT_SCHEMAS } = await import("../../kit/src/signpage/schema.ts");
 const { depositAccount, NEAR_NETWORKS } = await import("../../wallet/src/deposit/account.ts");
 const d = await import("../../wallet/src/derive/index.ts");
-const { depositFollows, FOLLOW_ENDS, FOLLOW_LOCK } = await import("../src/deposit-follow.ts");
+const { depositFollows, FOLLOW_ENDS, FOLLOW_LOCK, FOLLOWER_LOCK } = await import("../src/deposit-follow.ts");
 const { depositQuoteHost } = await import("../src/deposit-wire.ts");
 
 const SAVED: DepositPublic = { status: { source: "code", code_saved: true }, deposit: { v: 1, scope: "7", index: 3, id: MOCK_U } };
@@ -153,7 +153,7 @@ test("the seed is never opened without a credit to bind", async () => {
   assert.equal(opened, 0, "status and balance reads need only U");
 });
 
-test("N1 and E2: a live follow never holds the seed lock while it polls: an exclusive (nameDeposit, setCodeSaved, a sign out) and a trade's shared request go at once; U's own lock is held", async () => {
+test("N1 and E2: a live follow never holds the seed lock while it polls: an exclusive (nameDeposit, setCodeSaved, a sign out) and a trade's shared request go at once; U's follower lock is held", async () => {
   const w = await openWalletStore({ indexedDB: new IDBFactory() });
   closers.push(() => w.close());
   const f = depositFollows({
@@ -175,7 +175,9 @@ test("N1 and E2: a live follow never holds the seed lock while it polls: an excl
   await Promise.race([Promise.all([ex, sh]), new Promise((ok) => setTimeout(ok, 400))]);
   const q = await navigator.locks.query();
   assert.ok(exclusive && shared, "neither waited on the follow");
-  assert.ok(q.held!.some((l) => l.name === `${FOLLOW_LOCK}testnet/${U}` && l.mode === "exclusive"), "U's lock is held while it follows");
+  // one follower per U across tabs: the follower lock is held while it follows (U's own lock only around a round:
+  // held-move-follow-resume M1)
+  assert.ok(q.held!.some((l) => l.name === `${FOLLOWER_LOCK}testnet/${U}` && l.mode === "exclusive"), "U's follower lock is held while it follows");
   assert.ok(!q.held!.some((l) => l.name === WALLET_SEED_LOCK));
   f.signedOut();
   await f.idle();
@@ -210,6 +212,48 @@ const CREDIT_RPCS = (): readonly [FollowRpc, FollowRpc] => {
   });
   return [one(NEAR_NETWORKS.testnet.fastnear[0]), one(NEAR_NETWORKS.testnet.drpc)];
 };
+
+// held-move-follow-resume (review of 4723424c4, M1): the follow held U's lock across its waits, so the way out's tap
+// (main.ts heldULock: U's lock only if free) answered busy for as long as a held op's money was followed, about 31
+// minutes. The follow takes U's lock only around each round; a tap between rounds gets it, and a round waits for a tap.
+test("held-move-follow-resume M1: a tap during the follow's wait gets U's lock (the tap's own ifAvailable request); a round never starts while a tap holds it", async () => {
+  const w = await openWalletStore({ indexedDB: new IDBFactory() });
+  closers.push(() => w.close());
+  let waiting = 0;
+  let release = () => {};
+  let reads = 0;
+  const f = depositFollows({
+    network: () => "testnet",
+    store: async () => w,
+    seed64: async () => Uint8Array.from(SEED),
+    rpcs: RPCS,
+    fetch: (async () => (reads++, status("PENDING_DEPOSIT"))) as unknown as typeof fetch,
+    // each wait between rounds holds until the test lets it go
+    sleep: () => (waiting++, new Promise<void>((ok) => (release = () => (waiting--, ok())))),
+    locks: () => navigator.locks, // the real Web Locks (Node 24)
+    now: () => 1_762_400_000_000,
+  });
+  await f.quoted("dq-1", RESULT, { scope: 1n, index: 0, u: U });
+  for (let n = 0; waiting === 0 && n < 200; n++) await pause(5);
+  assert.equal(waiting, 1, "the follow reached its wait");
+  const tap = <T,>(fn: () => Promise<T>): Promise<T | null> =>
+    navigator.locks.request(`${FOLLOW_LOCK}testnet/${U}`, { mode: "exclusive", ifAvailable: true }, (lock) => (lock === null ? null : fn())) as Promise<T | null>;
+  // the tap in the follow's wait: U's lock is free; while the tap holds it, the follow's next round waits
+  const got = await tap(async () => {
+    const from = reads;
+    release();
+    await pause(100);
+    assert.equal(reads, from, "a round ran while the tap held U's lock");
+    return true;
+  });
+  assert.equal(got, true, "the tap found U's lock held during the follow's wait");
+  for (let n = 0; (waiting as number) === 0 && n < 200; n++) await pause(5);
+  assert.ok(reads > 0, "the round ran once the tap let U's lock go");
+  f.signedOut();
+  release();
+  await f.idle();
+  assert.ok(!(await navigator.locks.query()).held!.some((l) => l.name === `${FOLLOW_LOCK}testnet/${U}` || l.name === `${FOLLOWER_LOCK}testnet/${U}`), "U's lock is still held after the sign out");
+});
 
 test("S1: the tab's store connection closes (another tab's upgrade) and is opened again: the follows end, U's lock is freed, and the deposit is followed again", async () => {
   const idb = new IDBFactory();
@@ -480,7 +524,7 @@ test("G2b: a sign out ends a follow in its retry pause at once, so U's lock goes
   const ended = await Promise.race([f.idle().then(() => true), pause(300).then(() => false)]);
   assert.ok(ended, "the stopped follow waited out its pause");
   await pause(20);
-  assert.ok(!(await navigator.locks.query()).held!.some((l) => l.name === `${FOLLOW_LOCK}testnet/${U}`), "U's lock is still held");
+  assert.ok(!(await navigator.locks.query()).held!.some((l) => l.name === `${FOLLOW_LOCK}testnet/${U}` || l.name === `${FOLLOWER_LOCK}testnet/${U}`), "U's lock is still held");
 });
 
 test("G2c: a note store that never opens is retried at a pace that doubles across the op's re-follows, to the cap, never every second", async () => {
@@ -558,4 +602,57 @@ test(`V-01 on SIGN_HOST: a stranger naming U takes P at the quote's min${what}; 
   const all = await notes.list();
   assert.deepEqual(op.follow.notes, [all.find((n) => n.precommitment === P2)!.id]);
   assert.deepEqual(all.map((n) => [n.state, n.leaf?.value]).sort(), [["UNSPENT", BigInt(MIN_OUT)], ["UNSPENT", CREDIT]], "the stranger's note on our P is the user's");
+});
+
+test("held-move-follow-resume 2: settle() resumes a held op whose refund move went through and whose USDC has not read under U (wallet follow.ts heldFollowed); a held op with its end read stays as it is", async () => {
+  const t = await world(["REFUNDED"]);
+  let reads = 0;
+  const f = FOLLOW;
+  await t.w.put("ops", "moved", { kind: "deposit", stage: "held", txs: [], created_ms: 1, held_id: U, since_ms: 5, follow: { ...f, status: "REFUNDED", sent: true, moved: true, moved_ms: 1, why: "sender_struck" } });
+  await t.w.put("ops", "ended", { kind: "deposit", stage: "held", txs: [], created_ms: 1, held_id: U, since_ms: 5, follow: { ...f, address: "e".repeat(64), status: "REFUNDED", sent: true, moved: true, moved_ms: 1, why: "sender_struck", move_end: "arrived" } });
+  const g = depositFollows({
+    network: () => "testnet",
+    store: async () => t.w,
+    seed64: async () => Uint8Array.from(SEED),
+    // each chain read counted: the held op's round reads U's USDC and U's intents.near holdings
+    rpcs: () => RPCS().map((r) => ({ ...r, query: async (p: Record<string, unknown>) => (reads++, r.query(p)) })) as unknown as readonly [FollowRpc, FollowRpc],
+    sleep: async () => {
+      if (reads >= 2) g.signedOut();
+      await new Promise<void>((ok) => setImmediate(ok));
+    },
+    locks: () => null,
+    now: () => 1_762_400_000_000,
+  });
+  await g.settle();
+  await g.idle();
+  assert.ok(reads >= 2, `the held moved op is followed again on the landing: ${reads} chain reads`);
+  assert.equal(((await t.w.get("ops", "ended")) as { follow: { move_end?: string } }).follow.move_end, "arrived");
+});
+
+test("held-move-follow-resume 2 (the tap): a way out that answers empty for an op of a U whose moved money is still coming resumes U's follow (resume answers true); a U whose ops have all ended answers false", async () => {
+  const t = await world(["REFUNDED"]);
+  let reads = 0;
+  const f = FOLLOW;
+  await t.w.put("ops", "moved", { kind: "deposit", stage: "held", txs: [], created_ms: 1, held_id: U, since_ms: 5, follow: { ...f, status: "REFUNDED", sent: true, moved: true, moved_ms: 1, why: "sender_struck" } });
+  await t.w.put("ops", "ended", { kind: "deposit", stage: "held", txs: [], created_ms: 1, held_id: U, since_ms: 5, follow: { ...f, address: "e".repeat(64), why: "sender_struck" } });
+  const g = depositFollows({
+    network: () => "testnet",
+    store: async () => t.w,
+    seed64: async () => Uint8Array.from(SEED),
+    rpcs: () => RPCS().map((r) => ({ ...r, query: async (p: Record<string, unknown>) => (reads++, r.query(p)) })) as unknown as readonly [FollowRpc, FollowRpc],
+    sleep: async () => {
+      if (reads >= 2) g.signedOut();
+      await new Promise<void>((ok) => setImmediate(ok));
+    },
+    locks: () => null,
+    now: () => 1_762_400_000_000,
+  });
+  await t.w.put("ops", "other-u", { kind: "deposit", stage: "held", txs: [], created_ms: 1, held_id: "f".repeat(64), since_ms: 5, follow: { ...f, u: "f".repeat(64), address: "f".repeat(64), why: "sender_struck" } });
+  assert.equal(await g.resume("other-u"), false, "another U whose ops have all ended");
+  assert.equal(await g.resume("none"), false);
+  assert.equal(reads, 0);
+  // the tap's op of U has ended, but U's moved op has not: U's follow is resumed
+  assert.equal(await g.resume("ended"), true);
+  await g.idle();
+  assert.ok(reads >= 2, `the held moved op is followed again at the tap: ${reads} chain reads`);
 });

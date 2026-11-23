@@ -64,7 +64,9 @@ import { base58, base64 } from "@scure/base";
 import { readTokenStorageMin } from "../arming/accounts.ts";
 import { depositId } from "../derive/keys.ts";
 import { pacedFetch, pacedRpc, requestSignal } from "../pace.ts";
+import type { NoteStore } from "../notes/store.ts";
 import type { WalletStore } from "../store/index.ts";
+import { LAPSE_MARGIN, readU } from "./bind.ts";
 import { heightSpreadOver, NEAR_NETWORKS, nearPairNetwork, type NearNetwork, RPC_TIMEOUT_MS } from "./account.ts";
 import { DEPOSIT_STATUS_TIMEOUT_MS, type FollowRpc, followRpc, type DepositOp, readDepositStatus, statusFacts } from "./follow.ts";
 
@@ -1045,6 +1047,9 @@ export interface MoveOutDeps {
    *  op of U whose stored status is none, PENDING_DEPOSIT or INCOMPLETE_DEPOSIT. Default: fetch. */
   fetchFn?: typeof fetch;
   pollMs?: number;
+  /** The page's notes: a tap waits, inside U's lock, while a bind call U signed (follow.ts bindPhase) is out. None: no
+   *  such wait. */
+  notes?: Pick<NoteStore, "list">;
 }
 
 /** The held deposit op this device holds for U, or a refusal: held, on the token (not a struck intents route), ours. */
@@ -1056,6 +1061,10 @@ export async function heldOpOf(ops: Pick<WalletStore, "get">, opId: string): Pro
   if (typeof op.follow.u !== "string" || !IMPLICIT.test(op.follow.u) || !Object.hasOwn(NEAR_NETWORKS, op.follow.network)) throw new MoveOutRefused("the op names no one-time id");
   return op;
 }
+
+/** How many times a tap that waited for U's bind call asks for U's lock again, at the poll's pace, before it answers
+ *  unread: a follow round holds it only briefly (deposit-follow.ts roundLock). */
+const LOCK_TRIES = 30;
 
 /** How far below the read height U's key nonce must already be at or past a record's nonce for the record to be taken. */
 export const SETTLE_BLOCKS = 100;
@@ -1383,8 +1392,19 @@ async function moveOut(opId: string, to: string | null, deps: MoveOutDeps, again
   if (to === null) throw new MoveOutRefused("no typed account");
   const typed = to;
 
-  type Signed = { follow: MoveOutRecord; owner: string; fresh?: true } | { outcome: MoveOutOutcome };
-  const signed = await uLock(async (): Promise<Signed> => {
+  // a bind call U signed (follow.ts bindPhase, a NEP-366 delegate from U's same key) that can still land: U's key nonce at
+  // final on both RPCs below its nonce and the lower final height not past its max_block_height + LAPSE_MARGIN. null: no
+  // equal read of U (re-review FIX FIRST 2)
+  const bindOut = async (): Promise<boolean | null> => {
+    const calls = deps.notes === undefined ? [] : (await deps.notes.list()).flatMap((n) => (n.calls ?? []).filter((c) => c.sender_id === U));
+    if (calls.length === 0) return false;
+    const u = await readU(U, rpcs);
+    if (u === null) return null;
+    const low = u.heights[0] < u.heights[1] ? u.heights[0] : u.heights[1];
+    return calls.some((c) => c.nonce > u.nonce && low <= c.max_block_height + LAPSE_MARGIN);
+  };
+  type Signed = { follow: MoveOutRecord; owner: string; fresh?: true } | { outcome: MoveOutOutcome } | { wait: true };
+  const once = () => uLock(async (): Promise<Signed> => {
     op = await heldOpOf(ops, opId);
     if (op.follow.out !== undefined) return { follow: op.follow.out, owner: opId }; // another tab wrote one meanwhile
     await reread();
@@ -1402,6 +1422,12 @@ async function moveOut(opId: string, to: string | null, deps: MoveOutDeps, again
     // another op's landed record marked this op too: it reads Moved, nothing to sign
     const mine = await heldOpOf(ops, opId);
     if (mine.follow.why === "moved_out" && mine.follow.out !== undefined) return { outcome: { kind: "moved", ...shownOf(mine.follow.out) } };
+    // a bind call of U's still out: nothing is signed now; the tap lets U's lock go and waits outside it (below), so U's
+    // follow round can send a call written but not yet sent, and decides on a read of U taken after (re-review FIX FIRST 2
+    // and its follow-up: never a wait while holding U's lock). No equal read of U: unread, as below
+    const live = await bindOut();
+    if (live === null) return { outcome: { kind: "unread" } };
+    if (live) return { wait: true };
     const read = await readMoveOut(U, typed, token, rpcs);
     // U's nonce at 2^64 - 1: the nonce signed next (this + 1) would not fit the u64 nearcore reads
     if (read === null || read.nonce >= U64_MAX) return { outcome: { kind: "unread" } };
@@ -1443,6 +1469,19 @@ async function moveOut(opId: string, to: string | null, deps: MoveOutDeps, again
     if (now.follow.out === undefined) throw new MoveOutRefused("the move could not be written");
     return now.follow.out.hash === record.hash ? { follow: record, owner: opId, fresh: true } : { follow: now.follow.out, owner: opId };
   });
+  let signed = await once();
+  // U's bind call out: wait for it on chain reads with U's lock free (the round that sends a written call needs it), then
+  // take U's lock again and decide afresh; a round holding it then is brief, so the tap asks again at the poll's pace
+  // rather than answer busy
+  for (let tries = 0; signed !== null && "wait" in signed; ) {
+    for (;;) {
+      await sleep(deps.pollMs ?? 1_000);
+      const live = await bindOut();
+      if (live === null) return { kind: "unread" };
+      if (!live) break;
+    }
+    for (signed = await once(); signed === null && tries < LOCK_TRIES; tries++, signed = await once()) await sleep(deps.pollMs ?? 1_000);
+  }
   if (signed === null) return { kind: "unread" }; // U's lock is held: another op of U is being followed
   if ("outcome" in signed) return signed.outcome;
   const f = await follow(signed.follow, signed.owner);
