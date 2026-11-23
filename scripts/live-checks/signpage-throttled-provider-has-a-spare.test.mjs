@@ -24,6 +24,14 @@ test("the seats are the page's: provider A first, then its two spares, as src/tr
   assert.match(PROBE.pocket, /40 getAccountInfo in 10 s, 40 answered/);
 });
 
+test("the stable accounts hold none a seat declines as fat: the page never reads a program's executable bytes", () => {
+  // Pocket's gateway answered getMultipleAccounts of the associated token program alone with -32602 "request declined:
+  // this endpoint will not serve this request", data "shape targets a known-fat account" (23 Nov 17:36Z, each of the
+  // other nine answered 200), so every sign deploy's run failed on a read the page never makes
+  assert.ok(!STABLE.includes("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"));
+  assert.equal(new Set(STABLE).size, STABLE.length);
+});
+
 test("the good answer passes: every seat named, each allowing the page, the same bytes", () => {
   const v = check(A.good);
   assert.equal(v.ok, true, v.lines.join("\n"));
