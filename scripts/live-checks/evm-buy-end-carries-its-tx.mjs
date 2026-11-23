@@ -8,7 +8,8 @@
 //     kinds: `late` and the run's own end); a pool Withdrawn for the buy (the swap failed, the ETH on W, carried back)
 //     ends owed_back with its release, and so does the rest leg whose own buy reverted, and the legs' end is owed_back
 //     over a refusal (legsEnd); a kit at 1.18 or below is sent owed_back as refused (src/kit-version.ts stageFor; from kit 1.20, card
-//     taps-wait-inside-the-page, kit-v1.19 read as the current level there); the
+//     taps-wait-inside-the-page, kit-v1.19 read as the current level there, and from kit 1.21, card vault-balance-unread,
+//     kit-v1.20 too); the
 //     two wrappers between a kind and the api hand each stage on with its transactions (src/pool-testnet.ts evmEnds,
 //     which reads the chain's positions again at an end, owed_back among them, and src/cash-to-pool.ts cashFirst's
 //     trace: the review of 167d9deea found both passing the stage alone, so the end still reached the app with no tx);
@@ -48,7 +49,7 @@ export const MARKS = {
     ["a Withdrawn end is owed_back with its release", new RegExp(`carry\\?\\.\\(\\)\\}catch\\{\\}return\\{stage:${Q}owed_back${Q},txs:${ID}\\}`, "g"), 1],
     ["the rest leg's reverted buy is owed_back", new RegExp(`\\{end:${Q}reverted${Q}\\}\\)\\.catch\\(\\(\\)=>\\{\\}\\),${ID}\\(\\),\\{stage:${Q}owed_back${Q},txs:${ID}\\}`, "g"), 1],
     ["the legs' end is owed_back over a refusal", new RegExp(`\\.some\\(${ID}=>${ID}===${Q}owed_back${Q}\\)\\?\\{stage:${Q}owed_back${Q},txs:${ID}\\}:${ID}\\.some\\(${ID}=>${ID}===${Q}refused${Q}\\)`, "g"), 1],
-    ["kit-v1.18 and below are sent owed_back as refused", new RegExp(`${ID}!==${Q}current${Q}(?:&&${ID}!==${Q}1\\.19${Q})?&&${ID}===${Q}owed_back${Q}\\?${Q}refused${Q}:${ID}`, "g"), 1],
+    ["kit-v1.18 and below are sent owed_back as refused", new RegExp(`${ID}!==${Q}current${Q}(?:(?:&&${ID}!==${Q}1\\.20${Q})?&&${ID}!==${Q}1\\.19${Q})?&&${ID}===${Q}owed_back${Q}\\?${Q}refused${Q}:${ID}`, "g"), 1],
     ["the EVM trade's ends wrapper hands on the txs", new RegExp(`\\{\\.\\.\\.${ID},progress:\\((${ID}),(${ID})\\)=>\\{${ID}\\.progress\\(\\1,\\2\\),${ID}\\.has\\(\\1\\)&&${ID}\\(${ID}\\)\\?\\.refresh\\(\\)\\}\\}`, "g"), 1],
     ["the EVM trade's ends include owed_back", new RegExp(`=new Set\\(\\[${Q}filled${Q},${Q}part_filled${Q},${Q}not_landed${Q},${Q}owed_back${Q}\\]\\)`, "g"), 1],
     ["the cash-first trace hands on the txs", new RegExp(`progress:\\((${ID}),(${ID})\\)=>\\(${ID}\\(${Q}swap${Q},\\{stage:\\1\\}\\),${ID}\\.progress\\(\\1,\\2\\)\\)`, "g"), 1],

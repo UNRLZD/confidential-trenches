@@ -46,6 +46,9 @@
 // Card taps-wait-inside-the-page (kit 1.20) re-recorded good from its build, kept the kit 1.19 good as good119 (judged at
 // 1.19 with that era's plants), and added badSpendKept, badState119Kept, badNoV119Level, badKit119, badRouteNot119,
 // badProgress119Txs and badStage119Owed, each its build with the one cut the answers' note names: each FAIL at 1.20.
+// Card vault-balance-unread (kit 1.21) re-recorded good from its build, kept the kit 1.20 good as good120 (judged at
+// 1.20 with that era's plants), and added badBalanceKept, badState120Kept, badNoV120Level, badKit120, badRouteNot120,
+// badProgress120Txs and badStage120Owed, each its build with the one cut the answers' note names: each FAIL at 1.21.
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { test } from "node:test";
@@ -168,6 +171,17 @@ const judge118 = (a) => judgeNow(a, V118);
 // levels they were cut at (V119); this card's good build and its plants at 1.20 (judgeNow)
 const V119 = { kit: "1.19", levels: ["1.18", "1.17", "1.16", "1.15", "1.14", "1.13", "1.12", "1.11", "1.10", "1.9", "1.8", "1.7", "1.6", "1.5"] };
 const judge119 = (a) => judgeNow(a, V119);
+// card vault-balance-unread: the records cut at kit 1.20 (good120, badSpendKept, badState119Kept, badNoV119Level,
+// badKit119, badRouteNot119, badProgress119Txs, badStage119Owed) are judged at the version and levels they were cut at
+// (V120); this card's good build and its plants at 1.21 (judgeNow)
+const V120 = { kit: "1.20", levels: ["1.19", "1.18", "1.17", "1.16", "1.15", "1.14", "1.13", "1.12", "1.11", "1.10", "1.9", "1.8", "1.7", "1.6", "1.5"] };
+const judge120 = (a) => judgeNow(a, V120);
+const KIT121_LINE = (v) => `BAD the page reads an app in full from kit-v${v}, not kit-v1.21: a kit-v1.21 app's unread vault_balance has no level of its own`;
+const LEVELS121_LINE = (l) => `BAD the page's levels below the current one are ${JSON.stringify(l)}, not ["1.20","1.19","1.18","1.17","1.16","1.15","1.14","1.13","1.12","1.11","1.10","1.9","1.8","1.7","1.6","1.5"]: an older kit's app is sent what it cannot read`;
+const BALANCE_LINE = "BAD the state answer sent below the current level has no vault_balance where the notes are unread, which kit-v1.20 refuses the whole state for";
+const STATE120_LINE = "BAD the state events sent below the current level have no vault_balance where the notes are unread, which kit-v1.20 refuses the whole state for";
+const ROUTE120_LINE = "BAD kit-v1.20 is not told the move event, which it reads: its buy loses the Cash move it waits on";
+const PROGRESS121_LINE = "BAD kit-v1.20 is not sent a stage event in full: it loses the txs and the stage owed_back it reads";
 const KIT120_LINE = (v) => `BAD the page reads an app in full from kit-v${v}, not kit-v1.20: a kit-v1.20 app's pool spendable has no level of its own`;
 const LEVELS120_LINE = (l) => `BAD the page's levels below the current one are ${JSON.stringify(l)}, not ["1.19","1.18","1.17","1.16","1.15","1.14","1.13","1.12","1.11","1.10","1.9","1.8","1.7","1.6","1.5"]: an older kit's app is sent what it cannot read`;
 const SPEND_LINE = "BAD the state answer sent below the current level keeps each pool entry's spendable, which kit-v1.19 refuses the whole state for";
@@ -338,7 +352,7 @@ test("facts() reads the map, the field list and the hello from a minified bundle
   const f = facts("", js);
   assert.deepEqual(f.maps, [MAP]);
   assert.deepEqual(f.keys, [V1_4_KEYS]);
-  assert.deepEqual(Object.values(f.hello).map((x) => typeof x), ["string", "string", "string", "string", "object", "string", "object", "string", "string", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object"]);
+  assert.deepEqual(Object.values(f.hello).map((x) => typeof x), ["string", "string", "string", "string", "object", "string", "object", "string", "string", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object"]);
   assert.equal(f.hello.decimals, null, "a 1.7-era shaper strips no decimals");
   assert.equal(f.hello.kit, "1.7");
   // review P3 2: the filter and the kit-v1.6 answer branch read only on the functions the shaper calls
@@ -394,7 +408,7 @@ test("facts() reads the hello's path with the kit-v1.5 level (card held-move-for
   ].join(";");
   const js = `var pl=Object.freeze({${pairs}}),b=new Set([${V1_4_KEYS.map((k) => `\`${k}\``).join(",")}]);${path}`;
   const f = facts("", js);
-  assert.deepEqual(Object.values(f.hello).map((x) => typeof x), ["string", "string", "string", "string", "object", "string", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object"]);
+  assert.deepEqual(Object.values(f.hello).map((x) => typeof x), ["string", "string", "string", "string", "object", "string", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object", "object"]);
   assert.deepEqual(f.hello.progressMap, MAP);
   // card pool-deposit-stages: release-94's shape reads kit 1.6, kit-v1.5's level alone, no pool filter: FAIL now
   assert.deepEqual([f.hello.kit, f.hello.levels, f.hello.poolOps], ["1.6", ["1.5"], null]);
@@ -937,11 +951,9 @@ test("evm-buy-end-carries-its-tx: recorded bad answers: the kit 1.18 build (good
 
 // ------------------------------------------------------------------------------------------------ card taps-wait-inside-the-page
 test("taps-wait-inside-the-page: the good build reads kit 1.20 in full, kit-v1.19 to kit-v1.5 below it, a state answer and every state event sent with each pool entry's spendable left out at kit-v1.19 and below, kit-v1.19 its own level on that (owed_back kept, the move event told, a stage event in full), the owed_back answer, kit-v1.18's level and every lower stage built on what it returns", () => {
-  assert.equal(KIT, "1.20");
-  assert.deepEqual(LEVELS, ["1.19", "1.18", "1.17", "1.16", "1.15", "1.14", "1.13", "1.12", "1.11", "1.10", "1.9", "1.8", "1.7", "1.6", "1.5"]);
-  const g = ANSWERS.good;
+  const g = ANSWERS.good120;
   assert.equal(g.hello.kit, "1.20");
-  assert.deepEqual(g.hello.levels, LEVELS);
+  assert.deepEqual(g.hello.levels, V120.levels);
   assert.match(g.hello.spend, /^function ([\w$]+)\(([\w$]+),([\w$]+),([\w$]+)\)\{if\(\2===`current`\)return \4;let ([\w$]+)=[\w$]+\(\3,\4\);if\(\2===`1\.19`\)return \5;let ([\w$]+)=[\w$]+\(\3,\5\);$/);
   assert.match(g.hello.state119, /^function [\w$]+\(([\w$]+),([\w$]+)\)\{if\(\1===`current`\)return \2;let ([\w$]+)=[\w$]+\(\2\);if\(\1===`1\.19`\|\|\1===`1\.18`\)return \3;let [\w$]+=[\w$]+\(\3\);$/);
   assert.match(g.hello.route119, /^function [\w$]+\(([\w$]+),([\w$]+)\)\{return \1!==`current`&&\1!==`1\.19`&&\1!==`1\.18`&&\1!==`1\.17`&&\1!==`1\.16`&&\1!==`1\.15`&&Object\.hasOwn\(\2,`move`\)\?null:\2\}$/);
@@ -949,13 +961,13 @@ test("taps-wait-inside-the-page: the good build reads kit 1.20 in full, kit-v1.1
   assert.match(g.hello.progress120, /^function ([\w$]+)\(([\w$]+),([\w$]+)\)\{if\(\2===`current`\|\|\2===`1\.19`\)return \3;let ([\w$]+)=([\w$]+)\(\2,\3\.stage\);if\(\4===null\)return null; function \5\(([\w$]+),([\w$]+)\)\{let [\w$]+=\6!==`current`&&\6!==`1\.19`&&\7===`owed_back`\?`refused`:\7;$/);
   // the checks before it read the build with kit-v1.19's level taken out: the 1.19 form, kit-v1.18's level read on that
   for (const x of ["progress119", "owed", "state118", "route118", "code", "state117", "route117", "buys", "state116", "route116", "poolOps"]) assert.equal(typeof g.hello[x], "string", x);
-  assert.deepEqual(judgeNow(g).lines, []);
+  assert.deepEqual(judge120(g).lines, []);
   assert.deepEqual(judge119(ANSWERS.good119).lines, [], "the 1.19 build at its own era");
 });
 
 test("taps-wait-inside-the-page: recorded bad answers: the kit 1.19 build (good119) at 1.20, and badSpendKept, badState119Kept, badNoV119Level, badKit119, badRouteNot119, badProgress119Txs and badStage119Owed cut from this card's build: each FAIL, named", () => {
   const below = ["1.18", "1.17", "1.16", "1.15", "1.14", "1.13", "1.12", "1.11", "1.10", "1.9", "1.8", "1.7", "1.6", "1.5"];
-  assert.deepEqual(judgeNow(ANSWERS.good119).lines, [KIT120_LINE("1.19"), LEVELS120_LINE(below), SPEND_LINE, STATE119_LINE, ROUTE119_LINE, PROGRESS120_LINE]);
+  assert.deepEqual(judge120(ANSWERS.good119).lines, [KIT120_LINE("1.19"), LEVELS120_LINE(below), SPEND_LINE, STATE119_LINE, ROUTE119_LINE, PROGRESS120_LINE]);
   const cuts = [
     ["badSpendKept", SPEND_LINE],
     ["badState119Kept", STATE119_LINE],
@@ -966,17 +978,63 @@ test("taps-wait-inside-the-page: recorded bad answers: the kit 1.19 build (good1
     ["badStage119Owed", PROGRESS120_LINE],
   ];
   for (const [k, line] of cuts) {
-    assert.notEqual(ANSWERS[k].sha384, ANSWERS.good.sha384, k);
-    assert.deepEqual(ANSWERS[k].maps, ANSWERS.good.maps, k);
-    assert.deepEqual(judgeNow(ANSWERS[k]).lines, [line], k);
+    assert.notEqual(ANSWERS[k].sha384, ANSWERS.good120.sha384, k);
+    assert.deepEqual(ANSWERS[k].maps, ANSWERS.good120.maps, k);
+    assert.deepEqual(judge120(ANSWERS[k]).lines, [line], k);
   }
   assert.equal(typeof ANSWERS.badSpendKept.hello.owed, "string", "the answer shaper is still read: only the spendable strip returns the answer as it is");
   assert.equal(typeof ANSWERS.badState119Kept.hello.state118, "string", "the state shaper is still read: only its spendable strip is cut");
   assert.equal(typeof ANSWERS.badRouteNot119.hello.route118, "string", "the route function is still called: only kit-v1.19 is cut from it");
   for (const k of ["badProgress119Txs", "badStage119Owed"]) assert.equal(typeof ANSWERS[k].hello.progress119, "string", `${k}: the progress branch is still read through the stage map`);
   // every plant of the era before still FAILs at 1.20 too
-  for (const k of ["badOwedKept", "badOwedKinds", "badNoV118Level", "badKit118", "badState118Stripped", "badRouteNot118", "badProgressTxsKept", "badProgressOwedKept", "badCodeKept", "badNoV117Level"]) assert.equal(judgeNow(ANSWERS[k]).ok, false, k);
+  for (const k of ["badOwedKept", "badOwedKinds", "badNoV118Level", "badKit118", "badState118Stripped", "badRouteNot118", "badProgressTxsKept", "badProgressOwedKept", "badCodeKept", "badNoV117Level"]) assert.equal(judge120(ANSWERS[k]).ok, false, k);
+  const g = ANSWERS.good120;
+  for (const [x, line] of [["spend", SPEND_LINE], ["state119", STATE119_LINE], ["route119", ROUTE119_LINE], ["progress120", PROGRESS120_LINE]]) assert.deepEqual(judge120({ ...g, hello: { ...g.hello, [x]: null } }).lines, [line], x);
+  for (const v of ["1.19", "1.21", null]) assert.deepEqual(judge120({ ...g, hello: { ...g.hello, kit: v } }).lines, [KIT120_LINE(v ?? "?")], `kit ${v}`);
+});
+
+// ------------------------------------------------------------------------------------------------ card vault-balance-unread
+test("vault-balance-unread: the good build reads kit 1.21 in full, kit-v1.20 to kit-v1.5 below it, a state answer and every state event with no vault_balance sent \"0\" at kit-v1.20 and below, kit-v1.20 its own level on that (the move event told, a stage event in full): PASS", () => {
+  assert.equal(KIT, "1.21");
+  assert.deepEqual(LEVELS, ["1.20", "1.19", "1.18", "1.17", "1.16", "1.15", "1.14", "1.13", "1.12", "1.11", "1.10", "1.9", "1.8", "1.7", "1.6", "1.5"]);
   const g = ANSWERS.good;
-  for (const [x, line] of [["spend", SPEND_LINE], ["state119", STATE119_LINE], ["route119", ROUTE119_LINE], ["progress120", PROGRESS120_LINE]]) assert.deepEqual(judgeNow({ ...g, hello: { ...g.hello, [x]: null } }).lines, [line], x);
-  for (const v of ["1.19", "1.21", null]) assert.deepEqual(judgeNow({ ...g, hello: { ...g.hello, kit: v } }).lines, [KIT120_LINE(v ?? "?")], `kit ${v}`);
+  assert.equal(g.hello.kit, "1.21");
+  assert.deepEqual(g.hello.levels, LEVELS);
+  assert.match(g.hello.balance, /^function ([\w$]+)\(([\w$]+),([\w$]+),([\w$]+)\)\{if\(\2===`current`\)return \4;let ([\w$]+)=[\w$]+\(\3,\4\);if\(\2===`1\.20`\)return \5;let ([\w$]+)=[\w$]+\(\3,\5\);$/);
+  assert.match(g.hello.state120, /^function [\w$]+\(([\w$]+),([\w$]+)\)\{if\(\1===`current`\)return \2;let ([\w$]+)=[\w$]+\(\2\);if\(\1===`1\.20`\)return \3;let [\w$]+=[\w$]+\(\3\);$/);
+  assert.match(g.hello.route120, /^function [\w$]+\(([\w$]+),([\w$]+)\)\{return \1!==`current`&&\1!==`1\.20`&&\1!==`1\.19`&&\1!==`1\.18`&&\1!==`1\.17`&&\1!==`1\.16`&&\1!==`1\.15`&&Object\.hasOwn\(\2,`move`\)\?null:\2\}$/);
+  // kit-v1.20 is sent a stage event as the current level is: txs kept, owed_back kept
+  assert.match(g.hello.progress121, /^function ([\w$]+)\(([\w$]+),([\w$]+)\)\{if\(\2===`current`\|\|\2===`1\.20`\|\|\2===`1\.19`\)return \3;let ([\w$]+)=([\w$]+)\(\2,\3\.stage\);if\(\4===null\)return null; function \5\(([\w$]+),([\w$]+)\)\{let [\w$]+=\6!==`current`&&\6!==`1\.20`&&\6!==`1\.19`&&\7===`owed_back`\?`refused`:\7;$/);
+  // the checks before it read the build with kit-v1.20's level taken out: the 1.20 form, kit-v1.19's level read on that
+  for (const x of ["spend", "state119", "route119", "progress120", "progress119", "owed", "state118", "route118", "code", "poolOps"]) assert.equal(typeof g.hello[x], "string", x);
+  assert.deepEqual(judgeNow(g).lines, []);
+  assert.deepEqual(judge120(ANSWERS.good120).lines, [], "the 1.20 build at its own era");
+});
+
+test("vault-balance-unread: recorded bad answers: the kit 1.20 build (good120) at 1.21, and badBalanceKept, badState120Kept, badNoV120Level, badKit120, badRouteNot120, badProgress120Txs and badStage120Owed cut from this card's build: each FAIL, named", () => {
+  const below = ["1.19", "1.18", "1.17", "1.16", "1.15", "1.14", "1.13", "1.12", "1.11", "1.10", "1.9", "1.8", "1.7", "1.6", "1.5"];
+  assert.deepEqual(judgeNow(ANSWERS.good120).lines, [KIT121_LINE("1.20"), LEVELS121_LINE(below), BALANCE_LINE, STATE120_LINE, ROUTE120_LINE, PROGRESS121_LINE]);
+  const cuts = [
+    ["badBalanceKept", BALANCE_LINE],
+    ["badState120Kept", STATE120_LINE],
+    ["badNoV120Level", LEVELS121_LINE(below)],
+    ["badKit120", KIT121_LINE("1.20")],
+    ["badRouteNot120", ROUTE120_LINE],
+    ["badProgress120Txs", PROGRESS121_LINE],
+    ["badStage120Owed", PROGRESS121_LINE],
+  ];
+  for (const [k, line] of cuts) {
+    assert.notEqual(ANSWERS[k].sha384, ANSWERS.good.sha384, k);
+    assert.deepEqual(ANSWERS[k].maps, ANSWERS.good.maps, k);
+    assert.deepEqual(judgeNow(ANSWERS[k]).lines, [line], k);
+  }
+  assert.equal(typeof ANSWERS.badBalanceKept.hello.spend, "string", "the answer shaper is still read: only the balance fill returns the answer as it is");
+  assert.equal(typeof ANSWERS.badState120Kept.hello.state119, "string", "the state shaper is still read: only its balance fill is cut");
+  assert.equal(typeof ANSWERS.badRouteNot120.hello.route119, "string", "the route function is still called: only kit-v1.20 is cut from it");
+  for (const k of ["badProgress120Txs", "badStage120Owed"]) assert.equal(typeof ANSWERS[k].hello.progress120, "string", `${k}: the progress branch is still read through the stage map`);
+  // every plant of the era before still FAILs at 1.21 too
+  for (const k of ["badSpendKept", "badState119Kept", "badNoV119Level", "badKit119", "badRouteNot119", "badProgress119Txs", "badStage119Owed", "badOwedKept", "badCodeKept"]) assert.equal(judgeNow(ANSWERS[k]).ok, false, k);
+  const g = ANSWERS.good;
+  for (const [x, line] of [["balance", BALANCE_LINE], ["state120", STATE120_LINE], ["route120", ROUTE120_LINE], ["progress121", PROGRESS121_LINE]]) assert.deepEqual(judgeNow({ ...g, hello: { ...g.hello, [x]: null } }).lines, [line], x);
+  for (const v of ["1.20", "1.22", null]) assert.deepEqual(judgeNow({ ...g, hello: { ...g.hello, kit: v } }).lines, [KIT121_LINE(v ?? "?")], `kit ${v}`);
 });

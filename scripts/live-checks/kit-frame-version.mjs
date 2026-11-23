@@ -81,6 +81,13 @@
 //     n;`), every level below built on that; the route function tells kit-v1.19 the move event; and the progress function
 //     and the stage function treat it as the current level (a stage event with its txs and owed_back as it is): its schema
 //     refuses the whole state for a pool entry's spendable, and it reads everything else as the current level does;
+//   - (card vault-balance-unread) kit-v1.20 is a level of its own below kit 1.21: the answer shaper first gives a state
+//     answer with no vault_balance "0" (`let r=D(t,n);if(e===\`1.20\`)return r;`, D being BALANCE_FOR over NO_BALANCE,
+//     `e=>e.vault_balance===void 0?{...e,vault_balance:\`0\`}:e`), the spendable strip, kit-v1.19's level and every lower
+//     stage built on that; the state shaper first gives it too (`let n=F(t);if(e===\`1.20\`)return n;`), every level below
+//     built on that; the route function tells kit-v1.20 the move event; and the progress function and the stage function
+//     treat it as the current level: its schema refuses the whole state with no vault_balance, which kit 1.21 sends while
+//     the notes are unread, and it reads everything else as the current level does;
 // A page without them sends a kit-v1.4 app a state with a stage or field that kit refuses whole, so that app stops
 // receiving states. That the page applies them to every state, answer and event it posts is
 // packages/signpage/test/kit-version.test.ts's, against kit-v1.4's own schema, with its mutant sweep.
@@ -98,8 +105,8 @@ import { fileURLToPath } from "node:url";
 const KEY = "kit-frame-version";
 /** The kit version the page reads every app at in full (packages/kit/src/signpage/messages.ts SIGNPAGE_KIT_VERSION), and
  *  its levels below that, newest first, down to kit-v1.4's (packages/signpage/src/kit-version.ts KitLevel). */
-export const KIT = "1.20";
-export const LEVELS = ["1.19", "1.18", "1.17", "1.16", "1.15", "1.14", "1.13", "1.12", "1.11", "1.10", "1.9", "1.8", "1.7", "1.6", "1.5"];
+export const KIT = "1.21";
+export const LEVELS = ["1.20", "1.19", "1.18", "1.17", "1.16", "1.15", "1.14", "1.13", "1.12", "1.11", "1.10", "1.9", "1.8", "1.7", "1.6", "1.5"];
 export const SIGN = "https://confidential.unrealized.trade";
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 
@@ -232,6 +239,19 @@ const STATE_119 = /(function ([\w$]+)\(([\w$]+),([\w$]+)\)\{if\(\3===`current`)(
 const ROUTE_119 = /function ([\w$]+)\(([\w$]+),([\w$]+)\)\{return \2!==`current`&&\2!==`1\.19`&&\2!==`1\.18`&&\2!==`1\.17`&&\2!==`1\.16`&&\2!==`1\.15`&&Object\.hasOwn\(\3,`move`\)\?null:\3\}/;
 const PROGRESS_L119 = /(function ([\w$]+)\(([\w$]+),([\w$]+)\)\{if\(\3===`current`)\|\|\3===`1\.19`(\)return \4;let ([\w$]+)=([\w$]+)\(\3,\4\.stage\);if\(\6===null\)return null;)/;
 const STAGE_L119 = /(function ([\w$]+)\(([\w$]+),([\w$]+)\)\{let [\w$]+=)\3!==`current`&&\3!==`1\.19`&&(\4===`owed_back`\?`refused`:\4;)/;
+/** The state with vault_balance "0" where it has none (card vault-balance-unread), as minified. */
+const NO_BALANCE = /(?:^|[^\w$])([\w$]+)=([\w$]+)=>\2\.vault_balance===void 0\?\{\.\.\.\2,vault_balance:`0`\}:\2(?![\w$])/;
+/** kit-v1.20's own level (card vault-balance-unread), as minified: the answer shaper's first stage, the balance fill
+ *  (`let r=D(t,n);if(e===\`1.20\`)return r;`, D in SPENDABLE_FOR's form over NO_BALANCE) with the spendable strip built
+ *  on what it returns; the state shaper's first stage, the same fill (`let n=F(t);if(e===\`1.20\`)return n;`) with the
+ *  spendable strip built on what it returns; the route function letting kit-v1.20 have the move event; and the progress
+ *  function and the stage function each treating kit-v1.20 as the current level. Each is read and taken out of the text
+ *  before kit-v1.19's are, leaving the text a kit 1.20 build is, so each check below reads the form it was written for. */
+const BAL_STAGE = /(function ([\w$]+)\(([\w$]+),([\w$]+),([\w$]+)\)\{if\(\3===`current`\)return \5;)let ([\w$]+)=([\w$]+)\(\4,\5\);if\(\3===`1\.20`\)return \6;let ([\w$]+)=([\w$]+)\(\4,\6\);/;
+const STATE_120 = /(function ([\w$]+)\(([\w$]+),([\w$]+)\)\{if\(\3===`current`\)return \4;)let ([\w$]+)=([\w$]+)\(\4\);if\(\3===`1\.20`\)return \5;let ([\w$]+)=([\w$]+)\(\5\);/;
+const ROUTE_120 = /function ([\w$]+)\(([\w$]+),([\w$]+)\)\{return \2!==`current`&&\2!==`1\.20`&&\2!==`1\.19`&&\2!==`1\.18`&&\2!==`1\.17`&&\2!==`1\.16`&&\2!==`1\.15`&&Object\.hasOwn\(\3,`move`\)\?null:\3\}/;
+const PROGRESS_L120 = /(function ([\w$]+)\(([\w$]+),([\w$]+)\)\{if\(\3===`current`)\|\|\3===`1\.20`(\|\|\3===`1\.19`\)return \4;let ([\w$]+)=([\w$]+)\(\3,\4\.stage\);if\(\6===null\)return null;)/;
+const STAGE_L120 = /(function ([\w$]+)\(([\w$]+),([\w$]+)\)\{let [\w$]+=)\3!==`current`&&\3!==`1\.20`&&(\3!==`1\.19`&&\4===`owed_back`\?`refused`:\4;)/;
 /** The open kinds (packages/kit/src/signpage/messages.ts OPEN_KINDS): each one's ok answer carries closes from kit 1.13. */
 export const OPEN_KINDS = ["withdraw.open", "signin.open", "backup.open", "export.open", "signout", "pool.withdraw"];
 
@@ -245,6 +265,20 @@ function helloPath(given) {
   // card move-sends-what-it-shows: kit-v1.15's level read and taken out first (MAX_STAGE, STATE_115, ROUTE_115); `js` is
   // the text with it out, which a build before kit 1.16 already is
   let js = given;
+  // card vault-balance-unread: kit-v1.20's level read and taken out first (BAL_STAGE, STATE_120, ROUTE_120, and the
+  // progress and stage functions' extra term, PROGRESS_L120 and STAGE_L120), leaving the text a kit 1.20 build is: the
+  // spendable strip on the given answer and the given state, the route function from kit-v1.19 up, the progress and
+  // stage functions on the current level and kit-v1.19
+  const balAt = BAL_STAGE.exec(js);
+  if (balAt) js = js.replace(balAt[0], () => `${balAt[1]}let ${balAt[8]}=${balAt[9]}(${balAt[4]},${balAt[5]});`);
+  const state120At = STATE_120.exec(js);
+  if (state120At) js = js.replace(state120At[0], () => `${state120At[1]}let ${state120At[7]}=${state120At[8]}(${state120At[4]});`);
+  const route120At = ROUTE_120.exec(js);
+  if (route120At) js = js.replace(route120At[0], () => route120At[0].replace(`&&${route120At[2]}!==\`1.20\``, ""));
+  const prog121At = PROGRESS_L120.exec(js);
+  if (prog121At) js = js.replace(prog121At[0], () => `${prog121At[1]}${prog121At[5]}`);
+  const stage121At = STAGE_L120.exec(js);
+  if (stage121At) js = js.replace(stage121At[0], () => `${stage121At[1]}${stage121At[3]}!==\`current\`&&${stage121At[5]}`);
   // card taps-wait-inside-the-page: kit-v1.19's level read and taken out first (SPEND_STAGE, STATE_119, ROUTE_119, and the
   // progress and stage functions' extra term, PROGRESS_L119 and STAGE_L119), leaving the text a kit 1.19 build is: the
   // owed_back answer on the given answer, the state shaper's move code strip on the given state with kit-v1.18 in its
@@ -488,11 +522,23 @@ function helloPath(given) {
   // built on what it returns), the move event, and each stage event in full (the progress and stage functions each
   // treating it as the current level)
   const noSpend = NO_SPENDABLE.exec(given)?.[1];
-  const spendFor = SPENDABLE_FOR.exec(given);
+  // the one over NO_SPENDABLE: from kit 1.21 the balance fill has the same form (card vault-balance-unread)
+  const spendFor = [...given.matchAll(new RegExp(SPENDABLE_FOR.source, "g"))].find((m) => m[4] === noSpend) ?? null;
   const spend = owed && spendAt && noSpend && spendFor && spendAt[2] === shaper[4] && spendAt[7] === spendFor[1] && spendFor[4] === noSpend && spendAt[9] === owedFor[1] ? spendAt[0] : null;
   const state119 = state118 && state119At && noSpend && state119At[2] === shaper[5] && state119At[7] === noSpend && state119At[9] === noCode ? state119At[0] : null;
   const route119 = route118 && route119At && route119At[1] === route118At[1] ? route119At[0] : null;
   const progress120 = progress119 && prog120At && stage120At && prog120At[2] === shaper119At[7] && prog120At[7] === head119[4] && stage120At[2] === stage119At[1] ? `${prog120At[0]} ${stage120At[0]}` : null;
+  // card vault-balance-unread: kit-v1.20 is sent "0" for a state answer with no vault_balance (the answer shaper's first
+  // stage, BALANCE_FOR in SPENDABLE_FOR's form over NO_BALANCE, kit-v1.20 its own level on it, the spendable strip and
+  // every lower stage built on what it returns), every state event the same (the state shaper's first stage, NO_BALANCE,
+  // kit-v1.20 its own level on it, the spendable strip and every lower level built on what it returns), the move event,
+  // and each stage event in full (the progress and stage functions each treating it as the current level)
+  const noBal = NO_BALANCE.exec(given)?.[1];
+  const balFor = noBal ? [...given.matchAll(new RegExp(SPENDABLE_FOR.source, "g"))].find((m) => m[4] === noBal) : undefined;
+  const balance = spend && balAt && balFor && balAt[2] === shaper[4] && balAt[7] === balFor[1] && balAt[9] === spendAt[7] ? balAt[0] : null;
+  const state120 = state119 && state120At && noBal && state120At[2] === shaper[5] && state120At[6] === noBal && state120At[8] === noSpend ? state120At[0] : null;
+  const route120 = route119 && route120At && route120At[1] === route119At[1] ? route120At[0] : null;
+  const progress121 = progress120 && prog121At && stage121At && prog121At[2] === prog120At[2] && stage121At[2] === stage120At[2] ? `${prog121At[0]} ${stage121At[0]}` : null;
   return {
     assign: assign?.[0] ?? null,
     shaper: shaper?.[0] ?? null,
@@ -539,6 +585,10 @@ function helloPath(given) {
     state119,
     route119,
     progress120,
+    balance,
+    state120,
+    route120,
+    progress121,
   };
 }
 
@@ -589,7 +639,7 @@ export function judge(a, era = ERA) {
   else if (!sameMap(h.progressMap, MAP)) bad(`the progress stage function reads a map other than kit-v1.4's (${JSON.stringify(h.progressMap)})`);
   // card pool-deposit-stages: the version read in full, the levels below it, the pool deposit's op left out below it
   if (typeof h?.assign === "string" && typeof h?.shaper === "string" && typeof h?.post === "string") {
-    if (h.kit !== era.kit) bad(`the page reads an app in full from kit-v${h.kit ?? "?"}, not kit-v${era.kit}: a kit-v${era.kit} app's ${era.kit === "1.7" ? "pool deposit op" : era.kit === "1.8" ? "position decimals" : era.kit === "1.9" ? "op detail" : era.kit === "1.10" ? "op pool_amount" : era.kit === "1.11" ? "position asset_held" : era.kit === "1.12" ? "pool making" : era.kit === "1.13" ? "open answer's closes" : era.kit === "1.14" ? "dry buy's out" : era.kit === "1.15" ? "dry buy's with_cash and move route event" : era.kit === "1.16" ? "dry move's max" : era.kit === "1.17" ? "dry buy's buys" : era.kit === "1.18" ? "move op's code" : era.kit === "1.19" ? "stage event's txs and owed_back" : "pool spendable"} has no level of its own`);
+    if (h.kit !== era.kit) bad(`the page reads an app in full from kit-v${h.kit ?? "?"}, not kit-v${era.kit}: a kit-v${era.kit} app's ${era.kit === "1.7" ? "pool deposit op" : era.kit === "1.8" ? "position decimals" : era.kit === "1.9" ? "op detail" : era.kit === "1.10" ? "op pool_amount" : era.kit === "1.11" ? "position asset_held" : era.kit === "1.12" ? "pool making" : era.kit === "1.13" ? "open answer's closes" : era.kit === "1.14" ? "dry buy's out" : era.kit === "1.15" ? "dry buy's with_cash and move route event" : era.kit === "1.16" ? "dry move's max" : era.kit === "1.17" ? "dry buy's buys" : era.kit === "1.18" ? "move op's code" : era.kit === "1.19" ? "stage event's txs and owed_back" : era.kit === "1.20" ? "pool spendable" : "unread vault_balance"} has no level of its own`);
     if (!same(h.levels, era.levels)) bad(`the page's levels below the current one are ${JSON.stringify(h.levels)}, not ${JSON.stringify(era.levels)}: an older kit's app is sent what it cannot read`);
     if (era.kit !== "1.7" && typeof h.decimals !== "string") bad("the state sent below the current level keeps each position's decimals, which kit-v1.7 refuses the whole state for");
     if (typeof h.poolOps !== "string") bad("the state sent to kit-v1.6 and kit-v1.5 does not leave the pool_deposit op out");
@@ -640,6 +690,11 @@ export function judge(a, era = ERA) {
     if (!before119 && typeof h.state119 !== "string") bad("the state events sent below the current level keep each pool entry's spendable, which kit-v1.19 refuses the whole state for");
     if (!before119 && typeof h.route119 !== "string") bad("kit-v1.19 is not told the move event, which it reads: its buy loses the Cash move it waits on");
     if (!before119 && typeof h.progress120 !== "string") bad("kit-v1.19 is not sent a stage event in full: it loses the txs and the stage owed_back it reads");
+    const before120 = before119 || era.kit === "1.20";
+    if (!before120 && typeof h.balance !== "string") bad("the state answer sent below the current level has no vault_balance where the notes are unread, which kit-v1.20 refuses the whole state for");
+    if (!before120 && typeof h.state120 !== "string") bad("the state events sent below the current level have no vault_balance where the notes are unread, which kit-v1.20 refuses the whole state for");
+    if (!before120 && typeof h.route120 !== "string") bad("kit-v1.20 is not told the move event, which it reads: its buy loses the Cash move it waits on");
+    if (!before120 && typeof h.progress121 !== "string") bad("kit-v1.20 is not sent a stage event in full: it loses the txs and the stage owed_back it reads");
   }
   if (a?.posts !== 1)
     bad(`the bundle holds ${Number.isInteger(a?.posts) ? a.posts : "no count of"} parent.postMessage( calls, not exactly one: a post past the shaper sends an older kit what it cannot read`);
