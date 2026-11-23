@@ -6,7 +6,9 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
-import { classify, LIMIT_CODES, notYetWords, PAGE_THROTTLE_CODES, pageRefuses, preflight, preflightRefuses, RATE_LIMIT, RETRY, rpcAnswer, rpcBatchAnswer, STATELESS } from "./provider-answer.mjs";
+import { readdirSync } from "node:fs";
+import { verdictOf } from "../ci/live-rerun.mjs";
+import { classify, LIMIT_CODES, nothingToJudge, notYetWords, PAGE_THROTTLE_CODES, pageRefuses, preflight, preflightRefuses, RATE_LIMIT, RETRY, rpcAnswer, rpcBatchAnswer, STATELESS } from "./provider-answer.mjs";
 import { NO_ANSWERS } from "./provider-answer.plants.mjs";
 
 // a no-answer is read again at once here, not after provider-answer.mjs's pause
@@ -342,4 +344,18 @@ test("rpcBatchAnswer: a call the batch left out or throttled is read again once;
   assert.match(a.answers[2].noAnswer, /rate limit/);
   const t = await rpcBatchAnswer("https://p.example/rpc", [["eth_chainId", []]], { fetchFn: async () => { throw new DOMException("timed out", "TimeoutError"); } });
   assert.match(t.noAnswer, /no answer \(TimeoutError\)/);
+});
+
+// Card nothing-to-judge-is-inconclusive: helper 10037b286's live run 45167566673 went red on three checks that read no coin in
+// the case they check and printed "ERROR: nothing to judge" with exit 2, which the live run reads as an error that undoes
+// the deploy. A quiet market is no fault of the deploy and no pass: the live run reads the shared line as inconclusive,
+// never as an error, and no check prints the error for it.
+test("nothing to judge: the live run reads it as inconclusive, and no live check calls it an error", () => {
+  const { line, code } = nothingToJudge("evm-vendor-tape-refresh-keyed", "https://ct-api.unrealized.trade");
+  assert.equal(line, "live-check evm-vendor-tape-refresh-keyed: INCONCLUSIVE: nothing to judge (https://ct-api.unrealized.trade)");
+  assert.equal(verdictOf("evm-vendor-tape-refresh-keyed", code, `--  base: no coin\n${line}\n`), "inconclusive");
+  assert.equal(verdictOf("evm-vendor-tape-refresh-keyed", code, "live-check evm-vendor-tape-refresh-keyed: ERROR: nothing to judge (x)\n"), "error", "the old line");
+  const dir = fileURLToPath(new URL(".", import.meta.url));
+  const errs = readdirSync(dir).filter((f) => f.endsWith(".mjs") && !f.endsWith(".test.mjs") && /ERROR: nothing to judge/.test(readFileSync(`${dir}${f}`, "utf8")));
+  assert.deepEqual(errs, []);
 });

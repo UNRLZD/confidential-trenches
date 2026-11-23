@@ -10,12 +10,13 @@
 //   - at least MIN_VENDOR answers are the vendor's rows (evm-vendor-read named), so the tape is the one judged;
 //   - no answer names evm-vendor-price.
 // The rows priced from chain (evm-quote-usd) are printed: a coin that traded in the hold shows them, a quiet one none.
-// A coin with too few vendor answers to judge: error (exit 2), never a pass.
+// A coin with too few vendor answers to judge: INCONCLUSIVE (exit 2, provider-answer.mjs nothingToJudge), never a pass.
 // After: helper
 // Serial: evm-keyed 400 (its Base and Robinhood tape reads draw the keyed providers)
 //   node scripts/live-checks/evm-quote-token-priced-from-our-reads.mjs [--base <url>] [--record <file>]
-//   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
+//   PASS exit 0, FAIL exit 1, error or INCONCLUSIVE (nothing to judge) exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";
+import { nothingToJudge } from "./provider-answer.mjs";
 import { writeFileSync } from "node:fs";
 
 const KEY = "evm-quote-token-priced-from-our-reads";
@@ -123,8 +124,9 @@ if (import.meta.main) {
     const { ok, lines } = judge(r);
     for (const l of lines) console.log(l);
     if (ok === null) {
-      console.error(`live-check ${KEY}: ERROR: nothing to judge (${r.base})`);
-      process.exit(2);
+      const n = nothingToJudge(KEY, r.base);
+      console.log(n.line);
+      process.exit(n.code);
     }
     console.log(`live-check ${KEY}: ${ok ? "PASS" : "FAIL"} (${r.base})`);
     process.exit(ok ? 0 : 1);
