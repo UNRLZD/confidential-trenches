@@ -10,7 +10,7 @@ import { base58, base64 } from "@scure/base";
 import { VAULT_CONSTANTS, VAULT_TOKEN_CODE_HASH } from "@blindfill/kit";
 import { IDBFactory } from "fake-indexeddb";
 import { untilAborted } from "../../kit/src/abort.ts";
-import { NEAR_NETWORKS } from "../src/deposit/account.ts";
+import { HEIGHT_SPREAD_MAX, NEAR_NETWORKS } from "../src/deposit/account.ts";
 import type { DepositOp, FollowRecord } from "../src/deposit/follow.ts";
 import { REFUND_HEIGHTS } from "../src/deposit/follow.ts";
 import { buildMoveOut, ID_KEEP, buildRegisterOut, buildWithdrawOut, checkMoveCalls, checkRegisterCalls, checkWithdrawCalls, readWithdrawOut, GAS_PRICE_MARGIN, MOVE_GAS, moveCalls, withdrawCalls, type MoveOutRecord, MoveOutRefused, type MoveOutRpc, moveOutHeld, SETTLE_BLOCKS, signedBlockHash, TX_VALIDITY_BLOCKS } from "../src/deposit/moveout.ts";
@@ -1019,6 +1019,42 @@ test("BIND-RECEIPT-BOUND a tap waits REFUND_HEIGHTS past the first height that r
 });
 
 // a bind call used long ago (its window and REFUND_HEIGHTS past at the first read) holds no tap
+// U's bind call read used on a chain whose final height does not move: no debit can be ruled out, so nothing is signed.
+// One RPC stalled while the other goes on is no read once their heights spread past HEIGHT_SPREAD_MAX: the tap answers
+// unread. Both stalled at one height: the tap keeps waiting, signing nothing, until the heights move or the page goes.
+test("BIND-RECEIPT-STILL a tap while U's bind call reads used and the final height does not move signs nothing: one RPC stalled answers unread once the spread passes HEIGHT_SPREAD_MAX; both stalled, it keeps waiting", async () => {
+  {
+    const chain = new Chain();
+    chain.registered.add(TO);
+    chain.nonce = 8n;
+    seedOpens = 0;
+    let waits = 0;
+    const sleep = async () => {
+      waits++;
+      assert.equal(chain.sent.length, 0, "nothing sent while the debit cannot be ruled out");
+      chain.b.height++; // the first RPC's final height stays at 1000
+    };
+    const out = await moveOutHeld("op1", TO, { ...deps(await heldOp("sender_struck"), chain), sleep, notes: { list: async () => [bindNote(8n, 1100n)] } });
+    assert.deepEqual(out, { kind: "unread" });
+    assert.equal(waits, HEIGHT_SPREAD_MAX + 1, "unread once the two RPCs' heights spread past HEIGHT_SPREAD_MAX");
+    assert.equal(chain.sent.length, 0);
+    assert.equal(seedOpens, 0);
+  }
+  {
+    const chain = new Chain();
+    chain.registered.add(TO);
+    chain.nonce = 8n;
+    seedOpens = 0;
+    let waits = 0;
+    const sleep = async () => {
+      if (++waits === 200) throw new Error("the page goes");
+    };
+    await assert.rejects(moveOutHeld("op1", TO, { ...deps(await heldOp("sender_struck"), chain), sleep, notes: { list: async () => [bindNote(8n, 1100n)] } }), /the page goes/);
+    assert.equal(chain.sent.length, 0, "nothing sent on a chain that does not move");
+    assert.equal(seedOpens, 0);
+  }
+});
+
 test("BIND-RECEIPT-OLD a tap after U's bind call read used past its max_block_height + LAPSE_MARGIN + REFUND_HEIGHTS decides at once: it moves", async () => {
   const chain = new Chain();
   chain.registered.add(TO);
