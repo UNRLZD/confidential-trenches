@@ -272,6 +272,9 @@ export function nearExitWith(over: NearExitOver = {}): ExitChain {
           }
           const legs = ([["token", h!.token.amount], ["intents", h!.intents ?? 0n]] as const).filter(([, x]) => x > ID_KEEP);
           for (const [, x] of legs) held += x - ID_KEEP;
+          // money by the walk's read (any amount, any token inside intents.near) with no USDC above the kept base unit:
+          // said, so the id is never passed over unseen
+          if (legs.length === 0) ctx.say(`deposit id U_${i} ${u} holds no USDC above the base unit it keeps`);
           for (const [leg] of legs) {
             const out = await moveOut(account, u, leg);
             if (typeof out === "string") {
