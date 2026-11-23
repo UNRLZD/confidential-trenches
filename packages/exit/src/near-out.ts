@@ -11,12 +11,12 @@
 //   paid or refund_pending is settled and its A closed first; then each UNSPENT note, one at a time.
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { vaultScopeOf, vaultWithdrawYocto, VAULT_WITHDRAW, VaultTree, nearPairNetwork, type NearNetwork, type VaultProver, type VaultSyncRpc } from "@blindfill/kit";
-import { moveOutRpc, nearIdReader, openRestorePass, readMoveOutFor, readSettle, readWithdrawOut, restoreDepositIds, settleNeed, type BuiltMove, type MoveOutRpc, type RestoredNote } from "@blindfill/kit/core";
+import { moveOutRpc, nearIdReader, openRestorePass, readMoveOutFor, readSettle, readWithdrawOut, restoreDepositIds, settleNeed, type BuiltMove, type DepositIds, type MoveOutRpc, type RestoredNote } from "@blindfill/kit/core";
 import type { ExitChain, ExitCtx, ExitResult } from "./chain.ts";
 import { fundedOrWait, units } from "./fund.ts";
 import { exitAccountAt, exitBuildMove, exitHoldings, exitKey, exitReadStorage, exitRecipient, type ExitRecipient } from "./out.ts";
 import { exitReadPages, exitRpc, ExitRpcRefused, EXIT_NETWORKS } from "./rpc.ts";
-import { exitScanSeed } from "./scan.ts";
+import { EXIT_TOKENS, exitScanSeed, type ExitScan } from "./scan.ts";
 import { exitProver } from "./prover.ts";
 import { exitBuildWithdraw, exitCloseOne, exitReadDelete, exitWithdrawIndex, exitWithdrawOne, type ExitSent, type ExitSigned, type ExitWithdrawSteps } from "./withdraw.ts";
 
@@ -53,6 +53,8 @@ export type NearExitOver = {
   moveRpcs?: readonly [MoveOutRpc, MoveOutRpc];
   prover?: VaultProver;
   sleep?: (ms: number) => Promise<void>;
+  /** the deposit ids' walk (restoreDepositIds on nearIdReader at one pass block, unless given) */
+  walk?: (scope: bigint, scan: ExitScan) => Promise<DepositIds>;
 };
 
 type Obj = Record<string, unknown>;
@@ -242,14 +244,16 @@ export function nearExitWith(over: NearExitOver = {}): ExitChain {
     async function idsOut(r: typeof scan): Promise<{ sent: bigint; left: bigint; stops: string[] }> {
       const stops: string[] = [];
       let moved = 0n, held = 0n;
-      const scope = vaultScopeOf(keccak_256, r.vault, r.token);
+      // the release's vault and token on the network, as the scan's restore checked them against the vault's config()
+      const scope = vaultScopeOf(keccak_256, EXIT_NETWORKS[network as NearNetwork].vault, EXIT_TOKENS[network as NearNetwork]);
       // the reads' own clock when a test gives the sleep (the wallet's reader takes a given sleep only with its clock)
       let t = 0;
       const clock = over.sleep ? { sleep: async (ms: number) => { t += ms; await sleep(ms); }, now: () => t } : {};
       const money: number[] = [];
       try {
-        const pass = await openRestorePass(network as NearNetwork, vrpcs, clock);
-        const walk = await restoreDepositIds(ctx.seed, scope, r, await nearIdReader(network as NearNetwork, vrpcs, pass, clock));
+        const walk = over.walk
+          ? await over.walk(scope, r)
+          : await restoreDepositIds(ctx.seed, scope, r, await nearIdReader(network as NearNetwork, vrpcs, await openRestorePass(network as NearNetwork, vrpcs, clock), clock));
         for (const lane of walk.lanes) {
           money.push(...lane.money);
           for (const u of lane.unread) stops.push(`deposit id U_${u.i} ${u.id} is unread (${u.error})`);
@@ -301,7 +305,7 @@ export function nearExitWith(over: NearExitOver = {}): ExitChain {
         const got = await sendOnce(mrpcs, u, b, sleep, ctx.say);
         return got === "ok" ? null : `move tx ${b.hash} ${got}`;
       };
-      const token = scan.token;
+      const token = EXIT_TOKENS[network as NearNetwork];
       const base = { seed64: ctx.seed, account, network: network as NearNetwork, to };
       if (leg === "token") {
         const read = await readMoveOutFor(u, to.account, token, mrpcs);
