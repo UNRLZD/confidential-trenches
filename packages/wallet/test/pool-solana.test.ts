@@ -543,6 +543,23 @@ function restorePool() {
   deposit(P({ kind: "second", id: { id: "U", s: SCOPE, i: 0 }, n: 0 }), 20_000_000n);
   // the pool just before deposit 0's release, three slots earlier (card sol-restore-race)
   const beforeSpend: Chain = { accounts: new Map([...pages(0, entries(state)), ...pages(1, entries(labels))]), slot: 697, time: () => t + 5n, marks: new Map(marks) };
+  // card sol-restore-elsewhere: deposit 0 released instead by someone else holding its secrets (the thief signs as its
+  // own W, contracts/pool-solana src/release.rs:188), its spent mark as release.rs writes it (30 of its 50 out, the
+  // pool's first release) and a change leaf that is not the words' change (l0, 0); then W_{sol, l0, 0}'s return note,
+  // so a walk that goes on past it is seen to (its lookups under (l0, 0) kept)
+  const spentElsewhere = ((): Chain => {
+    const s = [...state, { leaf: noteCommitment(20_000_000n, l0, 4242n), t: t + 1n }];
+    const ls = [...labels];
+    const ms = new Map(marks).set(solanaMarkOf(PROGRAM, "spent", noteSecrets(SEED, { kind: "deposit", s: SCOPE, i: 0 }).nullifierHash), spentData(30_000_000n, 0));
+    const nonce = BigInt(ls.length + 1);
+    const label = vaultLabelOf(keccak_256, SCOPE, nonce);
+    const Pr = P({ kind: "return", c: "sol", l: l0, j: 0 });
+    ls.push({ leaf: label, t: t + 2n });
+    s.push({ leaf: noteCommitment(5_000_000n, label, Pr), t: t + 2n });
+    ms.set(solanaMarkOf(PROGRAM, "pre", Pr), markData(5_000_000n, nonce));
+    const tAt = t + 7n;
+    return { accounts: new Map([...pages(0, entries(s)), ...pages(1, entries(ls))]), slot: 699, time: () => tAt, marks: ms };
+  })();
   // deposit 0 is released whole: its spent mark, its change note of 0 into the state tree
   marks.set(solanaMarkOf(PROGRAM, "spent", noteSecrets(SEED, { kind: "deposit", s: SCOPE, i: 0 }).nullifierHash), spentData(50_000_000n, 0));
   state.push({ leaf: noteCommitment(0n, l0, P({ kind: "change", l: l0, j: 0 })), t: (t += 1n) });
@@ -580,7 +597,7 @@ function restorePool() {
     t = t0;
     return c;
   };
-  return { chain, l0, P, beforeSpend, afterSpend, withDeposit, withDeposits, shortState };
+  return { chain, l0, P, beforeSpend, afterSpend, withDeposit, withDeposits, shortState, spentElsewhere };
 }
 
 test("restore from the words alone: every note and each spent note's W, from the marks and pages on two RPCs", async () => {
@@ -594,6 +611,40 @@ test("restore from the words alone: every note and each spent note's W, from the
   assert.ok(r.notes.some((n) => n.ref.kind === "change" && n.leaf.value === 0n && n.leaf.leafIndex === 4n));
   assert.ok(r.notes.some((n) => n.ref.kind === "return" && n.leaf.value === 5_000_000n && n.leaf.leafIndex === 5n));
   assert.deepEqual(r.spends.map((s) => [s.l, s.j, s.withdrawn, s.w]), [[l0, 0, 50_000_000n, d.freshWallet(SEED, "sol", l0, 0).address]]);
+  assert.deepEqual(r.elsewhere, [], "the device's own release is no one else's");
+});
+
+test("card sol-restore-elsewhere: a note released by someone else holding its secrets (its change not the words') is SPENT and listed in elsewhere, with no W and no change note, and the walk goes on past it", async () => {
+  const { spentElsewhere, l0 } = restorePool();
+  // on main 5a6b61a77 the whole restore refused: "deposit:...: spent, but its change note (l, 0) is not in the state tree"
+  const r = await solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: pair(spentElsewhere, spentElsewhere), gap: 4 });
+  // every other note is found: deposit 9, U_{s,0}'s second arrival and the return note under (l0, 0)
+  assert.deepEqual(r.notes.map((n) => `${n.ref.kind} ${n.state} ${n.leaf.value}`), ["deposit SPENT 50000000", "deposit UNSPENT 10000000", "second UNSPENT 20000000", "return UNSPENT 5000000"]);
+  assert.ok(!r.notes.some((n) => n.ref.kind === "change"), "no change note of the words' for a release they did not make");
+  // no W listed or read for it: whoever released it signed as their own W
+  assert.deepEqual(r.spends, []);
+  assert.deepEqual(r.elsewhere, [{ note: refKey({ kind: "deposit", s: SCOPE, i: 0 }), withdrawn: 30_000_000n, number: 0 }]);
+  // a spent mark the pool cannot write is still a drift that stops the restore: more out than the note held
+  const over: Chain = { ...spentElsewhere, marks: new Map(spentElsewhere.marks!).set(solanaMarkOf(PROGRAM, "spent", noteSecrets(SEED, { kind: "deposit", s: SCOPE, i: 0 }).nullifierHash), spentData(50_000_001n, 0)) };
+  await assert.rejects(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: pair(over, over), gap: 4 }), /its spent mark withdrew 50000001 of 50000000/);
+  void l0;
+});
+
+test("card sol-restore-elsewhere: a RESERVED note someone else released settles SPENT with no change note, flagged elsewhere, never RESERVED again; the reserved pass lists it spent, never held", async () => {
+  const { spentElsewhere, l0 } = restorePool();
+  const settle = (ns: NoteStore, noteId: string) => solanaSettleSpent({ seed64: SEED, notes: ns, noteId, program: PROGRAM, rpcs: pair(spentElsewhere, spentElsewhere) });
+  const a = await reservedDeposit0(l0);
+  // on main 5a6b61a77 a refusal, nothing written: the note stayed RESERVED, held by every pass
+  assert.deepEqual(await settle(a.ns, a.id), { kind: "spent", change: null, withdrawn: 30_000_000n, elsewhere: true });
+  assert.equal((await a.ns.get(a.id))!.state, "SPENT");
+  assert.deepEqual((await a.ns.list()).filter((n) => n.parent === a.id), [], "no change note");
+  // settled again (a later pass, another tab): the same verdict, nothing more written
+  assert.deepEqual(await settle(a.ns, a.id), { kind: "spent", change: null, withdrawn: 30_000_000n, elsewhere: true });
+  assert.equal((await a.ns.list()).length, 1);
+  // the page's pass over RESERVED notes: spent at once, never held to be offered again
+  const b = await reservedDeposit0(l0);
+  assert.deepEqual(await solanaSettleReserved({ seed64: SEED, notes: b.ns, program: PROGRAM, rpcs: pair(spentElsewhere, spentElsewhere) }), { spent: [b.id], freed: [], held: [] });
+  assert.equal((await b.ns.get(b.id))!.state, "SPENT");
 });
 
 // card exit-pool-notes: one RPC lists the marks by bucket (getProgramAccounts), and both RPCs read every listed mark by
@@ -1517,7 +1568,7 @@ test("already spent: a send refused as spent marks the note SPENT with its chang
   assert.deepEqual([change.state, change.parent, change.leaf!.value, change.leaf!.leafIndex], ["UNSPENT", a.id, 0n, 4n]);
   // settled again (another tab, a retry): the change already there is taken
   const again = await solanaSettleSpent({ seed64: SEED, notes: a.ns, noteId: a.id, program: PROGRAM, rpcs: pair(chain, chain) });
-  assert.equal(again.kind === "spent" && again.change.id, change.id);
+  assert.equal(again.kind === "spent" && again.change?.id, change.id);
 
   // no spent mark on either RPC: the refusal's word changes nothing
   const b = await reservedDeposit0(l0);
@@ -2504,9 +2555,9 @@ test("sol-marks-scale fold 1 RV-B3 (stranger, card pool-sol-mark-tag): 5,000 zer
   const clean = notesOf(await solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: two(chain), gap: 4 }));
   const restore = await solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: two(zero), gap: 4 }).then(notesOf, (e: Error) => `refused: ${e.message}`);
   const a = await reservedDeposit0(l0);
-  const settle = await solanaSettleSpent({ seed64: SEED, notes: a.ns, noteId: a.id, program: PROGRAM, rpcs: two(zero) }).then((x) => `${x.kind} ${x.kind === "spent" ? `${refKey(x.change.ref)} ${x.change.leaf?.value} ${x.withdrawn}` : ""}`, (e: Error) => `refused: ${e.message}`);
+  const settle = await solanaSettleSpent({ seed64: SEED, notes: a.ns, noteId: a.id, program: PROGRAM, rpcs: two(zero) }).then((x) => `${x.kind} ${x.kind === "spent" ? (x.change === null ? `elsewhere ${x.withdrawn}` : `${refKey(x.change.ref)} ${x.change.leaf?.value} ${x.withdrawn}`) : ""}`, (e: Error) => `refused: ${e.message}`);
   const b = await reservedDeposit0(l0);
-  const settleClean = await solanaSettleSpent({ seed64: SEED, notes: b.ns, noteId: b.id, program: PROGRAM, rpcs: two(chain) }).then((x) => `${x.kind} ${x.kind === "spent" ? `${refKey(x.change.ref)} ${x.change.leaf?.value} ${x.withdrawn}` : ""}`, (e: Error) => `refused: ${e.message}`);
+  const settleClean = await solanaSettleSpent({ seed64: SEED, notes: b.ns, noteId: b.id, program: PROGRAM, rpcs: two(chain) }).then((x) => `${x.kind} ${x.kind === "spent" ? (x.change === null ? `elsewhere ${x.withdrawn}` : `${refKey(x.change.ref)} ${x.change.leaf?.value} ${x.withdrawn}`) : ""}`, (e: Error) => `refused: ${e.message}`);
   const biggest = Math.max(...sts.map((x) => x.biggest));
   console.log(`# RV-B3 20,000 zero accounts (5,000 each of 12, 13, 16, 17 B): restore ${restore === clean ? "the clean restore's notes" : restore}; settle ${settle} (clean: ${settleClean}); the biggest answer ${biggest} B`);
   assert.ok(biggest < SOLANA_ANSWER_MAX_BYTES / 8, `an answer of ${biggest} B`);

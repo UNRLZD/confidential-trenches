@@ -72,6 +72,13 @@ const M = [
   [R, "    seconds({ id: \"A\", l, j });\n", "", T, "RV6"],
   [R, "      seconds({ id: \"R\", c, l, j });\n", "", T, "RV6"],
   [R, "    w.secretKey.fill(0);\n", "", "test/pool-zeroing.test.ts", "solanaRestore zeroes"],
+  // card sol-restore-elsewhere: a release the device did not make stops nothing: the walk lists it and goes on past it,
+  // and a settle of it writes the note SPENT with no change note, never a refusal that leaves it RESERVED
+  [R, "      // not the device's release (its change is not the note's): spent all the same, listed", "      throw new Error(\"refused\");\n      //", T, "sol-restore-elsewhere"],
+  [R, "      elsewhere.push({ note: key, withdrawn, number: mark.number });\n", "", T, "sol-restore-elsewhere"],
+  [R, "      elsewhere.push({ note: key, withdrawn, number: mark.number });\n", "      elsewhere.push({ note: key, withdrawn, number: mark.number });\n      continue;\n", T, "sol-restore-elsewhere"],
+  [R, "        if (note.state !== \"SPENT\")\n", "        if (false)\n", T, "sol-restore-elsewhere"],
+  [R, "        out.push({ kind: \"spent\", change: null, withdrawn, elsewhere: true });\n        continue;\n", "        throw new Error(\"refused\");\n", T, "sol-restore-elsewhere"],
   // card sol-restore-race, review round 4: the first read's answers kept for the never-closed rule (G7); fold 7: the
   // earlier answer checked against the new one (G4, solana-restore.ts:101), told apart by an equal slot
   [R, "  solanaMarksGaps(calls, first.calls);\n", "", T, "fold 6 \\(G7"],
