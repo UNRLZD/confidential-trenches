@@ -3486,8 +3486,11 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    *  head it was read up to read more than its ms ago. Its tape is then no complete list: the answer says filling, with
    *  no whole_ms, so the page reads it again (card base-tape-never-complete-behind-the-index). */
   const behind = (e: Entry): boolean => (newest !== null && newest.n - e.headN > BEHIND_MAX[chain].blocks) || now() - (e.headAt ?? -Infinity) > BEHIND_MAX[chain].ms;
-  /** The block a book's tape holds every swap to and the newest head read, for the answer's Server-Timing. */
-  const readTo = (e: Entry): string => `evm-read-to;desc="block ${e.headN} of head ${newest?.n ?? e.headN}, read ${Math.max(0, Math.round((now() - (e.headAt ?? now())) / 1_000))} s ago"`;
+  /** The block a book's tape holds every swap to and the newest head read, and the pool its rows are read from, for the
+   *  answer's Server-Timing: a reader judges the tape against that pool, never another pool of the coin (card
+   *  tape-names-its-pool: helper live run 45256973001 judged Robinhood STATICS's tape, pool 0x20aa1721's, against its
+   *  listed pool 0xe79228d6, which every tape transaction also swapped in). */
+  const readTo = (e: Entry): string => `evm-read-to;desc="block ${e.headN} of head ${newest?.n ?? e.headN}, read ${Math.max(0, Math.round((now() - (e.headAt ?? now())) / 1_000))} s ago", evm-pool;desc="${e.pool.venue} ${e.pool.id}"`;
   /** How far back a settled tape holds every swap of its pool (card token-stats-count-every-trade): the trades answer's
    *  `whole_ms`, from which the page counts its buys, sells and volume for each window inside it. 0 when the read back
    *  reached the pool's birth; on a chain with a fixed block clock (BLOCK_CLOCK: Base) the second after the lowest block
