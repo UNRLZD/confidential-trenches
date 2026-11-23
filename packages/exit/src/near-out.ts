@@ -173,8 +173,10 @@ export function nearExitWith(over: NearExitOver = {}): ExitChain {
       if (out.stage !== "closed") stopped ??= `${out.stage}: ${out.why}`;
     }
     // a settle of refund_pending writes the refund note into the vault, after the scan above: scanned again, so this run
-    // withdraws it and its left counts it (card exit-every-note-kind-on-a-mainnet-copy)
-    if (scan.spends.some((s) => s.spend.status === "paid" || s.spend.status === "refund_pending")) {
+    // withdraws it and its left counts it (card exit-every-note-kind-on-a-mainnet-copy). Any spend the scan read not
+    // settled can be: one read in_flight may be refund_pending by exitCloseOne's own read and settled here (card
+    // exit-rescan-after-any-open-spend)
+    if (scan.spends.some((s) => s.spend.status !== "settled")) {
       notes = open((await exitScanSeed(ctx.seed, network, vrpcs)).notes);
       left = notes.reduce((s, n) => s + n.leaf.value, 0n);
       ctx.say(`scanned again after the settles: ${notes.length} note(s) to withdraw, ${units(left, 6)} USDC`);
