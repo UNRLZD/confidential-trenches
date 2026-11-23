@@ -24,8 +24,15 @@ const NOW = 1_800_000_000_000n;
 /** The epoch fee at the fake rent (3,480 a byte, factor 2): the cost 981,360 + 501,120 + 10,000 rounded up to the step, plus two steps (the kit's solanaPoolFee). */
 const FEE = 1_700_000n;
 
-/** A chain on two RPCs (the same state, each its own URL): balances, accounts, and every transaction sent. */
-function chain(o: { accounts?: Record<string, { owner: string; executable: boolean }>; history?: string[]; unreadSigs?: string[] } = {}) {
+/** A chain on two RPCs (the same state, each its own URL): balances, accounts, and every transaction sent. The onward
+ *  send's reads as each RPC answers them (card withdraw-onward-reads-gone-on-both): `read`, RPC r's answer to its n-th
+ *  getTransaction of a landed onward send ("seen" as the chain has it when not given, "none" for one that lags or lies,
+ *  "throw" for a read that fails); `status`, RPC r's getSignatureStatuses of it ("chain" when not given, "none" for one
+ *  that lies); `drop`, the onward send never lands; `finalHeight`, both RPCs' finalized height (900 when not given,
+ *  short of every blockhash's last block). */
+type Read = "seen" | "none" | "throw";
+type Status = "chain" | "none";
+function chain(o: { accounts?: Record<string, { owner: string; executable: boolean }>; history?: string[]; unreadSigs?: string[]; read?: (r: 0 | 1, n: number) => Read; status?: (r: 0 | 1) => Status; drop?: boolean; finalHeight?: number } = {}) {
   const balance = new Map<string, bigint>();
   const landed = new Map<string, Uint8Array>();
   const sent: Uint8Array[] = [];
@@ -39,7 +46,8 @@ function chain(o: { accounts?: Record<string, { owner: string; executable: boole
   new DataView(poolData.buffer).setBigUint64(49, 1n, true);
   new DataView(poolData.buffer).setBigUint64(49 + 8 + 1 + 33 * 32, 1n, true);
   const blockhash = b58encode(new Uint8Array(32).fill(7));
-  const answer = async (method: string, params: readonly unknown[]): Promise<unknown> => {
+  const reads = [0, 0];
+  const answer = async (method: string, params: readonly unknown[], r: 0 | 1): Promise<unknown> => {
     calls++;
     const p = params as unknown[];
     switch (method) {
@@ -62,7 +70,14 @@ function chain(o: { accounts?: Record<string, { owner: string; executable: boole
       case "isBlockhashValid":
         return { context: { slot: 10 }, value: true };
       case "getBlockHeight":
-        return 900;
+        return (p[0] as { commitment?: string } | undefined)?.commitment === "finalized" ? (o.finalHeight ?? 900) : 900;
+      case "getEpochInfo":
+        return { blockHeight: o.finalHeight ?? 900, absoluteSlot: 20 };
+      case "getSignatureStatuses": {
+        const sig = (p[0] as string[])[0]!;
+        const seen = landed.has(sig) && (o.status?.(r) ?? "chain") === "chain";
+        return { context: { slot: 20 }, value: [seen ? { slot: 11, confirmations: null, err: null, confirmationStatus: "finalized" } : null] };
+      }
       case "getFeeForMessage": {
         const m = Buffer.from(p[0] as string, "base64");
         return { value: 5_000 * m[1]! };
@@ -80,6 +95,7 @@ function chain(o: { accounts?: Record<string, { owner: string; executable: boole
           balance.set(keys[1]!, (balance.get(keys[1]!) ?? 0n) + r.withdrawnValue - r.relayFee);
           balance.set(keys[0]!, (balance.get(keys[0]!) ?? 0n) - 10_000n - 1_000_000n + r.relayFee);
         } else {
+          if (o.drop) return sig;
           const ix = tx.message.instructions[0]!;
           const v = new DataView(ix.data.buffer, ix.data.byteOffset).getBigUint64(4, true);
           const from = keys[ix.accounts[0]!]!, to = keys[ix.accounts[1]!]!;
@@ -91,13 +107,18 @@ function chain(o: { accounts?: Record<string, { owner: string; executable: boole
       }
       case "getTransaction": {
         const w = landed.get(p[0] as string);
+        if (w && w[0] === 1) {
+          const got = o.read?.(r, reads[r]!++) ?? "seen";
+          if (got === "throw") throw new Error("rpc: HTTP 429");
+          if (got === "none") return null;
+        }
         return w ? { slot: 11, transaction: [b64(w), "base64"], meta: { err: null } } : null;
       }
       default:
         throw new Error(`the fake chain has no ${method}`);
     }
   };
-  const rpcs = [Object.assign((m: string, p: readonly unknown[]) => answer(m, p), { url: NET.rpcs[0] }), Object.assign((m: string, p: readonly unknown[]) => answer(m, p), { url: NET.rpcs[1] })] as const satisfies readonly [SolanaRpc, SolanaRpc];
+  const rpcs = [Object.assign((m: string, p: readonly unknown[]) => answer(m, p, 0), { url: NET.rpcs[0] }), Object.assign((m: string, p: readonly unknown[]) => answer(m, p, 1), { url: NET.rpcs[1] })] as const satisfies readonly [SolanaRpc, SolanaRpc];
   return { rpcs, balance, sent, calls: () => calls };
 }
 
@@ -192,6 +213,54 @@ test("(b) the release: fee payer F, W the recipient and a signer; the onward: W 
   assert.equal(c.balance.get(W.address), 0n, "W ends at 0");
   assert.equal(c.balance.get(TO), amount);
   assert.deepEqual(r, { chain: "solana", txs: [b58encode(c.sent[0]!.subarray(1, 65)), b58encode(c.sent[1]!.subarray(1, 65))], sent: amount.toString(), left: "0" });
+});
+
+// card withdraw-onward-reads-gone-on-both: a send is "did not land" only once both RPCs prove it gone (goneOnBoth, each
+// status held to that RPC's finalized slot past the blockhash). Before, both RPCs' height past the blockhash and one more
+// read not ok on both said "did not land", a throwing read counted as none: a landed send read through one lagging,
+// failing or lying RPC stopped the run with a false "did not land".
+test("withdraw-onward-reads-gone-on-both: W's landed send that one RPC reads late, or by a throw, is read on until both see it: the run ends sent", async () => {
+  const seed = wordsToSeed64(WORDS);
+  for (const [name, read] of [
+    ["lagging", (r: 0 | 1, n: number): Read => (r === 1 && n < 3 ? "none" : "seen")],
+    ["throwing", (r: 0 | 1, n: number): Read => (r === 0 && n < 3 ? "throw" : "seen")],
+  ] as const) {
+    const F = solFeeWallet(seed);
+    F.secretKey.fill(0);
+    const c = chain({ read, finalHeight: 2_000 });
+    c.balance.set(F.address, 1_000_000_000n);
+    const lines: string[] = [];
+    const r = await solExitWith(over(c))(ctxOf(seed, lines));
+    assert.equal(r.sent, (VALUE - FEE - 5_000n).toString(), `${name}: ${lines.join(" / ")}`);
+    assert.equal(c.sent.filter((w) => w[0] === 1).length, 1, `${name}: W's send sent once, its blockhash past`);
+  }
+});
+
+test("withdraw-onward-reads-gone-on-both: W's landed send one RPC never shows, or both read as none while one's status holds it, stops the run unread, never \"did not land\"", async () => {
+  const seed = wordsToSeed64(WORDS);
+  for (const [name, o] of [
+    ["lying", { read: (r: 0 | 1): Read => (r === 1 ? "none" : "seen"), status: (r: 0 | 1): Status => (r === 1 ? "none" : "chain") }],
+    ["both none, one status", { read: (): Read => "none", status: (r: 0 | 1): Status => (r === 1 ? "none" : "chain") }],
+  ] as const) {
+    const F = solFeeWallet(seed);
+    F.secretKey.fill(0);
+    const c = chain({ ...o, finalHeight: 2_000 });
+    c.balance.set(F.address, 1_000_000_000n);
+    let sleeps = 0;
+    await assert.rejects(solExitWith(over(c, async () => void sleeps++))(ctxOf(seed, [])), /W's send onward \w+ is not read the same on both RPCs: run the exit again to read it/, name);
+    assert.ok(sleeps > 0 && sleeps <= 31, `${name}: bounded, ${sleeps} waits`);
+  }
+});
+
+test("withdraw-onward-reads-gone-on-both: W's send that never landed, proved gone on both RPCs, still stops at once as not landed", async () => {
+  const seed = wordsToSeed64(WORDS);
+  const F = solFeeWallet(seed);
+  F.secretKey.fill(0);
+  const c = chain({ drop: true, finalHeight: 2_000 });
+  c.balance.set(F.address, 1_000_000_000n);
+  let sleeps = 0;
+  await assert.rejects(solExitWith(over(c, async () => void sleeps++))(ctxOf(seed, [])), /W's send onward \w+ did not land/);
+  assert.equal(sleeps, 0, "proved gone on the first read past its blockhash");
 });
 
 test("(c) a typed address that is a program, the pool program or not base58 is refused before any send", async () => {

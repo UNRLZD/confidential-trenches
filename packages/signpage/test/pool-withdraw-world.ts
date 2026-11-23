@@ -93,6 +93,12 @@ export type Plant = {
   now?: () => bigint;
   /** the run's waits (none when not given) */
   wait?: (ms: number) => Promise<void>;
+  /** RPC p's answer to its n-th read-back of a landed onward send (card withdraw-onward-reads-gone-on-both): "seen" as
+   *  the chain has it (when not given), "none" (an RPC that lags, or lies), "throw" (a read that fails) */
+  onwardRead?: (p: 0 | 1, n: number) => "seen" | "none" | "throw";
+  /** RPC p's status of a landed onward send (getSignatureStatuses): "chain" as the chain has it (when not given), "none"
+   *  (an RPC that lies: null for a landed send) */
+  onwardStatus?: (p: 0 | 1) => "chain" | "none";
 };
 /** Both RPCs' finalized slot in the world. */
 export const FINAL_SLOT = 20;
@@ -108,6 +114,7 @@ export async function world(values: readonly bigint[], plant: Plant = {}) {
   const labels: bigint[] = [];
   const ids: string[] = [];
   const slotReads = [0, 0];
+  const onwardReads = [0, 0];
   for (const value of values) {
     const ref = plant.refs?.[ids.length];
     if (ref !== undefined) {
@@ -230,7 +237,11 @@ export async function world(values: readonly bigint[], plant: Plant = {}) {
         const rel = landed.get(sig);
         if (rel) return { slot: plant.txSlot ?? FINAL_SLOT, transaction: [base64.encode(rel), "base64"], meta: { err: failed.has(sig) ? { InstructionError: [1, { Custom: 6 }] } : null } };
         const on = onwards.get(sig);
-        if (on) return { transaction: [base64.encode(on), "base64"], meta: { err: null } };
+        if (on) {
+          const r = plant.onwardRead?.(p, onwardReads[p]!++) ?? "seen";
+          if (r === "throw") throw new Error("rpc: HTTP 429");
+          return r === "none" ? null : { transaction: [base64.encode(on), "base64"], meta: { err: null } };
+        }
         const last = releases.at(-1);
         // held until unhang(): then answered as the chain has it, so the run ends and holds nothing after its test
         if (sig === SIG && plant.hangReadBack) await new Promise<void>((r) => hung.push(r));
@@ -238,6 +249,12 @@ export async function world(values: readonly bigint[], plant: Plant = {}) {
         const tx = last.slice();
         tx.set(base58.decode(SIG), 1);
         return { slot: plant.txSlot ?? FINAL_SLOT, transaction: [base64.encode(tx), "base64"], meta: { err: spentByOther ? { InstructionError: [1, { Custom: 6 }] } : null } };
+      }
+      // a send's status over its whole history, at the finalized slot (pool-sell.ts goneOnBoth)
+      if (method === "getSignatureStatuses") {
+        const sig = (params[0] as string[])[0]!;
+        const seen = onwards.has(sig) && (plant.onwardStatus?.(p) ?? "chain") === "chain";
+        return { context: { slot: FINAL_SLOT }, value: [seen ? { slot: FINAL_SLOT, confirmations: null, err: null, confirmationStatus: "finalized" } : null] };
       }
       throw new Error(`unexpected ${method}`);
     }) as SolanaRpc;
