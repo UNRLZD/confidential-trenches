@@ -1,5 +1,6 @@
 import { useState } from "react";
 import "./avatar.css";
+import { avatarLetters } from "./letters.ts";
 import { badgeSize, chainOf, padOf } from "./pads.ts";
 
 /** The token's logo as the helper serves it (HELPER_HOST, which the CSP's img-src names): GET /v1/logo/{chain}/{token}.
@@ -41,7 +42,7 @@ function LogoImg({ src, size }: { src: string; size: number }) {
 export function Avatar({ symbol, size, pad, chain, logo, initials = true }: { symbol: string; size: number; pad?: string | null; chain?: string; logo?: Logo; initials?: boolean }) {
   let h = 7;
   for (const ch of symbol) h = (h * 31 + ch.charCodeAt(0)) % 360;
-  const letters = Array.from(symbol.replace(/^\$/, "").normalize("NFKC").replace(/\p{M}/gu, "")).slice(0, 2).join("");
+  const letters = avatarLetters(symbol);
   const src = logo?.icon === true && logo.token ? logoUrl(logo.chain, logo.token) : null;
   const av = (
     <span className="tok-av" aria-hidden="true" style={{ width: size, height: size, background: `conic-gradient(from ${h}deg at 35% 30%, oklch(0.62 0.15 ${h}), oklch(0.34 0.09 ${(h + 70) % 360}), oklch(0.5 0.13 ${h}), oklch(0.62 0.15 ${h}))`, color: `oklch(0.97 0.03 ${h})`, fontSize: Math.round(size * 0.36) }}>
