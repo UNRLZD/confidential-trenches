@@ -1,0 +1,23 @@
+{
+ "_note": "bad: this tree built with cfeeddfa7 (today main, before this card) follow.ts, deposit-follow.ts and main.ts (packages/signpage --site): a held moved op ends, nothing resumes it, a tap with U empty answers Nothing to move. good: this tree built after the re-review of 98c86663d (round_lock; ends on 1Click final status, left also past the window), main 5ab4d5fa4 merged (--site), which the deploy serves: every rule, PASS.",
+ "bad": {
+  "index": "<!doctype html>\n<html lang=\"en\" translate=\"no\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-EV9i6k1bgHDLRcUni9kO9W96ugPCMUO/0WsD/KYBU+PuA4oDGfpF1i28lM6BWtNb\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "app": {
+   "sha384": "sha384-EV9i6k1bgHDLRcUni9kO9W96ugPCMUO/0WsD/KYBU+PuA4oDGfpF1i28lM6BWtNb",
+   "markers": []
+  }
+ },
+ "good": {
+  "index": "<!doctype html>\n<html lang=\"en\" translate=\"no\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-Qfi0TpZIVkNNu7fHtvZen16Wbgm+DxVb2gyWtc6KtRe7Ykv3R5+ALJJ5JilUG3Bj\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "app": {
+   "sha384": "sha384-Qfi0TpZIVkNNu7fHtvZen16Wbgm+DxVb2gyWtc6KtRe7Ykv3R5+ALJJ5JilUG3Bj",
+   "markers": [
+    "held_followed",
+    "refund_back",
+    "ends",
+    "round_lock",
+    "tap_resumes"
+   ]
+  }
+ }
+}

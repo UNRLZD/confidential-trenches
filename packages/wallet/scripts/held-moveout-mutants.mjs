@@ -42,7 +42,7 @@ const M = [
   ["N1 taken with no look SETTLE_BLOCKS back", "    const past = await keyNonceAt(U, r.height - SETTLE_BLOCKS, rpcs).catch(() => null);\n    if (past !== null && past >= BigInt(had.nonce)) {", "    {"],
   ["N2 a settled record never settled", "  if (r.nonce >= BigInt(had.nonce) && r.height > SETTLE_BLOCKS) {", "  if (false) {"],
   ["N3 a resume signs anew (L6)", '    if (to === null && st.gone === "replaced") {', '    if (to === null && st.gone === "replaced" && false) {', '    if (to === null) return { kind: "failed", ...shownOf(had) };', '    if (to === null && false) return { kind: "failed", ...shownOf(had) };', "    await clear(opId, had);\n  }", "    await clear(opId, had);\n    to ??= had.to;\n  }"],
-  ["N4 no lock of U", "  const signed = await uLock(async (): Promise<Signed> => {", `  const signed = await ${SELF}(async (): Promise<Signed> => {`],
+  ["N4 no lock of U", "  const once = () => uLock(async (): Promise<Signed> => {", `  const once = () => ${SELF}(async (): Promise<Signed> => {`],
   ["N5 another op's live record of U ignored", '      if (st === "live") return { follow: r, owner: k };\n', ""],
   ["N6 no code hash read (M2)", "      if (resultAt(code, at)?.code_hash !== VAULT_TOKEN_CODE_HASH) return null; // the token's code is the pin (W:928)\n", ""],
   ["N7 the vault and intents.near allowed (L1)", "  if (to === net.vault || to === INTENTS) throw new MoveOutRefused(\"the typed account is the vault or intents.near: nothing sent there is the user's\");\n  const last = calls.at(-1);", "  if (false) throw new MoveOutRefused(\"the typed account is the vault or intents.near: nothing sent there is the user's\");\n  const last = calls.at(-1);"],
@@ -186,7 +186,7 @@ const M = [
   ["R10a (review 10, F2) the tap's re-reads one after another", "    const reads = await Promise.all(stale.map(read1));", "    const reads: Awaited<ReturnType<typeof read1>>[] = [];\n    for (const x of stale) reads.push(await read1(x));"],
   ["R10b (review 10, F2) each pass of a tap reads its stale ops again", "      tap.asked.add(k);\n", ""],
   ["P9 (review 10, order) the tap's re-read after another op's landed record is walked", "    await reread();\n    // another op of U with a live record", "    // another op of U with a live record", "    const read = await readMoveOut(U, typed, token, rpcs);", "    await reread();\n    const read = await readMoveOut(U, typed, token, rpcs);"],
-  ["P10 (review 10, F4) the tap's re-read outside U's lock", "    await reread();\n    // another op of U with a live record", "    // another op of U with a live record", "  const signed = await uLock(async (): Promise<Signed> => {\n", "  await reread();\n  const signed = await uLock(async (): Promise<Signed> => {\n"],
+  ["P10 (review 10, F4) the tap's re-read outside U's lock", "    await reread();\n    // another op of U with a live record", "    // another op of U with a live record", "  const once = () => uLock(async (): Promise<Signed> => {\n", "  await reread();\n  const once = () => uLock(async (): Promise<Signed> => {\n"],
   ["R9b (review 9, ruling 1) an INCOMPLETE_DEPOSIT op never read again at the tap", " || o.follow.status === \"INCOMPLETE_DEPOSIT\")) continue;", ")) continue;"],
   ["R9d (review 9, ruling 1) the tap's read never keeps what it read", "        return Object.keys(read).length === 0 ? undefined : { ...x, follow: { ...x.follow, ...read } };", "        return undefined;"],
   // delta review 11: the floor on what U held (F1, and its fix reverted), the tap's one budget over both passes (F2)
@@ -202,6 +202,14 @@ const MF = [
   ["H8b (review 8, ruling 1) holdAll's read never marks the send seen", "  if (st.status !== \"PENDING_DEPOSIT\" && !f.sent) read.sent = true;\n", ""],
   ["H8c (review 8, ruling 1) holdAll's SUCCESS read never keeps delivered", "  if (st.status === \"SUCCESS\" && f.delivered === undefined) read.delivered = (st.delivered ?? 0n).toString();\n", ""],
   ["H9a (review 9, ruling 2) holdAll reads each op's status before its held write", "    for (const [id, op] of all) await write(id, \"held\", legFacts(op, \"held\"), { why });\n    for (const [id, op] of all) {\n      const st = await readDepositStatus(op.follow.address, U, fetchFn, signal, now(), op.follow.refund_to ?? U);\n", "    for (const [id, op] of all) {\n      const st = await readDepositStatus(op.follow.address, U, fetchFn, signal, now(), op.follow.refund_to ?? U);\n      await write(id, \"held\", legFacts(op, \"held\"), { why });\n"],
+  // card held-move-follow-resume: a held op whose refund move went through is followed to its money's end
+  ["HF1 a held moved op counts as ended", " && !heldFollowed(op)) || (op.stage === \"done\"", ") || (op.stage === \"done\""],
+  ["HF2 the outcome of a held op ends it at once (no move out)", "  if (op.stage === \"held\") return followEnded(op) ? ", "  if (op.stage === \"held\") return op.follow.move === undefined ? "],
+  ["HF3 the round cut by every op held (the old early return)", "    if (ofU0.every(([, op]) => followEnded(op) && op.stage === \"held\")) return false;", "    if (ofU0.every(([, op]) => op.stage === \"held\" && op.follow.move === undefined)) return false;"],
+  ["HF4 a held U's credit bound (the seed opened for a struck U)", "    if (!heldOnly && !outLanded && amount !== null", "    if (!outLanded && amount !== null"],
+  ["HF5 a held moved op's refund back never offered", "(op.stage !== \"held\" || heldFollowed(op)) && op.follow.final", "op.stage !== \"held\" && op.follow.final"],
+  ["HF6 left before the move's window is past", " && (await pastOnBoth(rpcs, (op.follow.moved_ms ?? 0) + REFUND_QUOTE_DEADLINE_MS)))", ")"],
+  ["HF7 left while a refund move can still be offered", "        else if (!movable && (intents === null", "        else if ((intents === null"],
 ];
 const ALL = [...M.map((m) => [F, TESTS, m]), ...MF.map((m) => [FF, ["test/deposit-follow.test.ts"], m])];
 // every mutant's name, in the order the parts take them
