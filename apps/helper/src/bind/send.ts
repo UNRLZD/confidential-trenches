@@ -78,7 +78,11 @@ export const USDC_PAUSED = "FiatToken: paused";
 /** How long a send's outcome is waited for at FINAL, and the pages for both finals, before it stays pending. */
 export const OUTCOME_WAIT_MS = 30_000;
 export const SETTLE_WAIT_MS = 6_000;
+/** How often a wait reads again: about 12 times over the wait, at most every POLL_MS. Every production wait
+ *  (SETTLE_WAIT_MS, OUTCOME_WAIT_MS) reads every POLL_MS; a test's short wait over its fake chain reads as often as it
+ *  can be answered, not one read and then POLL_MS past its end. */
 const POLL_MS = 500;
+export const pollOf = (waitMs: number): number => Math.min(POLL_MS, Math.max(1, Math.ceil(waitMs / 12)));
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // ---- What the carry needs ----
@@ -773,6 +777,7 @@ async function readKey(r: Rpc, params: Record<string, unknown>): Promise<KeyRead
  * the same: the call is held, nothing spent on an unknown. The deposits pages are indexed as read, page by page.
  */
 export function createSendReads(rpcs: readonly [Rpc, Rpc], cfg: { vault: string; token: string }, waitMs = SETTLE_WAIT_MS): SendReads {
+  const pollMs = pollOf(waitMs);
   const finals = () => Promise.all(rpcs.map(async (r) => u64(((await r("block", { finality: "final" })) as { header?: { height?: unknown } }).header?.height, "block.height")));
   const finalHeight = async (): Promise<bigint> => {
     const hs = await finals();
@@ -843,7 +848,7 @@ export function createSendReads(rpcs: readonly [Rpc, Rpc], cfg: { vault: string;
       let low: bigint;
       while ((low = await finalHeight()) < height) {
         if (Date.now() >= until) return { state: "unknown" };
-        await sleep(POLL_MS);
+        await sleep(pollMs);
       }
       // read at the height that passed, not at a final read again (a load-balanced provider may answer lower)
       const row = await deposit(precommitment, low);
@@ -1032,6 +1037,7 @@ export const sameReceipts = (a: readonly Receipt[], b: readonly Receipt[]): bool
  * Nothing else drops one: not UNKNOWN_TRANSACTION, not a failed outcome on its own, not a timer.
  */
 export function createRelayer(rpcs: readonly [Rpc, Rpc], archival: Rpc | null, account: string, secretKey: string, vault: string, validity: bigint, store: RelayerStore, waitMs = OUTCOME_WAIT_MS): Relayer {
+  const pollMs = pollOf(waitMs);
   const { priv, pub } = relayerKey(secretKey);
   const publicKey = `ed25519:${base58(pub)}`;
   const counterKey = `${account}/${publicKey}`;
@@ -1292,7 +1298,7 @@ export function createRelayer(rpcs: readonly [Rpc, Rpc], archival: Rpc | null, a
     for (;;) {
       const out = await readOnce(tx, fromBlocks);
       if (out.kind !== "unknown" || Date.now() >= until) return out;
-      await sleep(POLL_MS);
+      await sleep(pollMs);
     }
   };
 
