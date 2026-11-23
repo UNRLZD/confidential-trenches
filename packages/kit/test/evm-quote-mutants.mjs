@@ -285,8 +285,8 @@ export const MUTANTS = [
   [QUOTE, "      const i = kept.get(readKey(r));", "      const i = undefined as number | undefined;", R, "W1 "],
   [QUOTE, "  if (plan !== undefined && block.timestamp >= plan.ts && block.timestamp - plan.ts <= EVM_WARM_RANGE_S) {", "  if (plan !== undefined) {", R, "W4 "],
   [QUOTE, "  PLANS.set(planKey, {", "  if (false) PLANS.set(planKey, {", R, "W1 "],
-  [QUOTE, "(!kept.has(readKey(r)) || hit.has(first + j))", "(!kept.has(readKey(r)) || true)", R, "W5 "],
-  [QUOTE, "filter((r, j) => r.override === undefined && !r.data.startsWith(", "filter((r, j) => !r.data.startsWith(", R, "W6 "],
+  [QUOTE, 'r.override === undefined && !r.data.startsWith("0x" + SEL_V4_OUT_SINGLE) && (!kept.has(readKey(r)) || hit.has(first + j))', 'r.override === undefined && !r.data.startsWith("0x" + SEL_V4_OUT_SINGLE) && (!kept.has(readKey(r)) || true)', R, "W5 "],
+  [QUOTE, "filter((r, j) => r.override === undefined && !r.data.startsWith(", "filter((r, j) => !r.data.startsWith(", R, "W6f "],
   [QUOTE, "  const early = plan === undefined ? [] : plan.scans.map((p) => scanAt(p.cs, p.kind, true));", "  const early: ReturnType<typeof scanAt>[] = [];", R, "W4 "],
   [QUOTE, "if (e instanceof TypeError && (cause === undefined || (typeof code === \"string\" && CONNECT_ERRORS.has(code)))) {", "if (false) {", R, "T7b "],
   [QUOTE, "if (e instanceof TypeError && (cause === undefined || (typeof code === \"string\" && CONNECT_ERRORS.has(code)))) {", "if (e instanceof Error) {", R, "T7b "],
@@ -305,8 +305,8 @@ export const MUTANTS = [
   [QUOTE, "        order.forEach((r, n) => ((rpcs as EvmRpc[])[n] = r));", "", R, "V1 "],
   [QUOTE, "        failed ??= { e };\n        if (n === 0) unsure = true;\n        continue;", "        throw e;", R, "V3 "],
   [QUOTE, "[rankClass(u, now), cost(u), k] as const;", "[0, cost(u), k] as const;", R, "V4 "],
-  [QUOTE, "late.length > 0 && s!.last < Math.min(...late) ? 1 : 0);", "0);", R, "V4 "],
-  [QUOTE, "|| evmProviderHeld(u, now) ? 2 : late", "|| evmProviderHeld(u, now) ? 1 : late", R, "V4 "],
+  [QUOTE, "late.length > 0 && s!.last < Math.min(...late) ? 1 : 0);", "0);", "test/evm-pair-rank.test.ts", "R2 "],
+  [QUOTE, "  if (till > now) return 20 + last;", "  if (till > now) return 1 + last;", R, "V4 "],
   [QUOTE, "      if (out.some(limited) || out.some(stateless)) s.held = performance.now() + (out.some(stateless) ? EVM_HOLD_MS : throttleHoldMs(url, null));\n      // an answer for a block the provider does not hold yet is no measure of its speed (re-review INFO 4)\n      else if (!out.some(notYet)) {", "      {", R, "V4 "],
   // card evm-quote-lag-held: a lower head more than maxLag below the scan provider's holds its provider and the block
   // is agreed again without it; a 200 carrying a state error holds its provider in the ranking
@@ -1271,7 +1271,6 @@ export const MUTANTS = [
   // card evm-warm-quote-inside-the-kpi-with-room: a warm buy's scan reads up to its held head, its scan provider's head
   // read beside it; and each batch of a round asks first the two providers that answer it soonest
   [QUOTE, "(a.pin !== undefined ? Promise.resolve(a.pin.number) : spec !== null ? Promise.resolve(spec.number) : headFrom(f))", "(a.pin !== undefined ? Promise.resolve(a.pin.number) : headFrom(f))", R, "WS1 "],
-  [QUOTE, "  if (rpcs.length < 3 || urls.every((u) => u === undefined)) return batches.map(() => rpcs);", "  return batches.map(() => rpcs);", R, "WS2 "],
   // card evm-cold-quote-inside-the-kpi: a first scan provider still out past its hedge time for its head has the next
   // asked beside it; the first head answered is kept, and the first's failure still asks the next
   [QUOTE, "evmHedgeAfter(URL_OF.get(o.rpc), \"head\") ?? EVM_HEDGE_MS);", "EVM_SCAN_HOLD_MS * 10);", R, "KPI1 "],
@@ -1280,6 +1279,26 @@ export const MUTANTS = [
   [QUOTE, "      const spare = () => (theirs ??= inTurn(next));", "      const spare = () => (theirs ??= headFrom(next));", R, "KPI3 "],
   // bloXroute's Robinhood endpoint paced to 16 calls in any second, its 429 from a runner at 17 (live run 45043534742)
   ["src/checks/evm/pace.ts", '"https://robinhood.rpc.blxrbdn.com": Object.freeze({ perS: 10, burst: 6, unit: "call" }),', '"https://robinhood.rpc.blxrbdn.com": Object.freeze({ perS: 15, burst: 6, unit: "call" }),', "test/evm-pace-provider-limits.test.ts", "card robinhood-taps-meet-no-429: a burst of a tap's posts to robinhood.rpc.blxrbdn.com from a runner"],
+  // card evm-quote-fewer-rounds: a held provider after every one not held, quoteLast too; half open after its hold
+  // until it answers; held by the pace's own hold as by the ranking's
+  [QUOTE, '  if (till > now) return 20 + last;', '  if (till > now) return 2 + last;', "test/evm-pair-rank.test.ts", "R6 "],
+  [QUOTE, '  if (till > 0 && (s?.last ?? 0) < till) return (s?.out.some((t) => t >= till) ? 10 : 2) + last;', '  if (false && till > 0 && (s?.last ?? 0) < till) return (s?.out.some((t) => t >= till) ? 10 : 2) + last;', "test/evm-pair-rank.test.ts", "R7 "],
+  // the half-open provider is probed: seated once before quoteLast, never left last with the rest healthy (review of A+B, 3)
+  [QUOTE, '  if (till > 0 && (s?.last ?? 0) < till) return (s?.out.some((t) => t >= till) ? 10 : 2) + last;', '  if (till > 0 && (s?.last ?? 0) < till) return 10 + last;', "test/evm-pair-rank.test.ts", "R7 "],
+  [QUOTE, '  if (till > 0 && (s?.last ?? 0) < till) return (s?.out.some((t) => t >= till) ? 10 : 2) + last;', '  if (till > 0 && (s?.last ?? 0) < till) return 2 + last;', "test/evm-pair-rank.test.ts", "R7 "],
+  [QUOTE, "        if (probe && open && ms > (evmHedgeAfter(url, kind) ?? EVM_HEDGE_MS)) s.held = performance.now() + EVM_HOLD_MS;", "", "test/evm-pair-rank.test.ts", "R9 "],
+  [QUOTE, "        if (probe && open && ms > (evmHedgeAfter(url, kind) ?? EVM_HEDGE_MS))", "        if (probe && ms > (evmHedgeAfter(url, kind) ?? EVM_HEDGE_MS))", "test/evm-pair-rank.test.ts", "R9b "],
+  // every hook-replaced read a warm quote sends is pinned to its own block (review of 7c0291eb2, LOW)
+  [QUOTE, "  const heldReading = heldFirst.length === 0 ? Promise.resolve(null) : readBoth(rpcs, block.hash, heldFirst, v.reads, undefined, firstDown).catch(() => null);", "  const heldReading = heldFirst.length === 0 ? Promise.resolve(null) : (readBoth(rpcs, block.parentHash, heldFirst, v.reads, undefined, firstDown).catch(() => null), readBoth(rpcs, block.hash, heldFirst, v.reads, undefined, firstDown).catch(() => null));", R, "W6c "],
+  [QUOTE, "    const probe = till > 0 && till <= t && s.last < till;", "    const probe = false;", "test/evm-pair-rank.test.ts", "R9 "],
+  [QUOTE, 'undefined): number => Math.max(s?.held ?? 0, evmProviderHeldMs(u, 0));', 'undefined): number => s?.held ?? 0;', "test/evm-pair-rank.test.ts", "R6 "],
+  // card evm-quote-fewer-rounds, S1 as the rule it holds: a speculative read's answer is used only for a pool held at the
+  // quote's block (W6), only by the very same read (W6e), only from the quote's own block (W6c), and a hook that is an
+  // address the reads call is still dropped (W6d)
+  [QUOTE, "  const held = found.filter(holds);", "  const held = found;", R, "W6 "],
+  [QUOTE, "const readKey = (r: Read) => JSON.stringify([r.to, r.data, r.override ?? null, r.group ?? null,", "const readKey = (r: Read) => JSON.stringify([r.to, r.data, null, null,", R, "W6e "],
+  [QUOTE, "readBoth(rpcs, block.hash, heldFirst, v.reads, undefined, firstDown)", "readBoth(rpcs, block.parentHash, heldFirst, v.reads, undefined, firstDown)", R, "W6c "],
+  [QUOTE, "const droppable = (k: EvmPoolKey) => k.hooks !== NATIVE && (v.called.has(k.hooks) ||", "const droppable = (k: EvmPoolKey) => k.hooks !== NATIVE && (false ||", R, "W6d "],
 ];
 // every mutant's name, in the order the parts take them
 export const NAMES = MUTANTS.map(([, find, , , t]) => `${find.split("\n")[0].slice(0, 70)} -> "${t}"`);

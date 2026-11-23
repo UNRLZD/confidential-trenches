@@ -106,6 +106,29 @@ test("a deposit that ends not_landed or refused is no end: read again at the slo
   }
 });
 
+// card signpage-sent-end-recorded: the terminal's pool deposit is pool.address's pool_deposit op, which this follow
+// ends; a deposit run that throws after its send (its bytes may be on their way) is no end and stops no follow: U_X is
+// read again and what it holds carried, so the op still reaches in_pool
+test("card signpage-sent-end-recorded: a deposit that throws after its send never ends or stops the follow: read again, carried, in_pool", async () => {
+  const w = world([
+    { bal: [FLOOR, FLOOR], status: "SUCCESS" },
+    { bal: [FLOOR, FLOOR], status: "SUCCESS" },
+    { bal: [0n, 0n], status: "SUCCESS", past: true },
+  ]);
+  let n = 0;
+  const deposit = w.deps.deposit;
+  w.deps.deposit = async (f, amount, signal) => {
+    if (n++ === 0) {
+      w.deposits.push(amount);
+      throw new Error("the deposit run threw after its send");
+    }
+    return deposit(f, amount, signal);
+  };
+  assert.equal(await followPoolQuote(F, w.deps), "in_pool");
+  assert.deepEqual(w.deposits, [10_000_000n, 10_000_000n], "the throw's money read again and carried");
+  assert.deepEqual(w.stages.at(-1), "in_pool", "the op's end written");
+});
+
 test("a late second send to U_X after in_pool, before the deadline, is carried too", async () => {
   const w = world([
     { bal: [FLOOR, FLOOR], status: "SUCCESS" },

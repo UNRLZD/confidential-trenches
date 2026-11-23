@@ -144,7 +144,9 @@ const JS = [
   // found pass naming no mint, and a young hold booking the next run
   "async function pK(e,t){let n=(await e.list()).find(e=>e.address===t.address);await e.put({...n??{passes:0},address:t.address,l:t.l,j:t.j,mints:n?.mints??[],found:!0})}",
   ",strand:t=>pK(mn(e.store),t)}).catch(()=>0)>0&&An.again()},",
-  "async function oq(e,t,n,r,i){let a=await eq(e,t.w.address),o=a.rec&&a.rec.rebuilt!==!0?{mint:a.rec.mint,program:a.rec.program}:void 0,s=n.buy,c=n.differs??0;if(o===void 0&&s===void 0&&(a.rec!==void 0||a.none)){let e=await aq(t.rpcs[0],t.program,t.w.address,a.rec?{mint:a.rec.mint,program:a.rec.program}:null);e===`differs`?c++:s=e}o===void 0&&s&&(o=s);let l=o===void 0&&s===void 0&&n.found!==!0?(a.rec===void 0&&!a.none?n.passes+1:c)>=3?`steady`:`again`:void 0,u=o?{...t,mints:Nq(t.mints,[o]),buy:o}:{...t,buy:null,...n.found===!0?{bare:!0,mints:[]}:l?{unproven:l}:{}},d,f=!1,p,m,h=await ZK(e,{...u,...n.spaced===void 0?{}:{own:n.spaced},read:e=>(d=e,f=!1),unlisted:()=>(d=void 0,f=!0),stamped:e=>p=e,swept:async(t,r)=>{m=t,(u.buy||u.bare===!0)&&(d=r);let i=(await e.owed.list()).find(e=>e.address===n.address)??n;await e.owed.put({...i,sweep:t,...d===void 0?{}:{lamports:d.toString()}})}},r);return await cq(e,n,h.end,h.steady&&u.bare!==!0?i:void 0,{...c===(n.differs??0)?{}:{differs:c},...s===void 0?{}:{buy:s},...d===void 0?{}:{lamports:d},...f?{unlisted:!0}:{},...p===void 0?{}:{spaced:p},...m===void 0?{}:{sweep:m}}),h.end===`gave_up`||h.end===`sent`||h.end===`owed`||l===`again`||h.end===`holds`&&!h.steady}",
+  "async function rq(e,t,n,r,i){let a=n.found===!0||await pq(t.store,t.scope,t.w),o=await ZK(e,t.w.address),s=!a&&o.rec&&o.rec.rebuilt!==!0?{mint:o.rec.mint,program:o.rec.program}:void 0,c=n.buy,l=n.differs??0;if(!a&&s===void 0&&c===void 0&&(o.rec!==void 0||o.none)){let e=await nq(t.rpcs[0],t.program,t.w.address,o.rec?{mint:o.rec.mint,program:o.rec.program}:null);e===`differs`?l++:c=e}!a&&s===void 0&&c&&(s=c);let u=s===void 0&&c===void 0&&!a?(o.rec===void 0&&!o.none?n.passes+1:l)>=3?`steady`:`again`:void 0,d=s?{...t,mints:jq(t.mints,[s]),buy:s}:a?{...t,buy:null,bare:!0,mints:[]}:{...t,buy:null,...u?{unproven:u}:{}},f,p=!1,m,h,g=await JK(e,{...d,...n.spaced===void 0?{}:{own:n.spaced},read:e=>(f=e,p=!1),unlisted:()=>(f=void 0,p=!0),stamped:e=>m=e,swept:async(t,r)=>{h=t,(d.buy||d.bare===!0)&&(f=r);let i=(await e.owed.list()).find(e=>e.address===n.address)??n;await e.owed.put({...i,sweep:t,...f===void 0?{}:{lamports:f.toString()}})}},r);return await aq(e,n,g.end,g.steady&&d.bare!==!0?i:void 0,{...l===(n.differs??0)?{}:{differs:l},...c===void 0?{}:{buy:c},...f===void 0?{}:{lamports:f},...p?{unlisted:!0}:{},...m===void 0?{}:{spaced:m},...h===void 0?{}:{sweep:h}}),g.end===`gave_up`||g.end===`sent`||g.end===`owed`||u===`again`||g.end===`holds`&&!g.steady}",
+  // card a-found-wallet-old-strand-records-sweep: the notes read that finds a W with no `found` (notesOpen)
+  "async function pq(e,t,n){let r=(await e.list()).filter(e=>e.scope===t&&e.leaf!==void 0&&e.leaf.label===n.l&&CR(e.ref)===n.j);return r.length>0&&r.every(e=>e.state===`UNSPENT`||e.state===`HELD`)}",
   // review P1-2 of 1d3b96d9c: W's own coins' accounts, the keep count's caller; card
   // a-found-wallet-sweeps-past-a-strangers-coin: a found W's every account until its note's spend reads alike, then none
   // while unspent
@@ -366,8 +368,18 @@ test("the facts read from a bundle; a planted line with its rule changed FAILs",
     [JS.replace("j:t.j,mints:n?.mints??[],found:!0}", "j:t.j,mints:[...n?.mints??[],{mint:t.mint,program:t.program}],found:!0}"), 26],
     [JS.replace("j:t.j,mints:n?.mints??[],found:!0}", "j:t.j,mints:n?.mints??[]}"), 26],
     [JS.replace("strand:t=>pK(mn(e.store),t)}", "strand:async()=>{}}"), 26],
-    [JS.replace("...n.found===!0?{bare:!0,mints:[]}:l?", "...n.found===!0?{bare:!0}:l?"), 26],
-    [JS.replace("||l===`again`||h.end===`holds`&&!h.steady}", "||l===`again`}"), 26],
+    [JS.replace(":a?{...t,buy:null,bare:!0,mints:[]}:", ":a?{...t,buy:null,bare:!0}:"), 26],
+    [JS.replace("||u===`again`||g.end===`holds`&&!g.steady}", "||u===`again`}"), 26],
+    // card a-found-wallet-old-strand-records-sweep: a W found by its record's `found` only; a found W's recorded buy kept,
+    // or its proven buy read; one open note of W's enough; a W with no note of its own found; a SPENT note read as open
+    [JS.replace("let a=n.found===!0||await pq(t.store,t.scope,t.w),", "let a=n.found===!0,"), 26],
+    [JS.replace("s=!a&&o.rec&&o.rec.rebuilt!==!0?", "s=o.rec&&o.rec.rebuilt!==!0?"), 26],
+    [JS.replace("if(!a&&s===void 0&&c===void 0&&", "if(s===void 0&&c===void 0&&"), 26],
+    [JS.replace("return r.length>0&&r.every(e=>", "return r.length>0&&r.some(e=>"), 26],
+    [JS.replace("return r.length>0&&r.every(e=>", "return r.every(e=>"), 26],
+    [JS.replace("e.state===`UNSPENT`||e.state===`HELD`)}", "e.state!==`RESERVED`)}"), 26],
+    [JS.replace("!a&&s===void 0&&c&&(s=c)", "s===void 0&&c&&(s=c)"), 26],
+    [JS.replace("s===void 0&&c===void 0&&!a?", "s===void 0&&c===void 0?"), 26],
     [JS.replace("n===0?g.then(e=>void(_=e,v=nh(e))):null,T===null?HW(e.rpcs):null]", "n===0?g.then(e=>void(_=e,v=nh(e))):null,null]"), 26],
     [JS.replace("T===null?HW(e.rpcs):null]);if(T===null&&O===null)return{error:`failed`};let k=fH(", "null]),k=fH(").replace("zW(R)]),V=", "zW(R),T===null?HW(e.rpcs):null]),V=").replace("[,z,B]=", "[,z,B,O]="), 26],
     [JS.replace("{blockhash:V.blockhash,lastValidBlockHeight:V.lastValidBlockHeight,stateSize", "{blockhash:z.blockhash,lastValidBlockHeight:z.lastValidBlockHeight,stateSize"), 26],

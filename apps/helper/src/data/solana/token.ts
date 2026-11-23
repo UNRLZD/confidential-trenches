@@ -709,8 +709,9 @@ const rpcBody = (method: string, params: unknown[]) => JSON.stringify({ jsonrpc:
  *  429 on it would be the device's own reads' and sends' 429 too. */
 /** `sleep`: the GeckoTerminal budget's wait (setTimeout unless a test passes its clock's beside `now`, card
  *  helper-pace-test-clock). */
-export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch; now?: () => number; sleep?: (ms: number) => Promise<unknown>; listed?: () => Promise<DataAnswer>; holdersRpc?: Rpc; gecko?: GeckoBudget; metaLogos?: Pick<Logos, "fromMeta">; keyed?: Keyed | null; later?: Later } = {}) {
+export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch; now?: () => number; sleep?: (ms: number) => Promise<unknown>; listed?: () => Promise<DataAnswer>; holdersRpc?: Rpc; gecko?: GeckoBudget; metaLogos?: Pick<Logos, "fromMeta">; keyed?: Keyed | null; later?: Later; log?: (line: string) => void } = {}) {
   const now = deps.now ?? Date.now;
+  const log = deps.log ?? ((line: string) => console.log(`helper: ${line}`));
   const sleep = deps.sleep ?? ((ms: number) => new Promise((ok) => setTimeout(ok, ms)));
   const doFetch = deps.fetch ?? fetch;
 
@@ -1124,7 +1125,12 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
       const at = now();
       const body: Holders = { holders: listedHolders(rows), total, top_bps: m.mint.supply > 0n ? top : null, src: "chain", as_of_ms: at };
       return { status: 200, body: JSON.stringify(body), src: "chain", asOfMs: at };
-    } catch {
+    } catch (x) {
+      // card helper-fresh-tapes-whole-from-the-first-minute: a failed holders read names its cause and provider (the
+      // holders key's slot, never its URL or key) in one line, so a page served no rows has it on record (live run
+      // 45050809291: a New coin's holders 200 with none, and the helper's log said nothing of it)
+      const why = x instanceof Throttled ? `throttled ${x.why ?? ""}` : x instanceof Upstream ? (x.why ?? "upstream") : "unread";
+      log(`solana holders read failed (${why.replace(/[^\w :.-]/g, "").slice(0, 80)}) on SOLANA_HOLDERS_RPC_URL for ${mint.slice(0, 8)}: served Jupiter's count, no rows`);
       // the fallback (06b v1.36): no rows, Jupiter's holder count and top-holders share
       const r = await rowOf(mint);
       if (r === null) return NOT_FOUND;

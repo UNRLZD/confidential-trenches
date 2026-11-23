@@ -69,6 +69,16 @@ export const CG_DOWN_TRIP = 2;
  *  bars after its top pool go keyless at once, as before), short of a tape's 15 s bound less its 10 s refresh and the
  *  2 s timeout. [design: 2 s] */
 export const CG_BLIP_HOLD_S = 2;
+/** How long a path CoinGecko answered 404 (a pool or token it has not indexed) is answered "not found" here with no
+ *  call, per path with its query left off (card helper-warm-start-coingecko-bound: CoinGecko counts a 404 against the
+ *  day as any call, and a cold helper's live run sent 81 of its 329 calls as 404s, helper-216 on 22 Nov, while the
+ *  minute lines name no path, so whether they repeat was unread). The minute line counts a held one as "404 held", so
+ *  the repeats are read from the log. The keyless path asked next is the same index, so the caller loses nothing it
+ *  would have had. [design: 2 min, about the time the index takes to list a new pool, so a coin listed meanwhile is asked
+ *  again within it; a page's chart, tape and info read at once and their refreshes send one] */
+export const CG_MISS_HOLD_MS = 120_000;
+/** The paths held after a 404, at most (the oldest go first). [design: the token caches' CACHE_MAX order] */
+export const CG_MISS_MAX = 2_048;
 /** CoinGecko's 429 with no Retry-After: its minute. */
 export const CG_THROTTLE_HOLD_S = 60;
 /** An answer's size limit (as the keyless reads'). */
@@ -114,10 +124,13 @@ export function kindOf(path: string): string {
 }
 
 /** The keyed reads, or null when no key is set (every read keyless, as main). `holds` must carry coingeckoPace(env). */
-export function createKeyed(env: Record<string, string | undefined>, holds: ProviderHolds, deps: { fetch?: Fetch } = {}): Keyed | null {
+export function createKeyed(env: Record<string, string | undefined>, holds: ProviderHolds, deps: { fetch?: Fetch; now?: () => number } = {}): Keyed | null {
   const key = env.COINGECKO_API_KEY;
   if (key === undefined || key === "" || holds.paceOf(CG_URL) === undefined) return null;
   const doFetch = deps.fetch ?? fetch;
+  const now = deps.now ?? Date.now;
+  /** Each path CoinGecko answered 404, with when its hold ends (CG_MISS_HOLD_MS), oldest first. */
+  const missing = new Map<string, number>();
   const counts = new Map<string, number>();
   const bump = (k: string) => counts.set(k, (counts.get(k) ?? 0) + 1);
   /** 5xx, timeouts and failed connections in a row (CG_DOWN_TRIP). */
@@ -129,6 +142,10 @@ export function createKeyed(env: Record<string, string | undefined>, holds: Prov
   };
   return {
     async read(path, ok, background = false) {
+      const where = path.split("?")[0]!;
+      const miss = missing.get(where);
+      if (miss !== undefined && now() < miss) return bump("404 held"), undefined;
+      if (miss !== undefined) missing.delete(where);
       if (holds.heldMs(CG_URL) > 0) return bump("held"), undefined;
       if (holds.dayOut(CG_URL, 1)) return bump("day"), undefined;
       if (holds.take(CG_URL, 1, background) > 0) return bump(background ? "minute background" : "minute"), undefined;
@@ -149,6 +166,11 @@ export function createKeyed(env: Record<string, string | undefined>, holds: Prov
           } else if (r.status === 401 || r.status === 403) holds.hold(CG_URL, CG_KEY_HOLD_S);
           if (r.status >= 500) down();
           else downs = 0;
+          if (r.status === 404) {
+            missing.delete(where);
+            if (missing.size >= CG_MISS_MAX) missing.delete(missing.keys().next().value!);
+            missing.set(where, now() + CG_MISS_HOLD_MS);
+          }
           return bump(String(r.status)), undefined;
         }
         downs = 0;

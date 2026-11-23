@@ -24,10 +24,10 @@ const M = [
   ["the refund bound on the taken note", F, "let note = mine.find((x) => x.note.leaf === undefined)?.note;", "let note = mine[0]!.note;", V, "a stranger takes P after the relayer's prepay"],
   // a landed note's calls still out (the review's M1, L2, L3)
   ["no wait for a call still out", F, "        } else if (low <= window) out = true;", "        } else if (false) out = true;", V, "answer lost"],
-  ["calls out never read", F, "const calls = out === undefined ? await callsOut() :", "const calls = false ? await callsOut() :", V, "answer lost"],
+  ["calls out never read", F, "const calls = out === undefined && !heldOnly ? await callsOut() :", "const calls = false ? await callsOut() :", V, "answer lost"],
   ["the slow refund at the slow pace", F, "    if (calls.due) fast = true;", "    if (calls.out) fast = true;", V, "refund slow"],
   ["final before the refund window", F, "const idle = out === undefined && !calls.late &&", "const idle = out === undefined && !calls.due &&", V, "refund slow"],
-  ["no resend of U's refund", F, "if (!outLanded && amount !== null && amount >= VAULT_CONSTANTS.MIN_DEPOSIT) {", "if (!outLanded && amount !== null && amount >= VAULT_CONSTANTS.MIN_DEPOSIT && out !== undefined) {", V, "a stranger takes P after the relayer's prepay"],
+  ["no resend of U's refund", F, "if (!heldOnly && !outLanded && amount !== null && amount >= VAULT_CONSTANTS.MIN_DEPOSIT) {", "if (!heldOnly && !outLanded && amount !== null && amount >= VAULT_CONSTANTS.MIN_DEPOSIT && out !== undefined) {", V, "a stranger takes P after the relayer's prepay"],
   // the ran call's receipts (the review of 9c218554: M1, L1)
   ["amount_above_balance refused", B, '"p_used", "amount_above_balance"]);', '"p_used"]);', V, "release relayer not named"],
   ["amount_above_balance refused in the bind", B, '"p_used", "amount_above_balance"]);', '"p_used"]);', TB, "amount_above_balance settles"],
