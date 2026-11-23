@@ -7,8 +7,13 @@
 // <t>&limit=50, again every POLL_MS while it says filling, BOUND_MS at most). Then, on the chain's two RPCS, which must
 // answer alike, it reads the PoolManager's Swap logs of that pool id from the block of the tape's oldest row (or the
 // newest WINDOW blocks for a tape with none) to the head.
-// A tape is judged against its pool when every row's transaction is one of the pool's swaps (a coin's tape is its
-// busiest pool's of a quote of ours, which may be another pool: shown, not judged). It passes only when every answer is
+// The pool judged is the one the tape's answer names (Server-Timing evm-pool;desc="<venue> <id>", card
+// tape-names-its-pool): a coin's tape follows the pool it trades on, which may not be its listed pool. Helper live run
+// 45256973001 judged Robinhood STATICS's tape, pool 0x20aa1721's, against its listed pool 0xe79228d6: every tape
+// transaction was a triangle through both, so the tape read as 0xe79228d6's with two of its swaps missing. A tape naming
+// a pool that is no v4 pool is shown, not judged; a tape naming a v4 pool whose rows are not all that pool's swaps
+// fails. A helper that names no pool is judged against the listed pool when every row's transaction is one of its swaps
+// (shown, not judged, otherwise). It passes only when every answer is
 // 200 and settles, each judged tape holds exactly the pool's swaps from its oldest row to its newest, and no swap of the
 // pool older than the tape's own time by LAG_S is missing past its newest. A tape settled with none while the pool
 // swapped in the window: FAIL. A chain with no tape judged, or the two RPCS not alike: INCONCLUSIVE.
@@ -60,6 +65,12 @@ export function hookOf(id, key) {
 }
 const TX = /^0x[0-9a-f]{64}$/;
 const arr = (v) => (Array.isArray(v) ? v : []);
+const NAMED = /(?:^|,)\s*evm-pool;desc="([a-z0-9]+) (0x[0-9a-fA-F]+)"/;
+/** The pool a tape answer's Server-Timing names, "<venue> <id>" (swaps.ts readTo), or null. */
+export const namedPool = (timing) => {
+  const m = NAMED.exec(typeof timing === "string" ? timing : "");
+  return m === null ? null : `${m[1]} ${m[2].toLowerCase()}`;
+};
 
 /** The pool's Swap logs over `from` to `to` on `url`, a span at a time (halved on a refusal), each as {tx, b, i, ts}
  *  (i: its log index in its block); or {noAnswer}. */
@@ -105,12 +116,19 @@ export async function readRun(base = BASE, { fetchFn = fetch, sleep = (ms) => ne
           body = await r.json();
         } catch {}
         const trades = arr(body?.trades);
-        coin.answers.push({ status: r.status, filling: body?.filling === true, as_of_ms: body?.as_of_ms ?? null, txs: trades.map((x) => x.tx), ms: Math.round(now() - t0) });
+        coin.answers.push({ status: r.status, filling: body?.filling === true, as_of_ms: body?.as_of_ms ?? null, txs: trades.map((x) => x.tx), ms: Math.round(now() - t0), named: namedPool(r.headers?.get?.("server-timing")) });
         if (r.status !== 200 || body?.filling !== true || now() - t0 >= BOUND_MS) break;
         await sleep(POLL_MS);
       }
       const last = coin.answers.at(-1);
       if (last.status !== 200 || last.filling) continue;
+      // the pool the tape names is the one judged; a helper that names none, the listed pool
+      if (last.named !== null) {
+        const [venue, id] = last.named.split(" ");
+        if (venue !== "v4" || !ID.test(id)) continue;
+        coin.judged = id;
+      }
+      const judged = coin.judged ?? pool;
       const [url0] = c.rpcs[0];
       const head = await rpcAnswer(url0, "eth_blockNumber", [], { fetchFn });
       if (typeof head.result !== "string") {
@@ -133,9 +151,9 @@ export async function readRun(base = BASE, { fetchFn = fetch, sleep = (ms) => ne
       // the pool's key as the helper's index names it, proven by its hash at the verdict (hookOf)
       const pr = await fetchFn(`${base}/v1/market/pools?chain=${chain}&token=${addr}`, { headers: { Origin: APP } }).catch(() => null);
       const pa = pr?.status === 200 ? await pr.json().catch(() => null) : null;
-      coin.key = arr(pa?.pools).find((p) => p?.id === pool)?.key ?? null;
+      coin.key = arr(pa?.pools).find((p) => p?.id === judged)?.key ?? null;
       coin.reads = [];
-      for (const [url, span] of c.rpcs) coin.reads.push({ host: new URL(url).host, ...(await swapsOn(url, span, c.poolManager, pool, coin.from, coin.head, fetchFn)) });
+      for (const [url, span] of c.rpcs) coin.reads.push({ host: new URL(url).host, ...(await swapsOn(url, span, c.poolManager, judged, coin.from, coin.head, fetchFn)) });
     }
   }
   return run;
@@ -155,8 +173,11 @@ export function judge(run) {
       continue;
     }
     for (const coin of arr(ch.coins)) {
-      const name = `${chain} ${coin.coin} pool ${coin.pool?.slice(0, 10)}`;
       const last = arr(coin.answers).at(-1);
+      // the pool judged: the one the tape named (readRun's coin.judged), or the listed pool when it named none
+      const named = typeof last?.named === "string" ? last.named : null;
+      const pool = coin.judged ?? coin.pool;
+      const name = `${chain} ${coin.coin} pool ${pool?.slice(0, 10)}${pool !== coin.pool ? ` (listed ${coin.pool?.slice(0, 10)})` : ""}`;
       if (last === undefined || last.status !== 200) {
         lines.push(`BAD ${name}: tape answered ${last?.status}`);
         bad = true;
@@ -165,6 +186,10 @@ export function judge(run) {
       if (last.filling) {
         lines.push(`BAD ${name}: still filling at ${last.ms} ms`);
         bad = true;
+        continue;
+      }
+      if (named !== null && coin.judged === undefined) {
+        lines.push(`--  ${chain} ${coin.coin}: its tape is the coin's ${named.slice(0, 13)} pool, no v4 pool, not judged`);
         continue;
       }
       if (coin.noAnswer !== undefined || coin.tooWide !== undefined) {
@@ -184,7 +209,7 @@ export function judge(run) {
         continue;
       }
       // the hook's own swaps are no trades (hookOf): left out, counted in the line
-      const hook = hookOf(coin.pool, coin.key);
+      const hook = hookOf(pool, coin.key);
       const logs = reads[0].logs.filter((l) => hook === null || l.s !== hook);
       const own = reads[0].logs.length - logs.length;
       const tape = new Set(last.txs);
@@ -198,7 +223,13 @@ export function judge(run) {
       }
       const inPool = new Set(logs.map((l) => l.tx));
       if (![...tape].every((t) => inPool.has(t))) {
-        lines.push(`--  ${name}: ${[...tape].filter((t) => !inPool.has(t)).length} of the tape's ${tape.size} rows are another pool's (the coin's busiest of a quote of ours), not judged`);
+        const off = [...tape].filter((t) => !inPool.has(t));
+        // a tape that names its pool holds that pool's swaps only; one that names none may be another pool's
+        if (named !== null) {
+          lines.push(`BAD ${name}: ${off.length} of the tape's ${tape.size} rows are no swap of the pool it names in blocks ${coin.from}-${coin.head} (${off.slice(0, 3).join(", ")})`);
+          bad = true;
+          judged++;
+        } else lines.push(`--  ${name}: ${off.length} of the tape's ${tape.size} rows are another pool's (the coin's busiest of a quote of ours), not judged`);
         continue;
       }
       judged++;

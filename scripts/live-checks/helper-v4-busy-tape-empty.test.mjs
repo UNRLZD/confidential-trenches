@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { test } from "node:test";
 import { BASE_VENUES, ROBINHOOD_VENUES, TOPIC } from "../../apps/helper/src/data/evm/swaps.ts";
-import { CHAINS, judge, LAG_S, SWAP } from "./helper-v4-busy-tape-empty.mjs";
+import { CHAINS, judge, LAG_S, namedPool, SWAP } from "./helper-v4-busy-tape-empty.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./helper-v4-busy-tape-empty.answers.json", import.meta.url), "utf8"));
 const copy = (x) => JSON.parse(JSON.stringify(x));
@@ -109,6 +109,57 @@ test("a tape of another pool (the coin's busiest of a quote of ours) is shown, n
   const r = judge(run);
   assert.equal(r.verdict, "PASS", r.lines.join("\n"));
   assert.ok(r.lines.some((l) => /another pool's/.test(l)));
+});
+
+// Card tape-names-its-pool: helper live run 45256973001 (23 Nov) judged Robinhood STATICS's tape, pool 0x20aa1721's,
+// against its listed pool 0xe79228d6. Every tape transaction was a triangle through both, so the tape read as
+// 0xe79228d6's, and two swaps of 0xe79228d6 alone read as missing from it.
+test("planted: a tape that names its pool is judged against that pool, never the listed one (STATICS): PASS; the same tape naming none, judged against a listed pool with two swaps of its own: FAIL", () => {
+  const LISTED = `0x${"e7".repeat(32)}`;
+  const run = copy(A.good);
+  const c = mow(run);
+  const own = c.pool;
+  c.pool = LISTED;
+  c.judged = own;
+  c.answers.at(-1).named = `v4 ${own}`;
+  const r = judge(run);
+  assert.equal(r.verdict, "PASS", r.lines.join("\n"));
+  assert.ok(r.lines.some((l) => l.startsWith("ok") && l.includes(`pool ${own.slice(0, 10)} (listed 0xe7e7e7e7)`)), r.lines.join("\n"));
+  // the helper before the name: the listed pool read, holding every tape transaction and two swaps of its own
+  const old = copy(A.good);
+  const o = mow(old);
+  const tape = new Set(o.answers.at(-1).txs);
+  for (const read of o.reads) {
+    const top = read.logs.filter((l) => tape.has(l.tx)).reduce((x, l) => (l.b > x.b ? l : x));
+    read.logs.push({ ...top, tx: `0x${"e2".repeat(32)}` }, { ...top, tx: `0x${"60".repeat(32)}` });
+  }
+  assert.equal(judge(old).verdict, "FAIL");
+  assert.match(bad(judge(old)).join("\n"), /2 missing/);
+});
+
+test("planted: a tape naming a v4 pool with a row that is no swap of it: FAIL; a tape naming a pool that is no v4 pool: shown, not judged", () => {
+  const run = copy(A.good);
+  const c = mow(run);
+  c.judged = c.pool;
+  c.answers.at(-1).named = `v4 ${c.pool}`;
+  c.answers.at(-1).txs = [...c.answers.at(-1).txs.slice(1), `0x${"ab".repeat(32)}`];
+  const r = judge(run);
+  assert.equal(r.verdict, "FAIL");
+  assert.match(bad(r).join("\n"), /1 of the tape's 50 rows are no swap of the pool it names/);
+  const v3 = copy(A.good);
+  const d = mow(v3);
+  d.answers.at(-1).named = "v3 0x9331f571f79d1e186a095c93756b5680a43932ac";
+  delete d.reads;
+  const s = judge(v3);
+  assert.notEqual(s.verdict, "FAIL", s.lines.join("\n"));
+  assert.ok(s.lines.some((l) => /its tape is the coin's v3 0x9331f571 pool, no v4 pool, not judged/.test(l)), s.lines.join("\n"));
+});
+
+test("namedPool reads the pool a tape answer's Server-Timing names, as the helper writes it", () => {
+  assert.equal(namedPool(`evm-open;dur=7, evm-read-to;desc="block 5 of head 5, read 0 s ago", evm-pool;desc="v4 0x${"AB".repeat(32)}"`), `v4 0x${"ab".repeat(32)}`);
+  assert.equal(namedPool('evm-read-to;desc="block 5 of head 5, read 0 s ago"'), null);
+  assert.equal(namedPool('x-evm-pool;desc="v4 0x01"'), null);
+  assert.equal(namedPool(null), null);
 });
 
 test("planted: a swap the pool's hook sent itself (fees it sold) inside the tape's blocks is no trade: PASS; a key that does not hash to the id proves no hook: FAIL", () => {
