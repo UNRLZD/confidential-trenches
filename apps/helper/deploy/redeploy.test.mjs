@@ -316,12 +316,53 @@ test("budget_ok in redeploy.sh takes exactly the values budgetFromEnv takes, eac
 
 // re-check finding 4: a budget value the helper's start refuses (budgetFromEnv, exit 2) would leave the container
 // restarting; the redeploy refuses it first, with the same rule, naming the variable only, with nothing changed.
+// Every value, in deploy/.env and in the shell, through the script's own check_budgets (with the functions it calls),
+// one bash for each name and place; the whole redeploy, from a temp server, for FULL_RUN's values: a refused value
+// leaves check_budgets before any step that changes something (main), so the full runs prove that for each kind of
+// value and the function runs prove each value's verdict and line (card readme-run-fits-an-agent-timeout: 232 full
+// runs were this file's 52 s of a fresh clone's 8 minutes on a 4-core runner).
+const FULL_RUN = ["", "100,42", "100,16", "lots", `${SECRET},1`, "'100,16'", " 100,16", "１００,１６"];
+test("check_budgets in redeploy.sh refuses, in deploy/.env or in the shell, exactly the budget values budgetFromEnv refuses, naming the variable and the place, never the value", () => {
+  const text = readFileSync(SCRIPT, "utf8");
+  const fns = ["lines_of", "plain_value", "budget_ok", "check_budgets", "is_set"].map((f) => new RegExp(`^${f}\\(\\) \\{\\n[\\s\\S]*?\\n\\}\\n`, "m").exec(text)?.[0]);
+  assert.ok(fns.every(Boolean), "the functions are in the script");
+  const dir = mkdtempSync(path.join(tmpdir(), "budgets-"));
+  try {
+    const env = path.join(dir, ".env");
+    let refused = 0;
+    for (const name of ["RPC_BUDGET_SOLANA", "PROXY_BUDGET_JUPITER"]) {
+      for (const where of ["env", "shell"]) {
+        // each value in its own subshell: its .env written or its variable exported, check_budgets run, its status and
+        // lines printed NUL-separated
+        const loop = `set -uo pipefail\n${fns.join("")}\nname="$1" where="$2" env="$3"; shift 3\nfor v in "$@"; do\n  if [[ "$where" == env ]]; then printf 'KEY=%s\\nHELPER_RELEASE=3\\n%s=%s\\n' "${SECRET}" "$name" "$v" > "$env"; else printf 'KEY=%s\\nHELPER_RELEASE=3\\n' "${SECRET}" > "$env"; fi\n  out="$( ( [[ "$where" == shell ]] && export "$name=$v"; check_budgets "$env" ) 2>&1 )"; st=$?\n  printf '%s\\0%s\\0' "$st" "$out"\ndone\n`;
+        const r = spawnSync("bash", ["-c", loop, "loop", name, where, env, ...values], { encoding: "utf8", env: { ...process.env, ...TEST_KEYS } });
+        assert.equal(r.status, 0, r.stderr);
+        const parts = r.stdout.split("\0");
+        assert.equal(parts.length, 2 * values.length + 1, `one verdict per value: ${r.stdout.slice(0, 200)}`);
+        values.forEach((v, i) => {
+          const [st, out] = [Number(parts[2 * i]), parts[2 * i + 1]];
+          const label = `${name}=${JSON.stringify(v)} in the ${where}`;
+          assert.equal(st === 0, helperTakes(name, v), `${label}: check_budgets ${st === 0 ? "takes" : "refuses"} it, the helper ${helperTakes(name, v) ? "takes" : "refuses"} it: ${out}`);
+          if (st === 0) return;
+          refused++;
+          assert.match(out, new RegExp(`redeploy: ${name} in (this shell|deploy/\\.env) is not a budget the helper takes; nothing changed`), label);
+          if (v.trim() !== "") assert.ok(!out.includes(v.trim()), `${label}: the value is never printed`);
+          assert.ok(!out.includes(SECRET), label);
+        });
+      }
+    }
+    assert.ok(refused >= 4 * 40, `refused ${refused}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("a budget variable the helper would refuse, in deploy/.env or in the shell, stops the redeploy with nothing changed; the rule is budgetFromEnv's", () => {
   const s = server();
   try {
     let refused = 0;
     for (const name of ["RPC_BUDGET_SOLANA", "PROXY_BUDGET_JUPITER"]) {
-      for (const v of values) {
+      for (const v of FULL_RUN) {
         const takes = helperTakes(name, v);
         for (const where of ["env", "shell"]) {
           const body = where === "env" ? `KEY=${SECRET}\nHELPER_RELEASE=3\nHELPER_COMMIT=${s.A}\n${name}=${v}\n` : `KEY=${SECRET}\nHELPER_RELEASE=3\nHELPER_COMMIT=${s.A}\n`;
@@ -343,13 +384,13 @@ test("a budget variable the helper would refuse, in deploy/.env or in the shell,
         }
       }
     }
-    assert.ok(refused >= 40, `refused ${refused}`);
+    assert.ok(refused >= 4 * 5, `refused ${refused}`);
     // a budget line not in the plain form is refused the same way
     writeFileSync(s.env, `HELPER_RELEASE=3\nexport RPC_BUDGET_BASE=100,16\n`, { mode: 0o600 });
     const r = s.run(s.B);
     assert.notEqual(r.status, 0, r.out);
     assert.match(r.out, /RPC_BUDGET_BASE in deploy\/\.env is not one plain RPC_BUDGET_BASE=<value> line; nothing changed/);
-    const taken = ["RPC_BUDGET_SOLANA", "PROXY_BUDGET_JUPITER"].reduce((k, name) => k + values.filter((v) => helperTakes(name, v)).length, 0);
+    const taken = ["RPC_BUDGET_SOLANA", "PROXY_BUDGET_JUPITER"].reduce((k, name) => k + FULL_RUN.filter((v) => helperTakes(name, v)).length, 0);
     assert.equal(s.docker().filter((l) => l.includes("|compose up ")).length, 2 * taken, "compose ran only for the values the helper takes");
   } finally {
     s.done();
