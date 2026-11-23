@@ -13,7 +13,7 @@ const SRC = fileURLToPath(new URL("../src/", import.meta.url));
 const CORE_FILE = path.join(SRC, "core.ts");
 const WALLET = fileURLToPath(new URL("../../wallet/", import.meta.url));
 
-/** The values core exports, and its types: 89 names in all. */
+/** The values core exports, and its types: 91 names in all. */
 const VALUES = [
   "RESTORE_GAP", "RESTORE_LANES", "entropyToWords", "noteCommitment", "noteSecrets", "refKey", "restoreNotes", "restorePages", "typedSeed", "walkLane", "wordsToSeed64",
   // card exit-ids-out: the ids' keys and their moves out
@@ -33,8 +33,10 @@ const VALUES = [
   "freshWallet", "solFirstAccount", "solanaPool", "solanaContextOf",
   // card wallet-u-restore-exit: the deposit ids' walk and its NEAR reader on one pass block (step 5's U ids)
   "restoreDepositIds", "DEPOSIT_ID_MARGIN", "nearIdReader", "openRestorePass",
+  // and the pools' one-time wallets U_X: a lane's walk end, and U^evm_{s,i}'s address
+  "walkEnd", "evmExitU",
 ];
-const TYPES = ["IdReader", "IdState", "LaneIds", "DepositIds", "RestorePass","LaneWalk", "NoteRef", "NoteRestore", "RestoredNote", "RestoredSpend", "BuiltMove", "MoveOutReadFor", "MoveOutRpc", "OwnKey", "RegisterOutReadFor", "WithdrawOutReadFor", "SettleReadFor", "DeleteReadFor", "SolanaRestoredNote", "SolanaRestoredSpend", "EvmRestoredNote", "EvmRestoredSpend", "EvmPoolPin", "EvmRelayData", "EvmRpc", "EvmExitProof", "EvmExitSigner", "EvmExitTx", "SolanaFeeAnswer", "SolanaReleaseRequest"];
+const TYPES = ["IdReader", "IdState", "LaneIds", "DepositIds", "RestorePass", "LaneWalk", "NoteRef", "NoteRestore", "RestoredNote", "RestoredSpend", "BuiltMove", "MoveOutReadFor", "MoveOutRpc", "OwnKey", "RegisterOutReadFor", "WithdrawOutReadFor", "SettleReadFor", "DeleteReadFor", "SolanaRestoredNote", "SolanaRestoredSpend", "EvmRestoredNote", "EvmRestoredSpend", "EvmPoolPin", "EvmRelayData", "EvmRpc", "EvmExitProof", "EvmExitSigner", "EvmExitTx", "SolanaFeeAnswer", "SolanaReleaseRequest"];
 
 /** Every name core.ts exports, as its export declarations write them (types included). */
 function declaredNames(file: string): string[] {

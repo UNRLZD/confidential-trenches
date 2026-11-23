@@ -39,7 +39,22 @@ import {
   type VaultProver,
   type VaultSnarkjsProof,
 } from "@blindfill/kit";
-import { changeIndex, freshWallet, noteSecrets, solFirstAccount, solanaContextOf, solanaPool, solanaPoolOf, type SolanaRestoredNote, type SolanaRestoredSpend } from "@blindfill/kit/core";
+import {
+  changeIndex,
+  depositId,
+  freshWallet,
+  noteSecrets,
+  restoreDepositIds,
+  RESTORE_GAP,
+  RESTORE_LANES,
+  solFirstAccount,
+  solanaContextOf,
+  solanaPool,
+  solanaPoolOf,
+  walkEnd,
+  type SolanaRestoredNote,
+  type SolanaRestoredSpend,
+} from "@blindfill/kit/core";
 import type { ExitChain, ExitCtx, ExitResult } from "./chain.ts";
 import { fundedOrWait, units } from "./fund.ts";
 import { exitProver } from "./prover.ts";
@@ -287,21 +302,40 @@ function proofBytes(p: VaultSnarkjsProof): Uint8Array {
   return out;
 }
 
-/** W's send onward of all it holds less its fee to `to`: built, signed by W (its key zeroed at once), sent, read back. */
-async function sendOnward(rpcs: Pair, seed64: Uint8Array, l: bigint, j: number, to: string, sleep: (ms: number) => Promise<void>, notTo: readonly string[]): Promise<{ signature: string; amount: bigint } | null> {
-  const w = freshWallet(seed64, "sol", l, j);
+/** A wallet of the words that sends on: its address and its key, derived anew at each call so each copy is zeroed. */
+type SolKeyOf = () => { address: string; secretKey: Uint8Array };
+/** W_{sol, l, j}, a fresh wallet of the release. */
+const wKeyOf = (seed64: Uint8Array, l: bigint, j: number): SolKeyOf => () => freshWallet(seed64, "sol", l, j);
+/** U_X of a pool deposit (scope, i) on Solana: the deposit id's own ed25519 key, its address the base58 of the id's 32
+ *  bytes (the wallet's pool deposit quote, packages/wallet/src/deposit/quote.ts: "On Solana U_X is that very key"). */
+export const solUxKeyOf = (seed64: Uint8Array, scope: bigint, i: number): SolKeyOf => () => {
+  const k = depositId(seed64, scope, i);
+  return { address: b58encode(k.publicKey), secretKey: k.secretKey };
+};
+
+/**
+ * The send onward of all a wallet of the words holds less its fee to `to` (W after its release, or a pool deposit's
+ * U_X): built, signed by that wallet alone (its key zeroed at once), sent, read back. `who` names it in a stop. A
+ * balance not above its own fee stops the run, unless `under` is given: then it is told there and nothing is sent.
+ */
+async function sendOnward(rpcs: Pair, keyOf: SolKeyOf, who: string, to: string, sleep: (ms: number) => Promise<void>, notTo: readonly string[], under?: (balance: bigint, fee: bigint) => void): Promise<{ signature: string; amount: bigint } | null> {
+  const w = keyOf();
   w.secretKey.fill(0);
   if (to === w.address || notTo.includes(to)) throw new ExitSolRefused(`the Solana address ${to} is an account of the release`);
   const balance = await agreedBalance(rpcs, w.address, sleep);
   if (balance === 0n) return null;
   const bh = await blockhashOf(rpcs);
   const fee = await feeOf(rpcs, solOnwardMessage(w.address, to, balance, bh.blockhash));
-  if (balance <= fee) stop(`W ${w.address} holds ${balance} lamports, not more than its own fee ${fee}`);
+  if (balance <= fee) {
+    if (under === undefined) stop(`${who} ${w.address} holds ${balance} lamports, not more than its own fee ${fee}`);
+    under!(balance, fee);
+    return null;
+  }
   const message = solOnwardMessage(w.address, to, balance - fee, bh.blockhash);
-  const signer = freshWallet(seed64, "sol", l, j);
+  const signer = keyOf();
   let sig: Uint8Array;
   try {
-    if (signer.address !== w.address) stop("W is not the one the bytes were built for");
+    if (signer.address !== w.address) stop(`${who} is not the one the bytes were built for`);
     sig = ed25519.sign(message, signer.secretKey);
   } finally {
     signer.secretKey.fill(0);
@@ -309,8 +343,24 @@ async function sendOnward(rpcs: Pair, seed64: Uint8Array, l: bigint, j: number, 
   const signed = wireOf(message, [sig]);
   const signature = b58encode(sig);
   const got = await sendAndRead(rpcs, signed, signature, bh.lastHeight, sleep);
-  if (got !== "ok") stop(`W's send onward ${signature} ${got === "failed" ? "failed" : "did not land"}`);
+  if (got !== "ok") stop(`${who}'s send onward ${signature} ${got === "failed" ? "failed" : "did not land"}`);
   return { signature, amount: balance - fee };
+}
+
+/**
+ * What a pool deposit's U_X shows, for the wallet's deposit id walk (restoreDepositIds, the IdReader contract of
+ * packages/wallet/src/restore/wallets.ts): "money" while it holds lamports, both RPCs reading the same balance; else
+ * "used" when either RPC lists a signature for it (one provider may hide history); "unused" only when both list none.
+ * Anything else throws, so the walk lists the id unread and never counts it unused.
+ */
+export async function solUxState(rpcs: Pair, address: string, sleep: (ms: number) => Promise<void>): Promise<"money" | "used" | "unused"> {
+  if ((await agreedBalance(rpcs, address, sleep)) > 0n) return "money";
+  const sigs = await both(rpcs, async (rpc) => {
+    const a = await rpc("getSignaturesForAddress", [address, { limit: 1, commitment: "confirmed" }]);
+    if (!Array.isArray(a)) throw new Error(`an RPC listed no signatures array for U_X ${address}`);
+    return a.length;
+  });
+  return sigs.some((n) => n > 0) ? "used" : "unused";
 }
 
 /** The cluster whose release pair ctx.rpcs is, or a refusal before any read. */
@@ -354,7 +404,7 @@ export function solExitWith(over: SolExitOver = {}): ExitChain {
     try {
       // the resume: a W of ours still holding lamports (its release landed, its send onward did not) is sent on first
       for (const s of scan.spends) {
-        const on = await sendOnward(rpcs, ctx.seed, s.l, s.j, to, sleep, [poolAccount, program]);
+        const on = await sendOnward(rpcs, wKeyOf(ctx.seed, s.l, s.j), "W", to, sleep, [poolAccount, program]);
         if (on === null) continue;
         txs.push(on.signature);
         sent += on.amount;
@@ -483,12 +533,46 @@ export function solExitWith(over: SolExitOver = {}): ExitChain {
         left -= leaf.value;
         ctx.say(`released ${units(leaf.value, 9)} SOL to ${w.address}: tx ${signature}`);
 
-        const on = await sendOnward(rpcs, ctx.seed, l, j, to, sleep, releaseAccounts.filter((k) => k !== w.address));
+        const on = await sendOnward(rpcs, wKeyOf(ctx.seed, l, j), "W", to, sleep, releaseAccounts.filter((k) => k !== w.address));
         if (on === null) stop(`W ${w.address} reads empty after its release`);
         txs.push(on!.signature);
         sent += on!.amount;
         ctx.say(`sent ${units(on!.amount, 9)} SOL to ${to}: tx ${on!.signature}`);
       }
+
+      // the pool deposits' one-time wallets U_X (card wallet-u-restore-exit): a delivery 1Click left there, a refund
+      // carried back, what a carry left under one deposit's floor. U_X's key is the deposit id's HKDF key, which no
+      // outside wallet imports, so this is its only way out with the words alone. Which U_X to read is the wallet's own
+      // deposit id walk (each lane to DEPOSIT_ID_MARGIN never-used ids past its highest note or history), each U_X read on
+      // both RPCs, one address a request; each one holding lamports sends all of it less its own fee to the typed
+      // address, U_X its only signer and fee payer, as W's onward send. What is under its fee is told and stays.
+      const deposits = scan.notes.filter((n) => n.ref.kind === "deposit" && n.ref.s === scope);
+      const laneHighest: (number | null)[] = Array<number | null>(RESTORE_LANES).fill(null);
+      for (const n of deposits) if (n.ref.kind === "deposit") laneHighest[n.ref.i % RESTORE_LANES] = Math.max(laneHighest[n.ref.i % RESTORE_LANES] ?? n.ref.i, n.ref.i);
+      const laneWalked = laneHighest.map((h, lane) => walkEnd(lane, h === null ? [] : [h], RESTORE_GAP));
+      const ids = await restoreDepositIds(ctx.seed, scope, { notes: deposits, laneHighest, laneWalked }, (_id, i) => {
+        const k = solUxKeyOf(ctx.seed, scope, i!)();
+        k.secretKey.fill(0);
+        return solUxState(rpcs, k.address, sleep);
+      });
+      for (const x of ids.lanes) {
+        for (const i of x.money) {
+          const k = solUxKeyOf(ctx.seed, scope, i)();
+          k.secretKey.fill(0);
+          const on = await sendOnward(rpcs, solUxKeyOf(ctx.seed, scope, i), "U_X", to, sleep, [poolAccount, program], (b, fee) => {
+            left += b;
+            ctx.say(`U_X ${k.address} holds ${units(b, 9)} SOL, not more than its own fee of ${units(fee, 9)} SOL: it stays`);
+          });
+          if (on === null) continue;
+          txs.push(on.signature);
+          sent += on.amount;
+          ctx.say(`sent ${units(on.amount, 9)} SOL left on U_X ${k.address} to ${to}: tx ${on.signature}`);
+        }
+      }
+      const unread = ids.lanes.flatMap((x) => x.unread.map((u) => `index ${u.i} (${u.error})`));
+      const reach = ids.lanes.filter((x) => x.reach !== null).map((x) => `lane ${x.lane} at ${String(x.reach)}`);
+      if (unread.length > 0 || reach.length > 0)
+        stop(`a pool deposit's U_X is not read: ${[...unread.map((u) => `unread ${u}`), ...reach.map((r) => `history past the walk's end in ${r}`)].join("; ")}`);
     } catch (e) {
       fail(e);
     }

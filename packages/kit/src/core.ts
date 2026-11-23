@@ -79,3 +79,7 @@ export { solanaPool, solanaContextOf, type SolanaFeeAnswer, type SolanaReleaseRe
 // tool finds each one-time id U_{s,i} by the wallet's own rule and miss limit (vault paper 2.12 steps 1 and 5)
 export { restoreDepositIds, DEPOSIT_ID_MARGIN, type IdReader, type IdState, type LaneIds, type DepositIds } from "../../wallet/src/restore/wallets.ts";
 export { nearIdReader, openRestorePass, type RestorePass } from "../../wallet/src/restore/id-reader.ts";
+// and for the pools' one-time wallets U_X: a lane's walk end at the pools' gap (each pool's restore returns notes only),
+// and U^evm_{s,i}'s address, whose plain send evmExitSignSend signs as W's
+export { walkEnd } from "../../wallet/src/notes/restore.ts";
+export { evmExitU } from "../../wallet/src/pool/evm-exit.ts";
