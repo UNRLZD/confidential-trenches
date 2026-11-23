@@ -12,9 +12,10 @@ import { IDBFactory } from "fake-indexeddb";
 import { untilAborted } from "../../kit/src/abort.ts";
 import { NEAR_NETWORKS } from "../src/deposit/account.ts";
 import type { DepositOp, FollowRecord } from "../src/deposit/follow.ts";
-import { buildMoveOut, buildRegisterOut, buildWithdrawOut, checkMoveCalls, checkRegisterCalls, checkWithdrawCalls, readWithdrawOut, GAS_PRICE_MARGIN, MOVE_GAS, moveCalls, withdrawCalls, type MoveOutRecord, MoveOutRefused, type MoveOutRpc, moveOutHeld, SETTLE_BLOCKS, signedBlockHash, TX_VALIDITY_BLOCKS } from "../src/deposit/moveout.ts";
+import { buildMoveOut, ID_KEEP, buildRegisterOut, buildWithdrawOut, checkMoveCalls, checkRegisterCalls, checkWithdrawCalls, readWithdrawOut, GAS_PRICE_MARGIN, MOVE_GAS, moveCalls, withdrawCalls, type MoveOutRecord, MoveOutRefused, type MoveOutRpc, moveOutHeld, SETTLE_BLOCKS, signedBlockHash, TX_VALIDITY_BLOCKS } from "../src/deposit/moveout.ts";
 import * as d from "../src/derive/index.ts";
 import { depositId } from "../src/derive/keys.ts";
+import type { NoteRecord } from "../src/notes/store.ts";
 import { openWalletStore, type WalletStore } from "../src/store/index.ts";
 
 const SEED = d.wordsToSeed64(d.entropyToWords(new Uint8Array(16)));
@@ -902,6 +903,80 @@ test("M1 U's lock held elsewhere (a deposit follow of U): nothing read for a sig
   assert.equal(seedOpens, 0);
 });
 
+// U's bind call (follow.ts bindPhase, a NEP-366 delegate from U's key) as the note store keeps it: an INCOMING note
+const bindNote = (nonce: bigint, max_block_height: bigint) =>
+  ({ id: "n1", state: "INCOMING", calls: [{ signed_delegate: "AA==", sender_id: U, receiver_id: TOKEN, nonce, max_block_height, public_key: "ed25519:x", balance: 2_500_000n, tx_hashes: [] }] }) as unknown as NoteRecord;
+
+test("BIND-OUT a tap while U's bind call is out (nonce above U's, within max_block_height) signs nothing until U's nonce reads it used, then decides on the new read: the bind took U's USDC, so empty, never a failed move (re-review FIX FIRST 2)", async () => {
+  const chain = new Chain();
+  chain.registered.add(TO);
+  seedOpens = 0;
+  let slept = 0;
+  const sleep = async () => {
+    slept++;
+    assert.equal(chain.sent.length, 0, "nothing sent while the bind call is out");
+    assert.equal(seedOpens, 0, "the seed is not opened while the bind call is out");
+    if (slept === 2) {
+      // the bind landed: U's nonce passed the call, U's USDC went into the vault
+      chain.nonce = 8n;
+      chain.usdc = 0n;
+    }
+  };
+  const out = await moveOutHeld("op1", TO, { ...deps(await heldOp("sender_struck"), chain), sleep, notes: { list: async () => [bindNote(8n, 1100n)] } });
+  assert.deepEqual(out, { kind: "empty" });
+  assert.ok(slept >= 2, "the tap waited for the call");
+  assert.equal(chain.sent.length, 0);
+  assert.equal(seedOpens, 0);
+});
+
+// re-review FIX FIRST 2, follow-up: the tap never waits while it holds U's lock. A bind call written but not yet sent goes
+// out only in a follow round, which needs U's lock: a tap waiting inside it would wait out the call's lapse (about 126
+// blocks) on a tap. It waits outside the lock, so the round sends the call and the tap decides once it is final.
+test("BIND-UNSENT a tap while U's bind call is written but not yet sent: the tap waits with U's lock free, the round sends the call, and the tap decides once it is used (empty), never after its lapse", async () => {
+  const chain = new Chain();
+  chain.registered.add(TO);
+  seedOpens = 0;
+  let locked = false;
+  let heldWaits = 0;
+  let sent = false;
+  const uLock = async <T,>(fn: () => Promise<T>): Promise<T | null> => {
+    locked = true;
+    try {
+      return await fn();
+    } finally {
+      locked = false;
+    }
+  };
+  const sleep = async () => {
+    if (locked) {
+      // the round cannot run: after a while the call lapses unsent (final height past max_block_height + LAPSE_MARGIN)
+      if (++heldWaits > 3) chain.a.height = chain.b.height = 1100 + 200;
+      return;
+    }
+    if (!sent) {
+      // U's lock is free: the follow round sends the written call, it lands, the bind takes U's USDC
+      sent = true;
+      chain.nonce = 8n;
+      chain.usdc = 0n;
+    }
+  };
+  const out = await moveOutHeld("op1", TO, { ...deps(await heldOp("sender_struck"), chain), sleep, uLock, notes: { list: async () => [bindNote(8n, 1100n)] } });
+  assert.equal(heldWaits, 0, "the tap waited while holding U's lock");
+  assert.deepEqual(out, { kind: "empty" }, "decided on the read after the call landed");
+  assert.equal(chain.sent.length, 0);
+  assert.equal(seedOpens, 0);
+});
+
+test("BIND-OVER a tap while U's bind call is over (final height past max_block_height + LAPSE_MARGIN, nonce unused) decides at once: it moves", async () => {
+  const chain = new Chain();
+  chain.registered.add(TO);
+  // the only wait is the send's own FINAL read, after it is sent
+  const sleep = async () => assert.ok(chain.sent.length > 0, "no wait before the send for a call that can never land");
+  const out = await moveOutHeld("op1", TO, { ...deps(await heldOp("sender_struck"), chain), sleep, notes: { list: async () => [bindNote(8n, 994n)] } });
+  assert.equal(out.kind, "moved");
+  assert.equal(decode(chain.sent[0]!).nonce, 8n);
+});
+
 test("L1 the payload rule refuses the vault and intents.near, called straight", async () => {
   for (const to of [NET.vault!, "intents.near"]) {
     assert.throws(() => checkMoveCalls(U, to, TOKEN, moveCalls(to, 1n, false, 0n), 2_500_000n, 0n), MoveOutRefused);
@@ -1160,6 +1235,23 @@ test("F3 a forgotten landed move, then a late 2,000,000 reaches U: open, and a t
   assert.notEqual(await whyOf(r.ops, "op1"), "moved_out");
   assert.equal(((await r.ops.get("ops", "op1")) as DepositOp).follow.out_past?.at(-1)?.amount, "2000000");
   assert.equal(seedOpens, 1);
+});
+
+// Card held-move-follow-resume, end state 5 (ruling (b)): the move's record keeps only what it moved
+// (MoveOutRecord.amount = read.usdc - ID_KEEP, src/deposit/moveout.ts), so dust after it and a real refund are the same
+// fact to the device: U at ID_KEEP + 2 after a landed move reopens the op (Held), and a tap moves those 2 units to the
+// typed account. Its landed move is under MIN_DEPOSIT and marks no op, so the page's answer is the plain empty (delta
+// review 10, F1); a tap after it signs nothing and answers empty again: no error, no loop, no busy
+test("held-move-follow-resume end state 5: dust of 2 units after a landed move (U at ID_KEEP + 2): open, a tap moves the 2 units and answers empty, a second tap signs nothing", async () => {
+  const r = await landedThenForgotten(ID_KEEP + 2n);
+  assert.deepEqual(r.again, { kind: "open" });
+  let sent = 0;
+  r.chain.onSend = (_s, h) => (sent++, r.chain.land(h));
+  assert.deepEqual(await moveOutHeld("op1", TO, deps(r.ops, r.chain)), { kind: "empty" });
+  assert.equal(sent, 1, "the tap signed and sent one move");
+  assert.equal(r.chain.usdc, ID_KEEP, "the 2 units moved; U keeps its one base unit");
+  assert.deepEqual(await moveOutHeld("op1", TO, deps(r.ops, r.chain)), { kind: "empty" });
+  assert.equal(sent, 1, "a second tap signs nothing");
 });
 
 test("F3 an op already moved_out, then a late 2,000,000 reaches U: a resume answers open (the record is history), a tap moves it; while U holds 1, or with no equal read of U, it stays moved", async () => {
@@ -2238,4 +2330,18 @@ test("a move both of the pair read FINAL success is moved on their word, its non
   assert.equal(out.kind, "moved");
   assert.equal(asked, 0);
   assert.equal(((await ops.get("ops", "op1")) as DepositOp).follow.why, "moved_out");
+});
+
+test("held-move-follow-resume 4: a record taken as replaced while U holds more keeps it in the op's history (out_past); a later tap moves what U holds, and the op names both its moves, the replaced one read from out_past", async () => {
+  const r = await landedThenForgotten(5_000_000n);
+  assert.deepEqual(r.again, { kind: "open" }, "replaced: U holds more than 1 base unit");
+  assert.deepEqual(r.op.follow.out_past?.map((x) => x.hash), [r.hash], "the replaced record kept as the op's history");
+  r.chain.onSend = (_s, h) => r.chain.land(h);
+  const tap = await moveOutHeld("op1", TO, deps(r.ops, r.chain));
+  assert.equal(tap.kind, "moved");
+  const op = (await r.ops.get("ops", "op1")) as DepositOp;
+  assert.equal(op.follow.why, "moved_out", "the later tap names op1 as the op it moved");
+  assert.equal(op.follow.out?.hash, (tap as { hash: string }).hash);
+  assert.deepEqual(op.follow.out_past?.map((x) => x.hash), [r.hash], "the replaced record still read from out_past after the later tap");
+  assert.deepEqual(await moveOutHeld("op1", null, deps(r.ops, r.chain)), { kind: "moved", to: TO, amount: 4_999_999n, hash: (tap as { hash: string }).hash }, "a resume names the op's move");
 });

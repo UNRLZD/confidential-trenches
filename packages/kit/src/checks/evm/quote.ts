@@ -2107,7 +2107,7 @@ const gapsOf = (spans: Spans, lo: number, hi: number): Spans => {
 // twice it, is asked at the next quote's own amount, or twice it (atAmount)
 // `early`: the reads of its routes through X's markets that its fourth round did not take (card
 // evm-warm-tap-reads-in-one-round), asked beside the next quote's first round as their own read (earlyFirst)
-const PLANS = new Map<string, { ts: bigint; amount: bigint; reads: Read[]; scans: { cs: string[]; kind: ScanKind }[]; xs: string[]; early: Read[] }>();
+const PLANS = new Map<string, { ts: bigint; amount: bigint; reads: Read[]; scans: { cs: string[]; kind: ScanKind }[]; xs: string[]; early: Read[]; held: Read[] }>();
 /** A kept read of a quote at `from` as the same read at `to` (card evm-quote-warm-from-the-coin-page: the coin page's
  *  warm quotes the coin before the amount is typed): each 32-byte word of its calldata that is `from` becomes `to`, and
  *  each that is twice `from` becomes twice `to`, so a route's quote at the amount and at twice it (quoteCall, v4Read,
@@ -3260,10 +3260,16 @@ export function evmHedgeAfter(url: string | undefined, kind: string): number | n
   const sorted = [...t].sort((a, b) => a - b);
   return Math.max(EVM_HEDGE_MS, sorted[Math.ceil(0.95 * sorted.length) - 1]!);
 }
+/** When `u`'s hold ends: by this ranking's own measure, or by any reader's throttle of the provider (pace.ts, its hold's
+ *  end kept). */
+const heldTill = (u: string, s: { held: number } | undefined): number => Math.max(s?.held ?? 0, evmProviderHeldMs(u, 0));
 const timed = (url: string, rpc: EvmRpc): EvmRpc => {
   const f: EvmRpc = async (calls, signal, sent) => {
     const t = performance.now();
     const s = speedOf(url);
+    // the half-open provider's probe (rankClass): its first post since its hold ended
+    const till = heldTill(url, s);
+    const probe = till > 0 && till <= t && s.last < till;
     s.out.push(t);
     // the post's own time on the wire: from its send, past the device's gate and pace (card
     // evm-warm-tap-ends-inside-two-seconds, round F)
@@ -3275,6 +3281,9 @@ const timed = (url: string, rpc: EvmRpc): EvmRpc => {
         wire = performance.now();
         sent?.(c);
       });
+      // still open when this answer came: no answer since the hold ended (a slower post of the probe's round, answered
+      // after an earlier one in time closed it, holds nothing again: review of 7c0291eb2, MEDIUM)
+      const open = s.last < till;
       s.last = performance.now();
       // an answer that names a rate limit or a state the provider does not hold is held, never measured: such an error
       // comes back fast, and a provider past its state cut kept first by it failed every quote's reads (card
@@ -3285,6 +3294,9 @@ const timed = (url: string, rpc: EvmRpc): EvmRpc => {
         const ms = performance.now() - (wire ?? t);
         s.ms = s.ms === null ? ms : s.ms * 0.75 + ms * 0.25;
         const kind = evmPostKind(calls);
+        // a probe answered past its kind's hedge time is held again: in time closes the breaker, late keeps it open
+        // (review of A+B, 3)
+        if (probe && open && ms > (evmHedgeAfter(url, kind) ?? EVM_HEDGE_MS)) s.held = performance.now() + EVM_HOLD_MS;
         const times = s.times.get(kind) ?? [];
         s.times.set(kind, times);
         times.push(ms);
@@ -3311,21 +3323,37 @@ const timed = (url: string, rpc: EvmRpc): EvmRpc => {
   return f;
 };
 /** `urls` in the order a quote asks them: those neither held nor with a request out past EVM_HEDGE_MS by their
- *  measured time (the unmeasured after them, in the venue list's order), then those with a request out, then the held,
- *  each in the same order; a venue's `quoteLast` after all of them, in the same order (card
- *  robinhood-quotes-inside-provider-limits). */
+ *  measured time (the unmeasured after them, in the venue list's order), then those with a request out, each in the same
+ *  order, a half-open one to be probed before a venue's `quoteLast`, which comes after them (card
+ *  robinhood-quotes-inside-provider-limits); then those half open with their probe out, then the held, each in the same
+ *  order (card evm-quote-fewer-rounds). */
 /** A request of `s` out longer than its own measured time (EVM_HEDGE_MS before its first answer): one it is late on. */
 const lateOf = (s: { ms: number | null; out: number[] } | undefined, now: number): number[] => (s === undefined ? [] : s.out.filter((t) => now - t > (s.ms ?? EVM_HEDGE_MS)));
 /** `url`'s class in evmRanked's order, lowest first: 0 free, 1 stalled (a request out past its own measured time and no
- *  answer since it was sent), 2 held, and 3 more for a venue's `quoteLast`. One late request of a provider that answers
- *  the requests sent after it is its load, never its seat (evmRanked): Base's blastapi, one post out 8 s while it answered
+ *  answer since it was sent), 3 more for a venue's `quoteLast`; where its hold has ended and it has answered no post
+ *  since (half open), 2 more until a post is sent to it (the probe), 10 more while that post is out; 20 more where held.
+ *  One late request of a provider that answers the requests sent after it is its load, never its seat (evmRanked): Base's
+ *  blastapi, one post out 8 s while it answered
  *  the rest in about 300 ms, sat behind mainnet.base.org for that post's 8 s at a request out past 400 ms, Base's warm
  *  taps 2.0 to 4.7 s on mainnet.base.org meanwhile (card evm-warm-tap-ends-inside-two-seconds, 2026-11-21 13:0xZ). */
 const rankClass = (u: string, now: number): number => {
   const s = SPEED.get(u);
   const late = lateOf(s, now);
-  // held: by this ranking's own measure, or by any reader's throttle of the provider (pace.ts)
-  return (quoteLastOf().has(u) ? 3 : 0) + ((s !== undefined && s.held > now) || evmProviderHeld(u, now) ? 2 : late.length > 0 && s!.last < Math.min(...late) ? 1 : 0);
+  const last = quoteLastOf().has(u) ? 3 : 0;
+  const till = heldTill(u, s);
+  // A circuit breaker (card evm-quote-fewer-rounds): a held provider is out of the first seats, after every provider not
+  // held, a venue's quoteLast too. Once its hold ends it is half open: the next quote seats it once as the probe, after
+  // the providers that are free and before a venue's quoteLast; while that post is out it waits after every one not held;
+  // an answer closes it (its own rank again), and a post lost holds it again (timed: a loss with no answer since its
+  // send). Never out of the agreement: agreeing still asks it where no other is left. Seated only where the quote ran
+  // short (a third's or a spare's seat), a half-open provider with the rest healthy was never asked, and stayed last
+  // (review of A+B, 3). Ranked by class alone, two held providers tied and the faster took a first seat while
+  // held: robinhood.drpc.org, held, sat beside publicnode while bloXroute, held 30 s by one 429, sat behind it and
+  // Robinhood's own RPC, quoteLast, after both; dRPC answered 10 more posts 429 in that tap's next quotes (read only from
+  // macOS, 2026-11-22 17:3xZ)
+  if (till > now) return 20 + last;
+  if (till > 0 && (s?.last ?? 0) < till) return (s?.out.some((t) => t >= till) ? 10 : 2) + last;
+  return last + (late.length > 0 && s!.last < Math.min(...late) ? 1 : 0);
 };
 /** The size a quote's reads are ranked for (evmRanked): its largest round's posts to each provider, and each provider's
  *  in-flight pin. */
@@ -4497,9 +4525,10 @@ async function routeSetOf(a: {
   // warm tap of Base 0x07b3d9 read its two in a round of their own after its second (about 0.3 s from the Mac,
   // 2026-11-19 03:2xZ)
   const earlyFirst: Read[] = [];
+  const heldFirst: Read[] = [];
   if (plan !== undefined && block.timestamp >= plan.ts && block.timestamp - plan.ts <= EVM_WARM_RANGE_S) {
     const own = new Set(reads.map(readKey));
-    // the plan holds no read with a state override (below)
+    // the plan's own reads hold no read with a state override (below); its early ones may, read apart
     for (const kept0 of plan.reads) {
       const r = atAmount(kept0, plan.amount, amountIn);
       const k = readKey(r);
@@ -4511,8 +4540,14 @@ async function routeSetOf(a: {
       const k = readKey(r);
       if (!own.has(k) && !kept.has(k) && !earlyFirst.some((e) => readKey(e) === k)) earlyFirst.push(r);
     }
+    for (const kept0 of plan.held) {
+      const r = atAmount(kept0, plan.amount, amountIn);
+      const k = readKey(r);
+      if (!own.has(k) && !kept.has(k) && !earlyFirst.some((e) => readKey(e) === k) && !heldFirst.some((e) => readKey(e) === k)) heldFirst.push(r);
+    }
   }
   const earlyReading = earlyFirst.length === 0 ? Promise.resolve(null) : readBoth(rpcs, block.hash, earlyFirst, v.reads, undefined, firstDown).catch(() => null);
+  const heldReading = heldFirst.length === 0 ? Promise.resolve(null) : readBoth(rpcs, block.hash, heldFirst, v.reads, undefined, firstDown).catch(() => null);
   // the lower head's confirmation and the reads at its hash in one round; the confirmation is judged first
   const reading = readAgreed(confirm, rpcs, block.hash, reads, v.reads, firstDown);
   if (spec !== null) {
@@ -4530,6 +4565,14 @@ async function routeSetOf(a: {
     earlyFirst.forEach((r, i) => {
       kept.set(readKey(r), reads.push(r) - 1);
       ans.push(earlyAns[i]!);
+    });
+  }
+  // and the reads with a state override (`held`), taken only as kept answers of a later round's very same read
+  const heldAns = await heldReading;
+  if (heldAns !== null) {
+    heldFirst.forEach((r, i) => {
+      kept.set(readKey(r), reads.push(r) - 1);
+      ans.push(heldAns[i]!);
     });
   }
   // the block is the same on both providers: the scan keeps what it read up to it
@@ -5030,13 +5073,25 @@ async function routeSetOf(a: {
   }
   // what the next quote of the token asks in its first round: this one's later reads, and the kept ones it asked again
   PLANS.delete(planKey);
-  // never a read with a state override: it is asked only once this quote's own reads find its pool held (review of
-  // 5452011, S1), so a pool that vanished since never puts its hook's override into a read
+  // never a read with a state override in the first round's own reads: no override answer is used before the
+  // PoolManager holds the pool on both providers at the quote's block (review of 5452011, S1), and a first round's
+  // failure ends the quote
   const planReads = reads.slice(first).filter((r, j) => r.override === undefined && !r.data.startsWith("0x" + SEL_V4_OUT_SINGLE) && (!kept.has(readKey(r)) || hit.has(first + j)) && !untaken.has(first + j));
   const inPlan = new Set(planReads.map(readKey));
-  // the early reads not in the first round's reads: never one with a state override, as above
+  // the early reads not in the first round's reads: never one with a state override, as above (the early routes go only
+  // through hooks none or listed)
+  // and the reads with a state override this quote used, of pools it found held (`held`, card evm-quote-fewer-rounds).
+  // Speculate, then validate: the next quote reads them beside its first round at its own block, their own read apart
+  // from the early routes', so a failure or a disagreement on one ends nothing, and uses an answer only where a later round of
+  // its own asks the very same read (readKey: the pool, the hook, the replaced code and slots, the amount), which it does
+  // only for a pool its first round's state reads find held on both providers at that block (S1); any other answer is
+  // never used, and a read not kept is asked in its round as before. A warm ANT tap on Robinhood read its pools with
+  // their hooks replaced in 2 to 4 rounds after its first, about 0.2 to 0.5 s each (read only from macOS, 2026-11-22
+  // 17:1xZ)
+  const usedHeld = reads.slice(first).filter((r, j) => r.override !== undefined && !r.data.startsWith("0x" + SEL_V4_OUT_SINGLE) && (!kept.has(readKey(r)) || hit.has(first + j)) && !untaken.has(first + j));
   const planEarly = earlyRead.flatMap((i) => (reads[i] === undefined ? [] : [reads[i]!])).filter((r) => r.override === undefined && !inPlan.has(readKey(r)));
-  PLANS.set(planKey, { ts: block.timestamp, amount: amountIn, reads: planReads, scans: asked, xs: [...xPools.keys()], early: planEarly });
+  const planHeld = usedHeld.filter((r, k, all) => all.findIndex((x) => readKey(x) === readKey(r)) === k);
+  PLANS.set(planKey, { ts: block.timestamp, amount: amountIn, reads: planReads, scans: asked, xs: [...xPools.keys()], early: planEarly, held: planHeld });
   while (PLANS.size > PLANS_MAX) PLANS.delete(PLANS.keys().next().value!);
   return { block, out, fills, filled, outOfGas: [...outOfGas.values()] };
 }
