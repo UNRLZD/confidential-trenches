@@ -158,6 +158,46 @@ export function poolDepositQuoteRequest(chain: PoolDepositChain, wallet: string,
 }
 
 /**
+ * A hop's quote (card wallet-hop-onward): `amount` base units of NEAR USDC, all a hop's A_{l,j} holds (`a`, its 64-hex
+ * implicit id), into chain X's pool coin for U_X (`wallet`, the pool's one-time deposit wallet on X: base58 of 32 bytes
+ * on Solana, EIP-55 on Base and Robinhood), asked at `now` (ms). A pays the deposit address by a plain transfer
+ * (depositType ORIGIN_CHAIN, the relayer's onward move, apps/helper/src/bind/onward.ts) and a failed swap refunds to A on
+ * NEAR (refundType ORIGIN_CHAIN), never into intents.near, whose DAO can freeze or move a balance held there. Always on
+ * Confidential Intents rails, as every Move's quote, so A is not linked to U_X. Throws on input that is not that.
+ */
+export function hopQuoteRequest(chain: PoolDepositChain, wallet: string, a: string, amount: bigint, now: number): OneClickRequest {
+  if (typeof chain !== "string" || !Object.hasOwn(POOL_DEPOSIT_DESTINATION, chain)) throw new Error("hop quote: no pool on this chain");
+  if (typeof a !== "string" || !IMPLICIT.test(a)) throw new Error("hop quote: A must be a 64-hex implicit account id");
+  if (typeof wallet !== "string") throw new Error("hop quote: no wallet");
+  if (chain === "solana") {
+    let key: Uint8Array;
+    try {
+      key = base58.decode(wallet);
+    } catch {
+      throw new Error("hop quote: U_X is not a Solana address");
+    }
+    if (key.length !== 32 || base58.encode(key) !== wallet) throw new Error("hop quote: U_X is not a Solana address");
+  } else if (!/^0x[0-9a-fA-F]{40}$/.test(wallet) || toChecksum(wallet) !== wallet) throw new Error("hop quote: U_X is not an EIP-55 address");
+  if (typeof amount !== "bigint" || amount <= 0n) throw new Error("hop quote: the amount must be a positive bigint");
+  if (!Number.isSafeInteger(now) || now <= 0) throw new Error("hop quote: now must be a time in ms");
+  return {
+    dry: false,
+    swapType: "EXACT_INPUT",
+    slippageTolerance: DEPOSIT_QUOTE_SLIPPAGE_BPS,
+    originAsset: DEPOSIT_QUOTE_DESTINATION,
+    depositType: "ORIGIN_CHAIN",
+    destinationAsset: POOL_DEPOSIT_DESTINATION[chain],
+    amount: amount.toString(),
+    refundTo: a,
+    refundType: "ORIGIN_CHAIN",
+    recipient: wallet,
+    recipientType: "DESTINATION_CHAIN",
+    deadline: new Date(now + DEPOSIT_QUOTE_DEADLINE_MS).toISOString(),
+    confidentiality: "advanced",
+  };
+}
+
+/**
  * Where a failed swap's refund lands when a device wallet pays the quote (card refunds-land-on-the-devices-own-wallet):
  * on the origin coin's own chain (refundType ORIGIN_CHAIN), at the quote's own deposit key there, derived on the device:
  * base58 of U_{s,i} on Solana, U^evm_{s,i} on Base and Robinhood. Never INTENTS for such a leg: a refund resting in
