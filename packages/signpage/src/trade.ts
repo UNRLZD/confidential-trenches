@@ -487,6 +487,11 @@ export function tradeKind(host: TradeHost): TradeKind {
 
 export type LegEnd = "filled" | "failed" | "not_landed";
 
+/** A Base or Robinhood trade's op (card signpage-sent-end-recorded-evm): a pool buy's reads "sent" with no tx until its
+ *  release is read back, and its end comes from the chain's read, the run's or a later load's follow
+ *  (pool-buy-evm.ts), never from this settle, which reads Solana's: never refused here, nor a settle made due by it. */
+const evmChainOp = (rec: object): boolean => (rec as { chain?: unknown }).chain === "base" || (rec as { chain?: unknown }).chain === "robinhood";
+
 /**
  * Whether a settle pass is due (re-check of 54cf7a29): the store holds a buy or sell no tab is running that is not
  * settled, whose trade lock no tab holds (locks.query): a wallet's mark, or an op still open (pending, signed, sent)
@@ -501,7 +506,7 @@ export async function tradeSettleDue(store: TradeStore, locks: Pick<LockManager,
   for (const k of await store.keys("ops")) {
     if (ops.has(k)) continue;
     const rec = (await store.get("ops", k)) as { kind?: unknown; stage?: unknown; txs?: unknown } | undefined;
-    if (rec && (rec.kind === "buy" || rec.kind === "sell") && ["pending", "signed", "sent"].includes(String(rec.stage)) && !(Array.isArray(rec.txs) && rec.txs.length > 0)) ops.add(k);
+    if (rec && (rec.kind === "buy" || rec.kind === "sell") && !evmChainOp(rec) && ["pending", "signed", "sent"].includes(String(rec.stage)) && !(Array.isArray(rec.txs) && rec.txs.length > 0)) ops.add(k);
   }
   if (ops.size === 0) return false;
   // the held names, as pool-sell.ts settleDeadSellOps reads them: a probe that took a dead op's lock, outside
@@ -562,7 +567,7 @@ export async function settleTradeOps(store: TradeStore, locks: Locks, providers:
     const marked = new Set((await armRecords(store, "sol")).flatMap((r) => (r.rec.inflight ? [r.rec.inflight.op] : [])));
     for (const k of await store.keys("ops")) {
       const rec = (await store.get("ops", k)) as { kind?: unknown; stage?: unknown; txs?: unknown } | undefined;
-      if (!rec || (rec.kind !== "buy" && rec.kind !== "sell") || !["pending", "signed", "sent"].includes(String(rec.stage)) || marked.has(k)) continue;
+      if (!rec || (rec.kind !== "buy" && rec.kind !== "sell") || evmChainOp(rec) || !["pending", "signed", "sent"].includes(String(rec.stage)) || marked.has(k)) continue;
       if (Array.isArray(rec.txs) && rec.txs.length > 0) continue;
       const live = await locks.request(tradeLock(k), { mode: "exclusive", ifAvailable: true }, async (l) => l === null);
       if (live) continue;

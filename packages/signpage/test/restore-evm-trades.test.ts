@@ -108,3 +108,39 @@ test("a deposit back before the buy, under another note, or with no block read i
     w.close();
   }
 });
+
+// card signpage-sent-end-recorded-evm: the device that bought keeps the buy's one op under its request's id (pool-buy-evm.ts
+// EvmBuyOp); a load's restore that reads the buy again writes no trade/<chain>/<tx> op beside it, so Activity shows one
+// row per buy. A sale of it is still written.
+test("a buy this device's own request op already names (by its transaction) gets no trade op from the restore", async () => {
+  const restoreEvmTrades = (evmSell as Record<string, unknown>).restoreEvmTrades as typeof evmSell.restoreEvmTrades;
+  const w = await openWalletStore({ indexedDB: new IDBFactory() });
+  try {
+    const own = { kind: "buy", stage: "filled", txs: [{ chain: "robinhood", hash: BUY }], created_ms: 1, chain: "robinhood", token: FIX.erc20, legs: [{ w: W }] };
+    await w.put("ops", "3f1c2b8e-0d4a-4b7e-9c1a-2e5f6a7b8c9d", own);
+    assert.equal(await restoreEvmTrades({ chain: "robinhood", read: recorded([]) as never, store: w, spends: [spend], returns: [back] }), 1, "the sale only");
+    assert.equal(await w.get("ops", evmTradeKey("robinhood", BUY)), undefined, "no second op of the buy");
+    assert.deepEqual(await w.get("ops", "3f1c2b8e-0d4a-4b7e-9c1a-2e5f6a7b8c9d"), own);
+  } finally {
+    w.close();
+  }
+});
+
+// review 3: a sent op has no tx until its release is read, so a restore during an open buy names it by the W of one of
+// its legs: no trade op for that W's spend, and the op that ends filled is still the buy's one row. An ended op's W, or
+// another chain's, names nothing by W.
+test("a buy whose request op is not ended yet (no tx on it) is named by its leg's W: the restore writes no trade op beside it", async () => {
+  const restoreEvmTrades = (evmSell as Record<string, unknown>).restoreEvmTrades as typeof evmSell.restoreEvmTrades;
+  const w = await openWalletStore({ indexedDB: new IDBFactory() });
+  try {
+    const open = { kind: "buy", stage: "sent", txs: [], created_ms: 1, chain: "robinhood", token: FIX.erc20, legs: [{ w: W.toUpperCase().replace("0X", "0x") }] };
+    await w.put("ops", "req-open", open);
+    assert.equal(await restoreEvmTrades({ chain: "robinhood", read: recorded([]) as never, store: w, spends: [spend], returns: [] }), 0, "no trade op for the open buy's W");
+    assert.equal(await w.get("ops", evmTradeKey("robinhood", BUY)), undefined);
+    // another chain's open op names nothing here
+    await w.put("ops", "req-open", { ...open, chain: "base" });
+    assert.equal(await restoreEvmTrades({ chain: "robinhood", read: recorded([]) as never, store: w, spends: [spend], returns: [] }), 1, "another chain's op: the buy is written");
+  } finally {
+    w.close();
+  }
+});

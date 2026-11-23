@@ -104,7 +104,74 @@ export type EvmHolding = {
    *  (followPendingEvmBuys); the run that wrote it removes it by its nullifier and deadline (unrecord). */
   buy?: EvmPendingBuy;
 };
-export type EvmPendingBuy = { nullifier: string; from: string; deadlineMs: string; minOut: string; value: string; feeCap: string; feeRecipient: string };
+export type EvmPendingBuy = {
+  nullifier: string;
+  from: string;
+  deadlineMs: string;
+  minOut: string;
+  value: string;
+  feeCap: string;
+  feeRecipient: string;
+  /** The request's op this buy's end goes onto (card signpage-sent-end-recorded-evm, EvmBuyOp: its request's id) and
+   *  this buy's leg in it; device-only. None on a record from before the card: its end writes a trade op
+   *  (writeEvmTradeOp) as before. */
+  op?: string;
+  leg?: number;
+};
+
+/** One leg's end as the request's op keeps it (EvmBuyOp.legs, device-only): its stage and transactions, and on filled
+ *  what it moved (decimal strings): the token's base units W received at the token's decimals, and the ETH into the
+ *  venue in wei, each when read. */
+export type EvmLegEnd = { stage: TradeStage; txs: TxRef[]; out?: string; decimals?: number; wei?: string };
+/** A Base or Robinhood pool buy's op (card signpage-sent-end-recorded-evm), under its request's id, src/state.ts's op
+ *  contract: kind buy, its stage, its txs, its time, chain and token; on filled, the token's whole units every leg
+ *  received, the ETH into the venue and its USD at the page's own price, each only when every leg's is read. Written
+ *  at "sent" (no tx: the release is not read yet) once the run's bytes have left, then ended by its legs: each leg notes
+ *  only its own end (evmBuyOpNoted: the run's own, or a later load's follow from W's holding, EvmPendingBuy.op), and
+ *  once every leg has one the op's stage and txs are the legs' ends by the run's own rule (legsEnd). `legs`, each W and
+ *  its end, is device-only (state.ts opOf sends none of it). */
+export type EvmBuyOp = { kind: "buy"; stage: TradeStage; txs: TxRef[]; created_ms: number; chain: Chain; token: string; units?: string; pool_amount?: string; amount_usd?: string; legs: { w: string; end?: EvmLegEnd }[] };
+
+/** `v`, the request's op, with leg `i`'s end noted (see EvmBuyOp), or undefined when nothing is to be written: no such
+ *  op or leg, or that leg already has an end. A leg's end is never written over, but a refusal on the helper's word,
+ *  which the chain's read replaces (the run posts that end late: runEvmPoolBuy). Once every leg has an end, the op's
+ *  stage is legsEnd's over them, the end's own txs (none: the op's kept), and on filled its figures; an op ended refused
+ *  keeps it over not_landed, as the run tells the app no not_landed after refused. */
+export function evmBuyOpNoted(v: unknown, i: number, end: EvmLegEnd, price: PoolStatePrice | null): EvmBuyOp | undefined {
+  const op = v as Partial<EvmBuyOp> | undefined;
+  if (op?.kind !== "buy" || !Array.isArray(op.legs) || !Number.isInteger(i) || i < 0 || i >= op.legs.length) return undefined;
+  const was = op.legs[i]?.end;
+  if (was !== undefined && (was.stage !== "refused" || end.stage === "refused")) return undefined;
+  const legs = op.legs.map((l, k) => (k === i ? { ...l, end } : l));
+  const next = { ...op, legs } as EvmBuyOp;
+  if (legs.some((l) => l.end === undefined)) return next;
+  const all = legsEnd(legs.map((l) => l.end!));
+  if (op.stage === "refused" && all.stage === "not_landed") return next;
+  const { units: _u, pool_amount: _p, amount_usd: _a, ...rest } = next;
+  return { ...rest, stage: all.stage, txs: all.txs.length > 0 ? all.txs : (op.txs ?? []), ...(all.stage === "filled" ? evmBuyFigures(legs.map((l) => l.end!), price) : {}) };
+}
+
+/** A filled buy's figures from its legs' ends: units when every leg's out is read at one decimals, pool_amount and its
+ *  USD (at `price`) when every leg's ETH into the venue is. */
+function evmBuyFigures(ends: readonly EvmLegEnd[], price: PoolStatePrice | null): Pick<EvmBuyOp, "units" | "pool_amount" | "amount_usd"> {
+  const sum = (xs: readonly (bigint | null)[]): bigint | null => (xs.some((x) => x === null) ? null : xs.reduce<bigint>((s, x) => s + x!, 0n));
+  const d = ends[0]?.decimals;
+  const outs = sum(ends.map((e) => big(e.out)));
+  const units = outs !== null && Number.isInteger(d) && d! >= 0 && d! <= TOKEN_DECIMALS_MAX && ends.every((e) => e.decimals === d) ? poolUnits(outs, d!) : null;
+  const wei = sum(ends.map((e) => big(e.wei)));
+  const usd = wei === null || price === null ? null : usdOf(wei, 18, price);
+  return { ...(units === null ? {} : { units }), ...(wei === null ? {} : { pool_amount: poolUnits(wei, 18) }), ...(usd === null ? {} : { amount_usd: usd }) };
+}
+
+/** The request's op and leg a record names (W's holding's EvmPendingBuy.op, or a rest record's: pool-buy-evm-rest.ts
+ *  EvmWBuyRecord.op), held to the shapes this device writes; null: none. */
+export const opRef = (b: { op?: unknown; leg?: unknown } | undefined): { id: string; leg: number } | null =>
+  typeof b?.op === "string" && /^[\w-]{1,64}$/.test(b.op) && Number.isInteger(b.leg) && (b.leg as number) >= 0 && (b.leg as number) < 256 ? { id: b.op, leg: b.leg as number } : null;
+
+/** Notes leg `leg`'s end on the request's op `id` (evmBuyOpNoted) at the page's price; a write that fails leaves the op
+ *  as it was (a holding still pending is followed again at the next load; a rest leg, at the carry's next pass). */
+export const noteLeg = (h: Pick<EvmPoolBuyHost, "ops" | "price">, id: string, leg: number, end: EvmLegEnd): Promise<void> =>
+  h.ops === undefined ? Promise.resolve() : h.ops(id, (v) => evmBuyOpNoted(v, leg, end, h.price?.() ?? null)).catch(() => {});
 
 /** A filled Base or Robinhood trade's op (card closed-positions-show-every-trade), src/state.ts's op contract, so the
  *  app's Activity and Portfolio's closed positions read these chains' trades as they read Solana's (apps/terminal
@@ -182,8 +249,13 @@ export type EvmPoolBuyHost = {
   landed?(noteId: string, attempt: string, withdrawn: bigint, block: bigint): void;
   /** An end the reads found after the tap's run answered "sent" at its bound. */
   late?(a: { stage: TradeStage; txs: TxRef[] }): void;
-  /** A filled buy read back (the tap's run or a load's follow): its trade op written (writeEvmTradeOp). */
+  /** A filled buy read back (the tap's run or a load's follow) whose holding names no request op (a record from before
+   *  card signpage-sent-end-recorded-evm): its trade op written (writeEvmTradeOp). */
   traded?(op: EvmTradeOp): Promise<void>;
+  /** The request's id (the kind's ctx.id): the run writes its op (EvmBuyOp) under it, given `ops`. */
+  opId?: string;
+  /** Read-modify-write of one ops record (WalletStore.update: undefined writes nothing): the request's op. */
+  ops?(id: string, change: (v: unknown) => unknown): Promise<void>;
   /** The chain's pool asset's USD price as the page read it (src/pool-price.ts), for the op's USD; null: none. */
   price?(): PoolStatePrice | null;
   /** The notes a run on this page has picked and not finished. */
@@ -615,6 +687,8 @@ export async function runEvmPoolBuy(h: EvmPoolBuyHost, ask: PoolAsk): Promise<Ev
   const wait = h.wait ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const live = (): boolean => h.signal?.aborted !== true;
   const stopped = (): boolean => h.stopped?.() === true;
+  // the request's op (card signpage-sent-end-recorded-evm): only with its id and the store's ops writer
+  const opId = h.ops !== undefined && opRef({ op: h.opId, leg: 0 }) !== null ? h.opId : undefined;
   const settle = (): void => {
     try {
       h.settle();
@@ -696,7 +770,8 @@ export async function runEvmPoolBuy(h: EvmPoolBuyHost, ask: PoolAsk): Promise<Ev
         const data = evmBuyCalldata(h.pin.pool, relay, r.proof, r.publicSignals, fee, built, signature);
         // W's holding, pending, before anything leaves: a write that fails sends nothing
         const want: EvmBuyWant = { nullifier: binding.nullifier, w: w.address, feeRecipient: h.pin.feeRecipient, token, minOut: built.minOut, value: r.chunk, feeCap: fee, deadlineMs: relay.deadlineMs };
-        const buy: EvmPendingBuy = { nullifier: want.nullifier.toString(), from: from.toString(), deadlineMs: want.deadlineMs.toString(), minOut: want.minOut.toString(), value: want.value.toString(), feeCap: want.feeCap.toString(), feeRecipient: lower(want.feeRecipient) };
+        // with the request's op and this leg's place in it: the load's follow ends that op (followPendingEvmBuys)
+        const buy: EvmPendingBuy = { nullifier: want.nullifier.toString(), from: from.toString(), deadlineMs: want.deadlineMs.toString(), minOut: want.minOut.toString(), value: want.value.toString(), feeCap: want.feeCap.toString(), feeRecipient: lower(want.feeRecipient), ...(opId === undefined ? {} : { op: opId, leg: legs.length }) };
         const holding: EvmHolding = { mint: lower(token), decimals, chain: h.chain, state: "pending", route: { venue: q.route.venue, adapter: lower(adapter), path: q.route }, buy };
         // this page follows W from here: the load's follow leaves it to this run until the run's own reads end; a W
         // another follow already holds stays that follow's (this run's pending write is then refused: review P3-F)
@@ -710,7 +785,8 @@ export async function runEvmPoolBuy(h: EvmPoolBuyHost, ask: PoolAsk): Promise<Ev
       }
       if (plan.rest !== null) {
         const r = proofs[plan.whole.length]!;
-        const leg = await prepRest(h, ask, plan, r, quoted, from, clock);
+        // the rest's record names the request's op and this leg, so a later load's carry pass ends it (pool-carry-evm.ts)
+        const leg = await prepRest(h, ask, plan, r, quoted, from, clock, opId === undefined ? undefined : { id: opId, leg: legs.length });
         legs.push({ kind: "rest", leg, st: restState(), data: leg.data, r, nullifier: BigInt(r.publicSignals[1]!) });
       }
       // the takes, awaited before anything leaves: each this very attempt, or refused with the notes HELD
@@ -718,6 +794,13 @@ export async function runEvmPoolBuy(h: EvmPoolBuyHost, ask: PoolAsk): Promise<Ev
         const got = await h.take(l.r.noteId, l.r.attempt, l.nullifier);
         taken = true;
         if (got.attempt !== l.r.attempt) return no();
+      }
+      // the request's op at "sent", before any byte leaves (card signpage-sent-end-recorded-evm): a page that dies while
+      // the helper holds the bytes leaves an op the next load's follow ends from W's holding. No tx until a release is
+      // read, each leg's W; never over an op already there. A write that fails leaves the buy with no op
+      if (opId !== undefined) {
+        const op: EvmBuyOp = { kind: "buy", stage: "sent", txs: [], created_ms: Number(clock()), chain: h.chain, token: lower(token), legs: legs.map((l) => ({ w: lower(l.kind === "whole" ? l.x.w : l.leg.w) })) };
+        await h.ops!(opId, (v) => (v === undefined ? op : undefined)).catch(() => {});
       }
       // the sends: a busy helper waited out while the proof has more than the send margin left and no sign out started
       posted = true;
@@ -753,19 +836,26 @@ export async function runEvmPoolBuy(h: EvmPoolBuyHost, ask: PoolAsk): Promise<Ev
           // release by the two-round final-block rule removes it, as the note's settle frees the note)
           if (l.refused) {
             follows.set(i, later);
+            if (opId !== undefined) await noteLeg(h, opId, i, { stage: "refused", txs: [] });
             return { stage: "refused", txs: [] };
           }
+          // its end noted on the request's op by watch itself, from W's holding (EvmPendingBuy.op)
           const tap = await watch(h, x, tapMore, wait, clock, live);
           if (tap === null) follows.set(i, later);
           return tap;
         }
+        // the rest leg's end, noted on the request's op by this run (W's holding names no pool buy the load follows)
+        const noted = async (e: EvmLegEnd | null): Promise<EvmLegEnd | null> => {
+          if (e !== null && opId !== undefined && live()) await noteLeg(h, opId, i, e);
+          return e;
+        };
         const slowAt = l.r.binding.request.relay.deadlineMs + BigInt(EVM_BUY_FOLLOW_MS);
-        const later = () => finishRest(h, ask, plan, l.leg, l.st, quoted, live, (ms) => wait(clock() > slowAt ? EVM_BUY_SLOW_WAIT_MS : ms), clock, hold);
+        const later = () => finishRest(h, ask, plan, l.leg, l.st, quoted, live, (ms) => wait(clock() > slowAt ? EVM_BUY_SLOW_WAIT_MS : ms), clock, hold).then(noted);
         if (l.refused) {
           follows.set(i, later);
-          return { stage: "refused", txs: [] };
+          return noted({ stage: "refused", txs: [] });
         }
-        const tap = await finishRest(h, ask, plan, l.leg, l.st, quoted, tapMore, wait, clock, hold);
+        const tap = await finishRest(h, ask, plan, l.leg, l.st, quoted, tapMore, wait, clock, hold).then(noted);
         if (tap === null) follows.set(i, later);
         return tap;
       }),
@@ -856,6 +946,13 @@ type Watch = { want: EvmBuyWant; from: bigint; holding: EvmHolding; w: string; s
  *  written. A read that fails is that round's no answer. Not_landed with no release needs two rounds of it at least
  *  EVM_BUY_LAG_MS apart, with no other verdict between them. */
 async function watch(h: EvmPoolBuyHost, x: Watch, more: () => boolean, wait: (ms: number) => Promise<void>, clock: () => bigint, live: () => boolean): Promise<{ stage: TradeStage; txs: TxRef[] } | null> {
+  // the request's op W's holding names (card signpage-sent-end-recorded-evm): each end below is noted on it, its leg's
+  // own; a holding that names none (a record from before the card) writes a filled trade's op by its tx as before
+  const ref = opRef(x.holding.buy);
+  const ended = async (e: EvmLegEnd): Promise<{ stage: TradeStage; txs: TxRef[] }> => {
+    if (ref !== null) await noteLeg(h, ref.id, ref.leg, e);
+    return { stage: e.stage, txs: e.txs };
+  };
   for (let i = 0; i === 0 || more(); i++) {
     if (i > 0) await wait(EVM_BUY_WAIT_MS);
     let v: EvmBuyVerdict;
@@ -873,30 +970,39 @@ async function watch(h: EvmPoolBuyHost, x: Watch, more: () => boolean, wait: (ms
       if (x.none === null) x.none = at;
       if (at - x.none < BigInt(EVM_BUY_LAG_MS)) continue;
       // the chain said it never landed: this run's pending record is removed with the verdict, so the note can buy
-      // again (a removal that fails leaves it: the next buy is refused and the next load's follow tries again)
+      // again (a removal that fails leaves it: the next buy is refused and the next load's follow tries again). The op
+      // is noted first: a page that dies between the two leaves the record pending, and the next load's follow ends it
+      const end = await ended({ stage: "not_landed", txs: [] });
       await h.unrecord(x.w, x.want.nullifier, x.want.deadlineMs).catch(() => {});
-      return { stage: "not_landed", txs: [] };
+      return end;
     }
     x.none = null;
     if (v === null) continue;
     if (v.end === "not_landed") {
       // the nullifier released to another W (the note spent elsewhere: another device on the same words): nothing of
-      // it is W's, so the record ends too (review P3-D)
+      // it is W's, so the record ends too (review P3-D), after the op is noted
+      const end = await ended({ stage: "not_landed", txs: [] });
       await h.unrecord(x.w, x.want.nullifier, x.want.deadlineMs).catch(() => {});
-      return { stage: "not_landed", txs: [] };
+      return end;
     }
     const txs: TxRef[] = [{ chain: h.chain, hash: v.release.tx }];
     const at = { ...x.holding.route, tx: v.release.tx, block: v.release.block.toString() };
     // this run's own release landed: its note's chunk (the device's, never the chain's word) is out of the pool
     if (x.mine !== undefined) h.landed?.(x.mine.noteId, x.mine.attempt, x.mine.chunk, v.release.block);
     if (v.end === "filled") {
+      // the figures: the token W received, and the chunk less the fee the sender charged, what went into the venue; on the
+      // request's op, noted before the holding leaves pending (a page that dies between the two leaves it pending, and
+      // the next load's follow ends the op), or by its tx where the holding names none
+      const end = ref === null ? null : await ended({ stage: "filled", txs, out: v.release.out.toString(), decimals: x.holding.decimals, wei: intoVenue(v.release).toString() });
       await h.record(x.w, { ...x.holding, state: "filled", received: poolUnits(v.release.out, x.holding.decimals), route: at }).catch(() => {});
-      // the trade's op: the token W received, and the chunk less the fee the sender charged, what went into the venue
+      if (end !== null) return end;
       await h.traded?.(evmTradeOp("buy", h.chain, v.release.tx, x.holding.mint, v.release.out, x.holding.decimals, intoVenue(v.release), h.price?.() ?? null, Number(clock()))).catch(() => {});
       return { stage: "filled", txs };
     }
     // withdrawn: W holds the chunk less the fee in ETH; the buy did not fill. The carry puts it back into the pool, from
-    // the chain's own release (no record of this run is its source: a write that fails here loses nothing)
+    // the chain's own release (no record of this run is its source: a write that fails here loses nothing). The op is
+    // noted first, as on filled
+    if (ref !== null) await noteLeg(h, ref.id, ref.leg, { stage: "owed_back", txs });
     await h.record(x.w, { ...x.holding, state: "withdrawn", route: at }).catch(() => {});
     try {
       h.carry?.();
@@ -1075,6 +1181,8 @@ export function evmBuyHost(chain: Chain, pin: EvmPoolPin, rpcs: readonly [EvmRpc
     price: () => page.price?.(chain) ?? null,
     // into the store while it is open
     traded: async (op) => writeEvmTradeOp(await page.held(), op),
+    // the request's op (EvmBuyOp), in the store while it is open
+    ops: async (id, change) => void (await (await page.held()).update("ops", id, change)),
     claimed,
     signal: page.signal,
     stopped: page.stopped,
@@ -1099,6 +1207,8 @@ export function poolBuyEvmKind(host: () => EvmPoolBuyHost & { end?(): void }, lo
         const a = await runEvmPoolBuy(
           {
             ...h,
+            // the request's op under its own id (card signpage-sent-end-recorded-evm)
+            ...(ctx === null ? {} : { opId: ctx.id }),
             hold: (f) => locks.request(WALLET_SEED_LOCK, { mode: "shared" }, f),
             sent: () => {
               if (!answer) answer = { result: { stage: "sent", txs: [] } };
