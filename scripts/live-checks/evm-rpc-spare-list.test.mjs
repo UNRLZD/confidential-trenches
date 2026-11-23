@@ -279,8 +279,8 @@ test("card evm-rpc-spare-list-asks-in-order: run 43722667540's held quotes pass:
   const r = check(inHoldRun());
   assert.equal(r.ok, true, r.lines.join("\n"));
   for (const [n, left] of [["base-hook", [18500, 5831]], ["robinhood-torch", [17400, 3305]]]) {
-    has(r.lines, new RegExp(`^PASS ${n}, first two refused: the first two asked 0 times \\(${left[0]} ms left of the kit's hold on them\\), the third asked 1 times \\(1 getLogs\\)$`));
-    has(r.lines, new RegExp(`^PASS ${n}, first two 503: the first two asked 0 times \\(${left[1]} ms left of the kit's hold on them\\), the third asked 1 times \\(1 getLogs\\)$`));
+    has(r.lines, new RegExp(`^PASS ${n}, first two refused: the first two asked 0 times \\(${left[0]} ms left of the kit's hold on them\\), past the first two asked 1 times \\(the third 1, 1 getLogs\\)$`));
+    has(r.lines, new RegExp(`^PASS ${n}, first two 503: the first two asked 0 times \\(${left[1]} ms left of the kit's hold on them\\), past the first two asked 1 times \\(the third 1, 1 getLogs\\)$`));
     for (const m of ["refused", "503"]) has(r.lines, new RegExp(`^PASS ${n}, first two ${m}: 1 of 2 held quotes met them unheld, 1 asked them`));
   }
 });
@@ -290,7 +290,7 @@ test("card evm-rpc-spare-list-asks-in-order: a held quote outside any hold that 
   for (const c of Object.values(run.cases)) for (const q of c.held) delete q.heldLeftMs;
   const r = check(run);
   assert.equal(r.ok, false);
-  for (const n of ["base-hook", "robinhood-torch"]) for (const m of ["refused", "503"]) has(r.lines, new RegExp(`^FAIL ${n}, first two ${m}: the first two asked 0 times, the third asked 1 times \\(1 getLogs\\)$`));
+  for (const n of ["base-hook", "robinhood-torch"]) for (const m of ["refused", "503"]) has(r.lines, new RegExp(`^FAIL ${n}, first two ${m}: the first two asked 0 times, past the first two asked 1 times \\(the third 1, 1 getLogs\\)$`));
 });
 
 test("card evm-rpc-spare-list-asks-in-order: a mode with no quote that met the first two unheld and asked them fails, as does one that never asks the third", () => {
@@ -304,7 +304,7 @@ test("card evm-rpc-spare-list-asks-in-order: a mode with no quote that met the f
   has(check(asks).lines, /^FAIL robinhood-torch, first two refused: 1 of 2 held quotes met them unheld, 0 asked them/);
   const third = inHoldRun();
   third.cases["base-hook"].held[1].thirdLogs = 0;
-  has(check(third).lines, /^FAIL base-hook, first two refused: the first two asked 0 times \(18500 ms left of the kit's hold on them\), the third asked 0 times \(0 getLogs\)$/);
+  has(check(third).lines, /^FAIL base-hook, first two refused: the first two asked 0 times \(18500 ms left of the kit's hold on them\), past the first two asked 0 times \(the third 0, 0 getLogs\)$/);
 });
 
 // card helper-tape-handover: since 893bbaa43 (card evm-warm-tap-ends-inside-two-seconds) the kit asks a third provider at
@@ -315,14 +315,31 @@ test("card helper-tape-handover: a held quote that asked the third any read pass
   for (const c of Object.values(warmKit.cases)) for (const q of c.held) Object.assign(q, { thirdAsked: 2, thirdLogs: 0 });
   const r = check(warmKit);
   assert.equal(r.ok, true, r.lines.join("\n"));
-  has(r.lines, /^PASS base-hook, first two refused: the first two asked 0 times \(18500 ms left of the kit's hold on them\), the third asked 2 times \(0 getLogs\)$/);
+  has(r.lines, /^PASS base-hook, first two refused: the first two asked 0 times \(18500 ms left of the kit's hold on them\), past the first two asked 2 times \(the third 2, 0 getLogs\)$/);
   const oldKit = check(inHoldRun());
   assert.equal(oldKit.ok, true, oldKit.lines.join("\n"));
   const never = inHoldRun();
   Object.assign(never.cases["robinhood-torch"].held[0], { thirdAsked: 0, thirdLogs: 0 });
   const n = check(never);
   assert.equal(n.ok, false);
-  has(n.lines, /^FAIL robinhood-torch, first two \S+: the first two asked \d+ times.*, the third asked 0 times \(0 getLogs\)$/);
+  has(n.lines, /^FAIL robinhood-torch, first two \S+: the first two asked \d+ times.*, past the first two asked 0 times \(the third 0, 0 getLogs\)$/);
+});
+
+// card evm-rpc-spare-list-past-two: the kit's pace of a spare (pace.ts, Base's Pocket 2 a second, burst 3) passes it
+// unasked when it has no turn free, and the walk goes on to the fourth (Sentio), an ok quote. Release 195's app run
+// 45125809604 (attempt 2, alone) and an A/B on 8e5ff14ee and 51a89d97e (23 Nov 08:1x-08:37Z) each read "the third
+// asked 0" with Sentio carrying every quote; the check FAILed them (red at e9b99240f: the third alone counted).
+test("card evm-rpc-spare-list-past-two: a held quote the fourth carried (the third paced out, asked 0) passes; one that asked nothing past the first two fails", () => {
+  const fourth = inHoldRun();
+  for (const c of Object.values(fourth.cases)) for (const q of c.held) Object.assign(q, { thirdAsked: 0, thirdLogs: 0, spareAsked: 3 });
+  const r = check(fourth);
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  has(r.lines, /^PASS base-hook, first two refused: the first two asked 0 times \(18500 ms left of the kit's hold on them\), past the first two asked 3 times \(the third 0, 0 getLogs\)$/);
+  const none = inHoldRun();
+  Object.assign(none.cases["base-hook"].held[0], { thirdAsked: 0, thirdLogs: 0, spareAsked: 0 });
+  const n = check(none);
+  assert.equal(n.ok, false);
+  has(n.lines, /^FAIL base-hook, first two \S+: the first two asked \d+ times.*, past the first two asked 0 times \(the third 0, 0 getLogs\)$/);
 });
 
 test("card evm-rpc-spare-list-asks-in-order: each mode's first held quote waits out the kit's hold of the first two; the next waits its gap", () => {
@@ -346,6 +363,6 @@ test("card evm-rpc-spare-list-asks-in-order: the good answer recorded on this ca
   assert.equal(r.verdict, "PASS", r.lines.join("\n"));
   for (const n of ["base-hook", "robinhood-torch"]) {
     for (const m of ["refused", "503"]) has(r.lines, new RegExp(`^PASS ${n}, first two ${m}: 2 of 2 held quotes met them unheld|^PASS ${n}, first two ${m}: 1 of 2 held quotes met them unheld, 1 asked them`));
-    has(r.lines, new RegExp(`^PASS ${n}, first two refused: the first two asked 0 times \\(\\d+ ms left of the kit's hold on them\\), the third asked 1 times \\(1 getLogs\\)$`));
+    has(r.lines, new RegExp(`^PASS ${n}, first two refused: the first two asked 0 times \\(\\d+ ms left of the kit's hold on them\\), past the first two asked 1 times \\(the third 1, 1 getLogs\\)$`));
   }
 });
