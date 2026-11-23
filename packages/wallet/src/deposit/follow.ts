@@ -1014,14 +1014,23 @@ async function followU(first: FollowArgs, deps: FollowDeps, signal: AbortSignal,
   // ---------- a held op's way out, still out ----------
   // Whether any op of U holds a move record (moveout.ts follow.out, the op not marked moved_out by it) that can still
   // land: U's key nonce at final on both RPCs below its nonce, and the lower final height not past its block +
-  // MOVE_VALIDITY_BLOCKS. No equal read of U counts as out.
+  // MOVE_VALIDITY_BLOCKS. No equal read of U counts as out. A move whose nonce U's key passed is out too until the lower
+  // final height is REFUND_HEIGHTS past the first that read it passed: the nonce moves at the move's own receipt, its
+  // token transfer debits U at a later one, so U's USDC read in between still holds what the move takes. A move whose
+  // window and REFUND_HEIGHTS were past at that first read ran long ago.
+  const movePassedAt = new Map<string, bigint>(); // move hash -> the lower final height U's nonce was first read past it at
   const moveOutLive = async (): Promise<boolean> => {
     const outs = (await opsOfU()).flatMap(([, op]) => (op.follow.out !== undefined && op.follow.why !== "moved_out" ? [op.follow.out] : []));
     if (outs.length === 0) return false;
     const u = await readU(U, rpcs);
     if (u === null) return true;
     const low = u.heights[0] < u.heights[1] ? u.heights[0] : u.heights[1];
-    return outs.some((r) => u.nonce < BigInt(r.nonce) && low <= BigInt(r.height) + MOVE_VALIDITY_BLOCKS);
+    return outs.some((r) => {
+      const window = BigInt(r.height) + MOVE_VALIDITY_BLOCKS;
+      if (u.nonce < BigInt(r.nonce)) return low <= window;
+      if (!movePassedAt.has(r.hash)) movePassedAt.set(r.hash, low);
+      return low <= window + REFUND_HEIGHTS && low < movePassedAt.get(r.hash)! + REFUND_HEIGHTS;
+    });
   };
 
   // ---------- one round ----------

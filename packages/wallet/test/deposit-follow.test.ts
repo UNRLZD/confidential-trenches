@@ -22,7 +22,7 @@ import { type BindOutcome, bindDeposit, POLL_MS, resetBindSession } from "../src
 import { encodeDelegateAction, RELEASE_BIND_URL } from "../src/deposit/delegate.ts";
 import { TX_VALIDITY_BLOCKS } from "../src/deposit/moveout.ts";
 import * as followTs from "../src/deposit/follow.ts";
-import { DEPOSIT_STATUS_URL, type DepositOp, REFUND_FINAL_BLOCKS, followEnded, readMoveAt, type FollowArgs, type FollowDeps, type FollowMoveAsk, type FollowRecord, followDeposit, type FollowRpc, MOVE_RETRY_MIN_MS, ONECLICK_STATUSES, type OneClickStatus, readCredit, readDepositStatus, SLOW_MS, STATUS_RETRY_MAX_MS, STATUS_STAGE, usdcUnits, usdOf } from "../src/deposit/follow.ts";
+import { DEPOSIT_STATUS_URL, type DepositOp, REFUND_FINAL_BLOCKS, REFUND_HEIGHTS, followEnded, readMoveAt, type FollowArgs, type FollowDeps, type FollowMoveAsk, type FollowRecord, followDeposit, type FollowRpc, MOVE_RETRY_MIN_MS, ONECLICK_STATUSES, type OneClickStatus, readCredit, readDepositStatus, SLOW_MS, STATUS_RETRY_MAX_MS, STATUS_STAGE, usdcUnits, usdOf } from "../src/deposit/follow.ts";
 import * as d from "../src/derive/index.ts";
 import { depositId } from "../src/derive/keys.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../src/notes/secrets.ts";
@@ -332,26 +332,73 @@ test("MOVE-OUT a round while another op of U has its move out (nonce above U's, 
   await heldWithMove(t, n + 1n, t.chain.a.height);
   // before the move: U holds the held op's 3 USDC and this op's delivery; the move takes the 3 USDC
   t.chain.credit(CREDIT + 3_000_000n);
-  // the move lands at the first key read after round 3 (a debit landing between two reads of one round)
-  let armed = false;
+  // the move's nonce moves at the first key read after round 3; its debit lands at the key read REFUND_HEIGHTS later
+  // (a debit landing between two reads of one round: the round reads the move before U's USDC)
+  let stage = 0;
+  let passedAt = 0n;
   const rpcs = t.chain.rpcs().map((r) => ({
     ...r,
     query: async (p: Parameters<FollowRpc["query"]>[0]) => {
-      if (armed && p.request_type === "view_access_key_list") {
-        armed = false;
-        t.chain.a.nonce = t.chain.b.nonce = n + 1n;
-        t.chain.credit(CREDIT);
+      if (p.request_type === "view_access_key_list") {
+        if (stage === 1) {
+          stage = 2;
+          passedAt = t.chain.a.height;
+          t.chain.a.nonce = t.chain.b.nonce = n + 1n;
+        } else if (stage === 2 && t.chain.a.height >= passedAt + REFUND_HEIGHTS) {
+          stage = 3;
+          t.chain.credit(CREDIT);
+        }
       }
       return r.query(p);
     },
   })) as unknown as [FollowRpc, FollowRpc];
   t.onTick.fn = (k) => {
-    if (k !== 3) return;
-    assert.deepEqual(t.binds, [], "no bind while the move is out");
-    assert.equal(t.seeds.length, 0, "the seed is not opened while the move is out");
-    armed = true;
+    if (stage < 3) {
+      assert.deepEqual(t.binds, [], "no bind while the move is out");
+      assert.equal(t.seeds.length, 0, "the seed is not opened while the move is out");
+    }
+    if (k === 3) stage = 1;
   };
   const out = await followDeposit(t.args, { ...t.deps, rpcs });
+  assert.equal(out.kind, "done");
+  assert.deepEqual(t.binds, [{ noteId: t.note.id, amount: CREDIT }]);
+});
+
+// The move's nonce moves at its own receipt; its token transfer debits U at a later one, up to REFUND_HEIGHTS after. A
+// round that read the nonce passed as the debit done would bind USDC the move is about to take: one of the two fails
+// on chain and U pays its gas.
+test("MOVE-RECEIPT a round while another op of U's move reads used but its debit shows only REFUND_HEIGHTS - 1 heights later signs no bind; it binds what U holds once the lower final height is REFUND_HEIGHTS past the first that read the move used", async () => {
+  const t = await setup(["SUCCESS"]);
+  const n = t.chain.a.nonce;
+  await heldWithMove(t, n + 1n, t.chain.a.height);
+  // before the move: U holds the held op's 3 USDC and this op's delivery; the move takes the 3 USDC
+  t.chain.credit(CREDIT + 3_000_000n);
+  let passedAt = 0n;
+  t.onTick.fn = (k) => {
+    assert.deepEqual(t.binds, [], `no bind before the move's debit can have shown (tick ${k})`);
+    if (k === 2) {
+      // the move runs: U's nonce passes it, U's USDC still reads whole
+      passedAt = t.chain.a.height;
+      t.chain.a.nonce = t.chain.b.nonce = n + 1n;
+    }
+    // its token receipt debits U REFUND_HEIGHTS - 1 heights after the nonce moved
+    if (passedAt > 0n && t.chain.a.height === passedAt + REFUND_HEIGHTS - 1n) {
+      t.chain.credit(CREDIT);
+      t.onTick.fn = () => {};
+    }
+  };
+  const out = await followDeposit(t.args, t.deps);
+  assert.equal(out.kind, "done");
+  assert.deepEqual(t.binds, [{ noteId: t.note.id, amount: CREDIT }], "bound what U holds after the move");
+});
+
+// a move whose nonce was used long ago (its validity window and REFUND_HEIGHTS past at the first read) holds no bind
+test("MOVE-RECEIPT-OLD a round while another op of U has a move record read used past its block + TX_VALIDITY_BLOCKS + REFUND_HEIGHTS binds at once", async () => {
+  const t = await setup(["SUCCESS"]);
+  await heldWithMove(t, t.chain.a.nonce, t.chain.a.height - 86_404n);
+  t.chain.credit(CREDIT);
+  t.onTick.fn = (k) => k === 1 && assert.deepEqual(t.binds, [{ noteId: t.note.id, amount: CREDIT }], "bound in the first round");
+  const out = await followDeposit(t.args, t.deps);
   assert.equal(out.kind, "done");
   assert.deepEqual(t.binds, [{ noteId: t.note.id, amount: CREDIT }]);
 });

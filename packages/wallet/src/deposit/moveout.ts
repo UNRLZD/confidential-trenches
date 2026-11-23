@@ -68,7 +68,7 @@ import type { NoteStore } from "../notes/store.ts";
 import type { WalletStore } from "../store/index.ts";
 import { LAPSE_MARGIN, readU } from "./bind.ts";
 import { heightSpreadOver, NEAR_NETWORKS, nearPairNetwork, type NearNetwork, RPC_TIMEOUT_MS } from "./account.ts";
-import { DEPOSIT_STATUS_TIMEOUT_MS, type FollowRpc, followRpc, type DepositOp, readDepositStatus, statusFacts } from "./follow.ts";
+import { DEPOSIT_STATUS_TIMEOUT_MS, type FollowRpc, followRpc, type DepositOp, readDepositStatus, REFUND_HEIGHTS, statusFacts } from "./follow.ts";
 
 /** What the op keeps of its move out (op.follow.out), written before the send: plain values, the signed bytes public. */
 export interface MoveOutRecord {
@@ -1395,13 +1395,23 @@ async function moveOut(opId: string, to: string | null, deps: MoveOutDeps, again
   // a bind call U signed (follow.ts bindPhase, a NEP-366 delegate from U's same key) that can still land: U's key nonce at
   // final on both RPCs below its nonce and the lower final height not past its max_block_height + LAPSE_MARGIN. null: no
   // equal read of U (re-review FIX FIRST 2)
+  // A call whose nonce U's key passed is out too until the lower final height is REFUND_HEIGHTS past the first that read
+  // it passed: the nonce moves at the call's own receipt, the token debits U at a later one (follow.ts REFUND_HEIGHTS),
+  // so U's USDC read in between still holds what the bind takes. A call whose window and REFUND_HEIGHTS were past at
+  // that first read ran long ago.
+  const callPassedAt = new Map<bigint, bigint>(); // call nonce -> the lower final height U's nonce was first read past it at
   const bindOut = async (): Promise<boolean | null> => {
     const calls = deps.notes === undefined ? [] : (await deps.notes.list()).flatMap((n) => (n.calls ?? []).filter((c) => c.sender_id === U));
     if (calls.length === 0) return false;
     const u = await readU(U, rpcs);
     if (u === null) return null;
     const low = u.heights[0] < u.heights[1] ? u.heights[0] : u.heights[1];
-    return calls.some((c) => c.nonce > u.nonce && low <= c.max_block_height + LAPSE_MARGIN);
+    return calls.some((c) => {
+      const window = c.max_block_height + LAPSE_MARGIN;
+      if (c.nonce > u.nonce) return low <= window;
+      if (!callPassedAt.has(c.nonce)) callPassedAt.set(c.nonce, low);
+      return low <= window + REFUND_HEIGHTS && low < callPassedAt.get(c.nonce)! + REFUND_HEIGHTS;
+    });
   };
   type Signed = { follow: MoveOutRecord; owner: string; fresh?: true } | { outcome: MoveOutOutcome } | { wait: true };
   const once = () => uLock(async (): Promise<Signed> => {
