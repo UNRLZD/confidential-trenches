@@ -11,10 +11,10 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { VAULT_CONSTANTS, vaultWithdrawYocto } from "@blindfill/kit";
 import { base58 } from "../bind/checks.ts";
-import { encodeAction, encodeTransaction, RpcError, type Relayer, type RelayerAction, type Rpc, type TxOutcome, type TxRef } from "../bind/send.ts";
+import { createFileStore, encodeAction, encodeTransaction, RpcError, type Relayer, type RelayerAction, type Rpc, type TxOutcome, type TxRef } from "../bind/send.ts";
 import { USDC_CODE_HASH, type HoldAt, type TokenStatus } from "../token-status/status.ts";
 import { checkWithdraw, type CheckedWithdraw, type WithdrawConfig } from "./checks.ts";
-import { FeeReadRefused, REGISTER_DEPOSIT_MAX, TESTNET_TOKEN } from "./fee.ts";
+import { FEE_A_FUND, FeeReadRefused, REGISTER_DEPOSIT_MAX, TESTNET_TOKEN } from "./fee.ts";
 import { createWithdrawSendStore, nullifierKey, TREE_CAPACITY, type LeavesIndex, type SpendsIndex } from "./index.ts";
 import {
   A_STORE_YOCTO,
@@ -31,6 +31,7 @@ import {
   check5,
   checkFunded,
   checks7to9,
+  createRecipient,
   feeAccountReady,
   idKeyOf,
   withdrawFloor,
@@ -100,6 +101,8 @@ type Chain = {
   down?: boolean;
 };
 const A_OK = { amount: A_STORE_YOCTO, keys: [{ public_key: idKeyOf(W.recipient), permission: "FullAccess" }] };
+/** A final block time that leaves the deadline the funding margin and 10 s more: a request that creates A passes check 9. */
+const FRESH_MS = DEADLINE - FUND_MARGIN_MS - 10_000n;
 const chain = (over: Partial<Chain> = {}): Chain => ({
   height: 1000,
   ms: DEADLINE - SEND_MARGIN_MS - 60_000n,
@@ -170,8 +173,14 @@ type Sent = { action: RelayerAction; tx: TxRef };
 const counters = new Map<string, bigint>();
 const nonceStore = { nonceNext: (k: string) => counters.get(k) ?? null };
 
-function fakeRelayer(name: string, outcomes: Map<string, TxOutcome>): Relayer & { sent: Sent[]; resolved: string[]; resends: boolean[]; near: bigint } {
+/** A Transfer's outcome as the relayer reads it at final: landed, failed on chain, not known yet, or dropped. */
+type TransferFate = "land" | "fail" | "unknown" | "drop";
+const transferOutcome = (tx: string, fate: TransferFate): TxOutcome =>
+  fate === "unknown" ? { kind: "unknown", tx_hash: tx, why: "not yet" } : fate === "drop" ? { kind: "dropped", tx_hash: tx, why: "nonce passed" } : { kind: "final", tx_hash: tx, receipts: [{ executor: W.recipient, ok: fate === "land", failure: fate === "land" ? "" : "LackBalanceForState", height: 1001n }] };
+
+function fakeRelayer(name: string, outcomes: Map<string, TxOutcome>): Relayer & { sent: Sent[]; resolved: string[]; resends: boolean[]; near: bigint; transfer: TransferFate; transfers(): Sent[] } {
   const key = `${name}/ed25519:test`;
+  const calls = new Set<string>();
   const r = {
     account: name,
     key,
@@ -179,6 +188,9 @@ function fakeRelayer(name: string, outcomes: Map<string, TxOutcome>): Relayer & 
     resolved: [] as string[],
     resends: [] as boolean[],
     near: 10n ** 24n,
+    /** What a Transfer's send reads at final (the creation of a fresh recipient). */
+    transfer: "land" as TransferFate,
+    transfers: () => r.sent.filter((x) => x.action.kind === "transfer"),
     balance: async () => r.near,
     async send<C extends string>(action: RelayerAction, guard: () => Promise<C | null>, before: (tx: TxRef) => void) {
       const code = await guard();
@@ -190,10 +202,12 @@ function fakeRelayer(name: string, outcomes: Map<string, TxOutcome>): Relayer & 
       const tx: TxRef = { tx_hash: base58(createHash("sha256").update(`${key} ${n}`).digest()), nonce: n.toString(), height: "999", block_hash: hashOf(999), signed_tx: bytes.toString("base64") };
       before(tx); // a throw here drops the bytes: nothing is recorded as sent
       r.sent.push({ action, tx });
+      if (action.kind === "transfer") return transferOutcome(tx.tx_hash, r.transfer);
+      calls.add(tx.tx_hash);
       return { kind: "unknown" as const, tx_hash: tx.tx_hash, why: "sent" };
     },
     async resolve(tx: TxRef, opts: { resend: boolean; fromBlocks?: boolean }) {
-      assert.equal(opts.fromBlocks, true, "a vault call's outcome is read from blocks only");
+      if (calls.has(tx.tx_hash)) assert.equal(opts.fromBlocks, true, "a vault call's outcome is read from blocks only");
       r.resolved.push(tx.tx_hash);
       r.resends.push(opts.resend);
       return outcomes.get(tx.tx_hash) ?? { kind: "unknown" as const, tx_hash: tx.tx_hash, why: "not yet" };
@@ -217,6 +231,7 @@ function setup(c = chain(), opts: { status?: () => TokenStatus; release?: number
   const outcomes = new Map<string, TxOutcome>();
   const relayer = fakeRelayer("relay.test.near", outcomes);
   const store = createWithdrawSendStore(mkdtempSync(join(tmpdir(), "wsend-")), { release: opts.release ?? 1, keys: nonceStore });
+  const creations = createFileStore(mkdtempSync(join(tmpdir(), "wcreate-")));
   const deps: WithdrawSendDeps = {
     cfg: CFG,
     rpcs: [provider(c, 0), provider(c, 1)],
@@ -227,8 +242,9 @@ function setup(c = chain(), opts: { status?: () => TokenStatus; release?: number
     relayers: [relayer],
     tokenStatus: async () => (opts.status ?? (() => open))(),
     now: () => Number(c.ms),
+    creations,
   };
-  return { c, deps, relayer, store, outcomes };
+  return { c, deps, relayer, store, outcomes, creations };
 }
 
 const code = (a: Awaited<ReturnType<typeof carryWithdraw>>) => ("error" in a.body ? a.body.error.code : "ok");
@@ -363,12 +379,11 @@ test("check 5, row 12: newCommitmentHash already a leaf, or a full tree, is bad_
   assert.equal(known.relayer.sent.length + full.relayer.sent.length + behind.relayer.sent.length, 0);
 });
 
-// ---- fund_recipient (until H3.7 funds A) ----
+// ---- fund_recipient: an A that exists ----
 
-test("fund_recipient true: carried only for an implicit A that exists with key list exactly [its own id key, full access] and at least A_store; else recipient_refused, nothing signed", async () => {
+test("fund_recipient true and A exists: carried only when its key list is exactly [its own id key, full access] and it holds at least A_store; else recipient_refused, nothing signed (an absent A is created first: card relayer-fresh-near below)", async () => {
   const idKey = idKeyOf(W.recipient);
   const cases: [string, Chain["account"][number], string][] = [
-    ["absent", "absent", "recipient_refused"],
     ["below A_store", { amount: A_STORE_YOCTO - 1n, keys: [{ public_key: idKey, permission: "FullAccess" }] }, "recipient_refused"],
     ["a second key", { amount: A_STORE_YOCTO, keys: [{ public_key: idKey, permission: "FullAccess" }, { public_key: idKeyOf("11".repeat(32)), permission: "FullAccess" }] }, "recipient_refused"],
     ["another key", { amount: A_STORE_YOCTO, keys: [{ public_key: idKeyOf("11".repeat(32)), permission: "FullAccess" }] }, "recipient_refused"],
@@ -393,7 +408,7 @@ test("fund_recipient true: carried only for an implicit A that exists with key l
   assert.equal(checkFunded({ fund_recipient: undefined, recipient: "a.near" } as CheckedWithdraw, reads()), null);
 });
 
-test("an absent A reads as nearcore answers it (view_account UNKNOWN_ACCOUNT, an empty key list) and is recipient_refused; any other mix, or an answer at another block, is 503 with nothing signed", async () => {
+test("an absent A reads as nearcore answers it (view_account UNKNOWN_ACCOUNT, an empty key list) and is created; any other mix, or an answer at another block, is 503 with nothing signed", async () => {
   const b = { height: 1000n, hash: hashOf(1000), gasPrice: 100_000_000n, ms: 0n } as unknown as Parameters<typeof accountAt>[1];
   const absent = chain({ account: ["absent", "absent"] });
   assert.deepEqual(await accountAt([provider(absent, 0), provider(absent, 1)], b, W.recipient), { kind: "absent" });
@@ -411,9 +426,9 @@ test("an absent A reads as nearcore answers it (view_account UNKNOWN_ACCOUNT, an
   for (const [acc, list] of [["unknown", "unknown"], ["unknown", "one"], ["ok", "unknown"]] as const) {
     await assert.rejects(accountAt([mix(acc, list), mix(acc, list)], b, W.recipient), /neither absent nor an account/, `${acc} / ${list}`);
   }
-  const route = setup(absent);
+  const route = setup({ ...absent, ms: FRESH_MS });
   const a = await carryWithdraw(req(), route.deps);
-  assert.deepEqual([a.status, code(a), route.relayer.sent.length], [400, "recipient_refused", 0]);
+  assert.deepEqual([a.status, code(a), route.relayer.sent.map((x) => x.action.kind)], [200, "ok", ["transfer", "call"]]);
   // one provider answers view_account, or the key list, at another block (another height, or the height on another hash)
   const other = { block_height: 999, block_hash: hashOf(999) };
   const fork = { block_height: 1000, block_hash: hashOf(1001) }; // the height asked, another block's hash
@@ -436,6 +451,121 @@ test("check 5, row 12: the spends index's final height read again for the leaves
   assert.deepEqual([a.status, code(a), x.relayer.sent.length], [503, "index_behind", 0]);
   assert.equal(reads, 2, "checkNullifier's read passed, leafCheck's threw");
   assert.equal(x.store.get(NF), null);
+});
+
+// ---- card relayer-fresh-near: the creation of a fresh recipient ----
+
+const ABSENT: Chain["account"] = ["absent", "absent"];
+const fresh = (over: Partial<Chain> = {}) => chain({ account: [...ABSENT], ms: FRESH_MS, ...over });
+const kinds = (x: ReturnType<typeof setup>) => x.relayer.sent.map((s) => s.action.kind);
+
+test("card relayer-fresh-near: fund_recipient for an id absent on both providers is carried with one creation: one Transfer of A_store to A, its record written before the broadcast, then the withdraw", async () => {
+  const x = setup(fresh());
+  const seen: string[] = [];
+  const s = x.creations;
+  x.deps.creations = { creation: s.creation, bind: s.bind, putCreation: (rec) => (seen.push(`${rec.last?.state} after ${x.relayer.transfers().length} sent`), s.putCreation(rec)) };
+  const a = await carryWithdraw(req(), x.deps);
+  assert.deepEqual([a.status, code(a)], [200, "ok"]);
+  assert.deepEqual(kinds(x), ["transfer", "call"]);
+  assert.deepEqual(x.relayer.sent[0]!.action, { kind: "transfer", receiver: W.recipient, amount: A_STORE_YOCTO });
+  assert.deepEqual(seen, ["pending after 0 sent", "landed after 1 sent"], "the creation is recorded before its bytes go");
+  const rec = s.creation(W.recipient)!;
+  assert.deepEqual([rec.last!.state, rec.last!.tx_hash, rec.used], ["landed", x.relayer.sent[0]!.tx.tx_hash, [nullifierKey(NF)]]);
+  assert.equal((x.store.get(NF) as { outcome: string }).outcome, "open", "the withdraw is claimed after the creation");
+});
+
+test("card relayer-fresh-near: an A is created only after checks 1-10 pass; any check that refuses creates nothing and records nothing", async () => {
+  const deposit = vaultWithdrawYocto(MIN, BigInt(W.relay_fee), true);
+  const cases: [string, Chain, Parameters<typeof setup>[1], string][] = [
+    ["check 3: relay_fee under fee_min", fresh(), { feeMin: BigInt(W.relay_fee) + 1n }, "fee_too_low"],
+    ["check 5: a state root the vault never had", fresh({ stateKnown: false }), {}, "unknown_root"],
+    ["check 8: a blocklisted recipient", fresh({ recipientListed: [true, true] }), {}, "bad_recipient"],
+    ["check 9: 30 s left carries a send, never a creation (120 s)", fresh({ ms: DEADLINE - FUND_MARGIN_MS + 1n }), {}, "deadline_too_close"],
+    ["check 10: a halted token", fresh(), { status: () => halted }, "token_halted"],
+    ["check 7b: a fee account not registered", fresh({ feeRegistered: [false, false] }), {}, "relayer_low"],
+  ];
+  for (const [why, c, opts, want] of cases) {
+    const x = setup(c, opts);
+    assert.equal(code(await carryWithdraw(req(), x.deps)), want, why);
+    assert.deepEqual([x.relayer.sent.length, x.creations.creation(W.recipient), x.store.get(NF)], [0, null, null], why);
+  }
+  // the gas account's floor in the queue: the creation's A_fund and one more withdrawal's worst; one yocto under holds
+  const poor = setup(fresh());
+  poor.relayer.near = withdrawFloor(deposit) + FEE_A_FUND - 1n;
+  const p = await carryWithdraw(req(), poor.deps);
+  assert.deepEqual([p.status, code(p), poor.relayer.sent.length, poor.creations.creation(W.recipient)], [503, "relayer_low", 0, null]);
+  const enough = setup(fresh());
+  enough.relayer.near = withdrawFloor(deposit) + FEE_A_FUND;
+  assert.deepEqual([code(await carryWithdraw(req(), enough.deps)), kinds(enough)], ["ok", ["transfer", "call"]]);
+  // a helper with no creation store creates nothing: recipient_refused, as before this card
+  const none = setup(fresh());
+  delete none.deps.creations;
+  assert.deepEqual([code(await carryWithdraw(req(), none.deps)), none.relayer.sent.length], ["recipient_refused", 0]);
+});
+
+test("card relayer-fresh-near: an id present on one provider only is refused (503 upstream), at the reads or again right before the signing; no Transfer, no record, no withdraw", async () => {
+  for (const account of [["absent", A_OK], [A_OK, "absent"], ["absent", { amount: 0n, keys: [] }]] as Chain["account"][]) {
+    const x = setup(fresh({ account }));
+    const r = await carryWithdraw(req(), x.deps);
+    assert.deepEqual([r.status, code(r), x.relayer.sent.length, x.creations.creation(W.recipient), x.store.get(NF)], [503, "upstream", 0, null, null], account.map((a) => (a === "absent" ? a : `${a.keys.length} key(s)`)).join(" / "));
+  }
+  // absent on both at the reads; one provider shows it when the queue reads it again right before the signing
+  const q = setup(fresh());
+  const balance = q.relayer.balance;
+  q.relayer.balance = async () => ((q.c.account = ["absent", A_OK]), balance());
+  const r = await carryWithdraw(req(), q.deps);
+  assert.deepEqual([r.status, code(r), q.relayer.sent.length, q.creations.creation(W.recipient), q.store.get(NF)], [503, "upstream", 0, null, null]);
+  // present on both by then (created by another): nothing signed, and the next request reads it as it is
+  const both = setup(fresh());
+  const b0 = both.relayer.balance;
+  both.relayer.balance = async () => ((both.c.account = [A_OK, A_OK]), b0());
+  assert.deepEqual([code(await carryWithdraw(req(), both.deps)), both.relayer.sent.length], ["in_flight", 0]);
+});
+
+test("card relayer-fresh-near: a resend creates nothing: an unknown Transfer is read again and its bytes resent, never signed again; once it lands the withdraw goes; a restart, two at once, and another A for the note create nothing more", async () => {
+  const x = setup(fresh());
+  x.relayer.transfer = "unknown";
+  const first = await carryWithdraw(req(), x.deps);
+  assert.deepEqual([first.status, code(first), kinds(x)], [400, "in_flight", ["transfer"]]);
+  const tx = x.relayer.sent[0]!.tx.tx_hash;
+  assert.equal(x.creations.creation(W.recipient)!.last!.state, "pending");
+  // the device's resend while the outcome is unknown: the stored bytes again (resend true), no second signature
+  const again = await carryWithdraw(req(), x.deps);
+  assert.deepEqual([code(again), kinds(x), x.relayer.resolved, x.relayer.resends], ["in_flight", ["transfer"], [tx], [true]]);
+  // it lands: the next resend sends the withdraw, still one Transfer
+  x.outcomes.set(tx, transferOutcome(tx, "land"));
+  const landed = await carryWithdraw(req(), x.deps);
+  assert.deepEqual([landed.status, code(landed), kinds(x)], [200, "ok", ["transfer", "call"]]);
+  // a restart (a new withdraw store: the send freed, as a deadline failure frees it) while a provider still reads A absent:
+  // the note's creation landed, so the withdraw goes with no Transfer
+  const y = setup(fresh());
+  y.deps.creations = x.creations;
+  const after = await carryWithdraw(req(), y.deps);
+  assert.deepEqual([code(after), kinds(y)], ["ok", ["call"]]);
+  // another A for the same note: recipient_refused, nothing signed (one note funds one A, ever)
+  const deposit = vaultWithdrawYocto(MIN, BigInt(W.relay_fee), true);
+  const other = { recipient: "11".repeat(32), deadline_ms: W.deadline_ms } as CheckedWithdraw;
+  const z = setup(fresh());
+  z.deps.creations = x.creations;
+  assert.deepEqual([code((await createRecipient(other, NF, z.deps, deposit))!), z.relayer.sent.length], ["recipient_refused", 0]);
+  // two requests at once for one fresh A: one Transfer
+  const two = setup(fresh());
+  await Promise.all([carryWithdraw(req(), two.deps), carryWithdraw(req(), two.deps)]);
+  assert.equal(two.relayer.transfers().length, 1);
+});
+
+test("card relayer-fresh-near: a Transfer dropped (never applied) is signed afresh once; one that failed on chain is recipient_refused and never signed again", async () => {
+  const x = setup(fresh());
+  x.relayer.transfer = "drop";
+  assert.equal(code(await carryWithdraw(req(), x.deps)), "in_flight");
+  assert.equal(x.creations.creation(W.recipient)!.last!.state, "dropped");
+  x.relayer.transfer = "land";
+  assert.deepEqual([code(await carryWithdraw(req(), x.deps)), kinds(x)], ["ok", ["transfer", "transfer", "call"]]);
+  const f = setup(fresh());
+  f.relayer.transfer = "fail";
+  assert.equal(code(await carryWithdraw(req(), f.deps)), "recipient_refused");
+  assert.equal(code(await carryWithdraw(req(), f.deps)), "recipient_refused");
+  assert.deepEqual(kinds(f), ["transfer"]);
 });
 
 // ---- relayer_low ----
