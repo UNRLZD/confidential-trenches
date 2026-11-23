@@ -9,11 +9,12 @@
 // - The proof: snarkjs on the setup files, each checked against the kit's sha256 pin (./setup.ts) before use.
 // - The order, the checks and the resume are ./withdraw.ts's (exitWithdrawOne, exitCloseOne): a spend of ours already
 //   paid or refund_pending is settled and its A closed first; then each UNSPENT note, one at a time.
-import { vaultWithdrawYocto, VAULT_WITHDRAW, VaultTree, nearPairNetwork, type NearNetwork, type VaultProver, type VaultSyncRpc } from "@blindfill/kit";
-import { moveOutRpc, readSettle, settleNeed, type MoveOutRpc, type RestoredNote } from "@blindfill/kit/core";
+import { keccak_256 } from "@noble/hashes/sha3.js";
+import { vaultScopeOf, vaultWithdrawYocto, VAULT_WITHDRAW, VaultTree, nearPairNetwork, type NearNetwork, type VaultProver, type VaultSyncRpc } from "@blindfill/kit";
+import { moveOutRpc, nearIdReader, openRestorePass, readMoveOutFor, readSettle, readWithdrawOut, restoreDepositIds, settleNeed, type BuiltMove, type MoveOutRpc, type RestoredNote } from "@blindfill/kit/core";
 import type { ExitChain, ExitCtx, ExitResult } from "./chain.ts";
 import { fundedOrWait, units } from "./fund.ts";
-import { exitAccountAt, exitKey, exitReadStorage, exitRecipient, type ExitRecipient } from "./out.ts";
+import { exitAccountAt, exitBuildMove, exitHoldings, exitKey, exitReadStorage, exitRecipient, type ExitRecipient } from "./out.ts";
 import { exitReadPages, exitRpc, ExitRpcRefused, EXIT_NETWORKS } from "./rpc.ts";
 import { exitScanSeed } from "./scan.ts";
 import { exitProver } from "./prover.ts";
@@ -26,6 +27,10 @@ const GAS_PRICE_MARGIN = 12n;
 const ACCOUNT_KEEP = 10n ** 22n;
 /** The withdraw's send gas on top of the call's (the wallet's MOVE_GAS.send). */
 const SEND_GAS = 5n * TGAS;
+/** What a one-time id keeps of each asset it holds after its move out: one base unit (the wallet's ID_KEEP). */
+const ID_KEEP = 1n;
+/** The largest of an id's moves, with its send: intents.near's ft_withdraw, 100 Tgas (the wallet's WITHDRAW_GAS). */
+const ID_MOVE_GAS = 100n * TGAS + SEND_GAS;
 /** Between two reads of a tx's outcome, and how many reads before it is unread. */
 const TX_POLL_MS = 2_000;
 const TX_POLLS = 60;
@@ -130,6 +135,7 @@ export function nearExitWith(over: NearExitOver = {}): ExitChain {
     const to: ExitRecipient = checked.recipient;
     ctx.say(`reading the vault ${EXIT_NETWORKS[network].vault} on ${network}`);
     const scan = await exitScanSeed(ctx.seed, network, vrpcs);
+    let latest = scan;
     // a note of value 0 (the change of a whole withdrawal) holds nothing and the vault refuses a withdrawal of 0
     // (contracts/vault/src/withdraw.rs InvalidWithdrawalAmount), so it is never sent, as evm-out and sol-out skip it
     const open = (ns: readonly RestoredNote[]) => ns.filter((n) => n.state === "UNSPENT" && n.leaf.value > 0n);
@@ -177,7 +183,8 @@ export function nearExitWith(over: NearExitOver = {}): ExitChain {
     // settled can be: one read in_flight may be refund_pending by exitCloseOne's own read and settled here (card
     // exit-rescan-after-any-open-spend)
     if (scan.spends.some((s) => s.spend.status !== "settled")) {
-      notes = open((await exitScanSeed(ctx.seed, network, vrpcs)).notes);
+      latest = await exitScanSeed(ctx.seed, network, vrpcs);
+      notes = open(latest.notes);
       left = notes.reduce((s, n) => s + n.leaf.value, 0n);
       ctx.say(`scanned again after the settles: ${notes.length} note(s) to withdraw, ${units(left, 6)} USDC`);
     }
@@ -218,8 +225,99 @@ export function nearExitWith(over: NearExitOver = {}): ExitChain {
         break;
       }
     }
-    if (stopped !== null) throw new Error(`${stopped} (txs so far: ${txs.join(" ") || "none"}); run the exit again to go on`);
+    // step 5 (vault paper 2.12, "Nothing into the vault"): the vault scope's one-time deposit ids U_{s,i}, found by the
+    // wallet's own walk and miss limit (restore step 5, restoreDepositIds, never a copy of it) on one pass block read on
+    // both RPCs. What an id the walk reads as money holds on the token or inside intents.near goes to the typed account by
+    // U's own plain ft_transfer or ft_withdraw (exitBuildMove: one base unit kept), never into the vault; U pays its gas
+    // from a Transfer the user sends it (fundedOrWait, as A's). An id the walk could not read, a lane it stopped at a
+    // reach, a halted token, or a move not read back ends the run stopped with each named; nothing is skipped silently
+    const ids = await idsOut(latest);
+    sent += ids.sent;
+    left += ids.left;
+    const why = [stopped, ...ids.stops].filter((x): x is string => x !== null);
+    if (why.length > 0) throw new Error(`${why.join("; ")} (txs so far: ${txs.join(" ") || "none"}); run the exit again to go on`);
     return { chain: "near", txs, sent: sent.toString(), left: (left - sent).toString() };
+
+    /** Step 5's walk and moves; `left` is what the money ids hold above the base unit each keeps. */
+    async function idsOut(r: typeof scan): Promise<{ sent: bigint; left: bigint; stops: string[] }> {
+      const stops: string[] = [];
+      let moved = 0n, held = 0n;
+      const scope = vaultScopeOf(keccak_256, r.vault, r.token);
+      // the reads' own clock when a test gives the sleep (the wallet's reader takes a given sleep only with its clock)
+      let t = 0;
+      const clock = over.sleep ? { sleep: async (ms: number) => { t += ms; await sleep(ms); }, now: () => t } : {};
+      const money: number[] = [];
+      try {
+        const pass = await openRestorePass(network as NearNetwork, vrpcs, clock);
+        const walk = await restoreDepositIds(ctx.seed, scope, r, await nearIdReader(network as NearNetwork, vrpcs, pass, clock));
+        for (const lane of walk.lanes) {
+          money.push(...lane.money);
+          for (const u of lane.unread) stops.push(`deposit id U_${u.i} ${u.id} is unread (${u.error})`);
+          if (lane.reach !== null) stops.push(`the deposit ids of lane ${lane.lane} stopped at index ${lane.reach}, past the note walk's end`);
+        }
+      } catch (e) {
+        stops.push(`the deposit ids' walk stopped: ${e instanceof Error ? e.message : String(e)}`);
+      }
+      ctx.say(`${money.length} deposit id(s) of the vault's scope hold money`);
+      for (const i of money.sort((x, y) => x - y)) {
+        const account = { kind: "U", s: scope, i } as const;
+        const k = exitKey(ctx.seed, account);
+        k.secretKey.fill(0);
+        const u = k.id;
+        try {
+          const [h] = (await exitHoldings({ network: network as NearNetwork, ids: [u], rpcs: vrpcs }, sleep)).holdings;
+          if (h!.token.state === "halted") {
+            stops.push(`deposit id U_${i} ${u}: USDC is halted (FiatToken: paused)`);
+            continue;
+          }
+          const legs = ([["token", h!.token.amount], ["intents", h!.intents ?? 0n]] as const).filter(([, x]) => x > ID_KEEP);
+          for (const [, x] of legs) held += x - ID_KEEP;
+          for (const [leg] of legs) {
+            const out = await moveOut(account, u, leg);
+            if (typeof out === "string") {
+              stops.push(`deposit id U_${i} ${u}: ${out}`);
+              break;
+            }
+            moved += out;
+          }
+        } catch (e) {
+          stops.push(`deposit id U_${i} ${u}: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+      return { sent: moved, left: held, stops };
+    }
+
+    /** One leg of U's money out to the typed account, U funded first: the amount sent, or why it stopped. */
+    async function moveOut(account: { kind: "U"; s: bigint; i: number }, u: string, leg: "token" | "intents"): Promise<bigint | string> {
+      const storage = await exitReadStorage(network as NearNetwork, to, vrpcs, sleep);
+      const need = ID_MOVE_GAS * (await gasPrice(mrpcs)) * GAS_PRICE_MARGIN + (storage.registered ? 0n : storage.storageMin) + ACCOUNT_KEEP;
+      await fundedOrWait({ address: u, need, unit: { symbol: "NEAR", decimals: 24 }, balance: () => nearBalance(mrpcs, u), say: ctx.say, sleep });
+      const send = async (b: BuiltMove): Promise<string | null> => {
+        ctx.say(`move tx ${b.hash} from ${u}`);
+        txs.push(b.hash);
+        const got = await sendOnce(mrpcs, u, b, sleep, ctx.say);
+        return got === "ok" ? null : `move tx ${b.hash} ${got}`;
+      };
+      const token = scan.token;
+      const base = { seed64: ctx.seed, account, network: network as NearNetwork, to };
+      if (leg === "token") {
+        const read = await readMoveOutFor(u, to.account, token, mrpcs);
+        if (read === null) return "its move is not read the same on both RPCs";
+        const b = exitBuildMove({ ...base, move: { leg: "token", read, storageMin: storage.storageMin } });
+        return (await send(b)) ?? b.amount;
+      }
+      let read = await readWithdrawOut(u, to.account, token, mrpcs);
+      if (read === null) return "its move out of intents.near is not read the same on both RPCs";
+      // intents.near refunds an ft_transfer the token refuses: the typed account is registered by U first (W:777)
+      if (!read.registered) {
+        const reg = await send(exitBuildMove({ ...base, move: { leg: "register", read, storageMin: storage.storageMin } }));
+        if (reg !== null) return reg;
+        read = await readWithdrawOut(u, to.account, token, mrpcs);
+        if (read === null || !read.registered) return "the typed account's registration is not read on both RPCs";
+      }
+      const b = exitBuildMove({ ...base, move: { leg: "intents", read } });
+      return (await send(b)) ?? b.amount;
+    }
   };
 }
 
