@@ -88,6 +88,11 @@ path = "tests/exit_words.rs"
 required-features = ["sandbox"]
 
 [[test]]
+name = "exit_every_kind"
+path = "tests/exit_every_kind.rs"
+required-features = ["sandbox"]
+
+[[test]]
 name = "relayer_send"
 path = "tests/relayer_send.rs"
 required-features = ["sandbox"]

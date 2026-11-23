@@ -743,3 +743,121 @@ test("evmSellVerdict: a sale's deposit of the rung of its least is filled; under
   assert.equal(end(dep(10_000_000_000_000_000n - 1n)), "taken", "under the rung");
   assert.equal(end(dep(10_000_000_000_000_000n, "0x2222222222222222222222222222222222222222")), "taken", "another depositor");
 });
+
+// ---- card signpage-sent-end-recorded-evm: a rest leg whose page died after the send ----
+// The rest W's own buy has no read-back of a load's follow (W's holding names no pool buy), so the carry pass, which
+// reads the rest record, notes that leg's end onto the request's op by the run's own path (pool-buy-evm.ts
+// evmBuyOpNoted): the op reaches the stage the same page's run answers from its legs (legsEnd).
+const OP_ID = "6a4f1c2e-1b7d-4c9a-8e3f-0d2b5a6c7e8f";
+const WHOLE_TX = "0x" + "aa".repeat(32);
+const opsWith = (ws: WalletStore) => async (id: string, f: (v: unknown) => unknown): Promise<void> => void (await ws.update("ops", id, f));
+const twoLegOp = (whole: string) => ({ kind: "buy", stage: "sent", txs: [], created_ms: 1, chain: "base", token: "0x" + "11".repeat(20), legs: [{ w: "0x" + "22".repeat(20), end: { stage: whole, txs: [{ chain: "base", hash: WHOLE_TX }] } }, { w: W }] });
+const restRec = (o: Record<string, unknown> = {}) => ({ chain: "base", l: LABEL.toString(), j: 0, nullifier: "1", deadlineMs: "1", signBy: "2", spend: "1", token: "0x" + "11".repeat(20), op: OP_ID, leg: 1, ...o });
+
+test("card signpage-sent-end-recorded-evm: a two-leg buy whose rest leg's page died after the send: the next load's carry pass ends that leg, and the op reaches the stage the same-page run answers", async () => {
+  const legsEnd = ((await import("../src/pool-buy-evm.ts")) as unknown as { legsEnd: (e: { stage: string; txs: unknown[] }[]) => { stage: string } }).legsEnd;
+  // W never signed its buy (no hash), its window long past: its change is the user's money on its way back, owed_back
+  {
+    const ch = chain();
+    ch.c.release = releaseTxOf(POOL, WITHDRAW_INPUT);
+    ch.c.balance = [CHUNK - FEE, CHUNK - FEE];
+    const { ns, ws } = await stores();
+    await refused(ch, ns);
+    await ws.update("meta", WBUY_KEY, () => ({ [W]: restRec() }));
+    await ws.put("ops", OP_ID, twoLegOp("filled"));
+    const h = hostOf(ch, ns, ws, "base", { ops: opsWith(ws) } as Partial<EvmCarryHost>);
+    await carryEvmOwed(h);
+    const op = (await ws.get("ops", OP_ID)) as { stage: string; txs: { hash: string }[]; legs: { end?: { stage: string } }[] };
+    assert.equal(op.legs[1]!.end?.stage, "owed_back", "the rest leg ended by the carry pass");
+    assert.equal(op.stage, legsEnd([{ stage: "filled", txs: [] }, { stage: "owed_back", txs: [] }]).stage, "part_filled, as the same page answers");
+    assert.deepEqual(op.txs.map((t) => t.hash), [WHOLE_TX, ch.c.release.hash], "every leg's transactions");
+  }
+  // W's buy ended filled on its record (the page wrote that end and died before the op's): filled
+  {
+    const ch = chain();
+    ch.c.release = releaseTxOf(POOL, WITHDRAW_INPUT);
+    ch.c.balance = [CHUNK - FEE, CHUNK - FEE];
+    const { ns, ws } = await stores();
+    await refused(ch, ns);
+    await ws.update("meta", WBUY_KEY, () => ({ [W]: restRec({ end: "filled", hash: "0x" + "bb".repeat(32), adapter: "0x" + "ad".repeat(20) }) }));
+    await ws.put("ops", OP_ID, twoLegOp("filled"));
+    await carryEvmOwed(hostOf(ch, ns, ws, "base", { ops: opsWith(ws) } as Partial<EvmCarryHost>));
+    const op = (await ws.get("ops", OP_ID)) as { stage: string; txs: { hash: string }[] };
+    assert.equal(op.stage, "filled");
+    assert.deepEqual(op.txs.map((t) => t.hash), [WHOLE_TX, ch.c.release.hash, "0x" + "bb".repeat(32)]);
+  }
+});
+
+// A rest W whose own buy was sent (its hash on the record) and whose receipt the two RPCs do not yet agree on: the carry
+// never carries (nor ends) W in that pass, so the leg's end is never lost; the pass after the receipts agree notes it,
+// then carries. A buy neither RPC knows by its window's end never landed: owed_back, and W's change is carried.
+test("card signpage-sent-end-recorded-evm: a rest leg whose receipt is not agreed yet keeps W uncarried that pass; once agreed the leg ends first, then W is carried; a buy neither RPC knows is owed_back", async () => {
+  const BUY_TX = "0x" + "bb".repeat(32);
+  const ADAPTER = "0x" + "ad".repeat(20);
+  let receipt: "none" | "split" | "ok" = "split";
+  const withReceipts = (ch: ReturnType<typeof chain>) =>
+    ch.rpcs.map((rpc, k) => async (method: string, params: readonly unknown[]): Promise<unknown> => {
+      if (method === "eth_getTransactionReceipt") {
+        if (receipt === "none") return null;
+        if (receipt === "split" && k === 1) return null;
+        return { status: "0x1", from: W, to: ADAPTER, blockHash: "0x" + "cc".repeat(32), blockNumber: "0x5" };
+      }
+      if (method === "eth_getBlockByNumber" && params[0] === "safe") return { number: "0x64" };
+      return rpc(method, params);
+    }) as unknown as EvmCarryHost["rpcs"];
+  const ch = chain();
+  ch.c.release = releaseTxOf(POOL, WITHDRAW_INPUT);
+  ch.c.balance = [RUNG + 10n ** 15n, RUNG + 10n ** 15n];
+  const { ns, ws } = await stores();
+  await refused(ch, ns);
+  await ws.update("meta", WBUY_KEY, () => ({ [W]: restRec({ hash: BUY_TX, adapter: ADAPTER }) }));
+  await ws.put("ops", OP_ID, twoLegOp("filled"));
+  const h = hostOf(ch, ns, ws, "base", { ops: opsWith(ws), rpcs: withReceipts(ch) } as Partial<EvmCarryHost>);
+  assert.deepEqual(await carryEvmOwed(h), [{ w: W, end: "pending" }], "not carried before its leg's end is known");
+  assert.equal(ch.c.sent.length, 0, "nothing signed");
+  assert.equal(((await ws.get("ops", OP_ID)) as { stage: string }).stage, "sent");
+  receipt = "ok";
+  assert.deepEqual(await carryEvmOwed(h), [{ w: W, end: "sent" }], "the leg ended, then W carried in the same pass");
+  const op = (await ws.get("ops", OP_ID)) as { stage: string; txs: { hash: string }[] };
+  assert.equal(op.stage, "filled");
+  assert.deepEqual(op.txs.map((t) => t.hash), [WHOLE_TX, ch.c.release.hash, BUY_TX]);
+  // a buy neither RPC knows by its window's end: never landed
+  const ch2 = chain();
+  ch2.c.release = releaseTxOf(POOL, WITHDRAW_INPUT);
+  ch2.c.balance = [RUNG + 10n ** 15n, RUNG + 10n ** 15n];
+  const s2 = await stores();
+  await refused(ch2, s2.ns);
+  await s2.ws.update("meta", WBUY_KEY, () => ({ [W]: restRec({ hash: BUY_TX, adapter: ADAPTER }) }));
+  await s2.ws.put("ops", OP_ID, twoLegOp("filled"));
+  receipt = "none";
+  const h2 = hostOf(ch2, s2.ns, s2.ws, "base", { ops: opsWith(s2.ws), rpcs: withReceipts(ch2) } as Partial<EvmCarryHost>);
+  h2.clock.t = Number(2n + (REST.EVM_WBUY_CARRY_AFTER_MS as bigint)) + 1;
+  assert.deepEqual(await carryEvmOwed(h2), [{ w: W, end: "sent" }]);
+  assert.equal(((await s2.ws.get("ops", OP_ID)) as { stage: string }).stage, "part_filled", "filled and owed_back, as the same page answers");
+});
+
+// A rest leg whose release never landed and whose page died: no release pays W, so the carry never reads it. The RESERVED
+// settle frees its note once the newest block both RPCs agree on is past the deadline with none; that freed note's
+// nullifier ends its leg not_landed on the op its record names (the chain's word, never the helper's), and nothing else.
+test("card signpage-sent-end-recorded-evm: a rest leg whose release never landed ends not_landed when its note is freed; another nullifier, another chain or an ended leg is untouched", async () => {
+  const CARRY = (await import("../src/pool-carry-evm.ts")) as unknown as { noteFreedRests?: (store: Pick<WalletStore, "get">, ops: (id: string, f: (v: unknown) => unknown) => Promise<void>, chain: "base" | "robinhood", nullifiers: readonly bigint[]) => Promise<void> };
+  assert.equal(typeof CARRY.noteFreedRests, "function", "a freed rest note ends its leg");
+  const noteFreedRests = CARRY.noteFreedRests!;
+  const { ws } = await stores();
+  const W2 = "0x" + "33".repeat(20);
+  const W3 = "0x" + "44".repeat(20);
+  await ws.update("meta", WBUY_KEY, () => ({ [W]: restRec({ nullifier: "77" }), [W2]: restRec({ nullifier: "78", op: "req-other" }), [W3]: restRec({ nullifier: "77", chain: "robinhood", op: "req-rh" }) }));
+  await ws.put("ops", OP_ID, twoLegOp("filled"));
+  await ws.put("ops", "req-other", twoLegOp("filled"));
+  await ws.put("ops", "req-rh", { ...twoLegOp("filled"), chain: "robinhood" });
+  await noteFreedRests(ws, opsWith(ws), "base", [77n]);
+  const op = (await ws.get("ops", OP_ID)) as { stage: string; legs: { end?: { stage: string } }[] };
+  assert.equal(op.legs[1]!.end?.stage, "not_landed");
+  assert.equal(op.stage, "part_filled", "a filled leg and a leg that never landed, as the same page answers");
+  assert.equal(((await ws.get("ops", "req-other")) as { stage: string }).stage, "sent", "another nullifier");
+  assert.equal(((await ws.get("ops", "req-rh")) as { stage: string }).stage, "sent", "another chain");
+  // an ended leg is never moved by a later free
+  await ws.put("ops", OP_ID, { ...twoLegOp("filled"), stage: "filled", legs: [twoLegOp("filled").legs[0], { w: W, end: { stage: "filled", txs: [] } }] });
+  await noteFreedRests(ws, opsWith(ws), "base", [77n]);
+  assert.equal(((await ws.get("ops", OP_ID)) as { stage: string }).stage, "filled");
+});

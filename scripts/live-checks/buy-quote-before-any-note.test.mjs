@@ -72,3 +72,35 @@ test("coinsOf: the chain's coins, trending then graduating then new, each once, 
   assert.deepEqual(coinsOf(lists, "solana"), ["ypump", "x"]);
   assert.deepEqual(coinsOf(null, "base"), []);
 });
+
+// card buy-quote-check-skips-an-unpinned-venue: the sign live run 45066381643 (22 Nov 20:40Z) failed on the first
+// trending Solana coin, answered venue_not_pinned: mainnet pins pool tables for pump-curve and pumpswap only, and the page
+// refuses an unpinned venue before any note is read, so that answer says nothing of a buy priced with no note
+test("a coin the page cannot trade yet (venue_not_pinned, no_table_fits) moves on to the next coin; not_funded still FAILs", () => {
+  /** good with Solana's coins answering `codes` in turn ("out": good's priced answer), each a coin of its own. */
+  const solana = (codes) => {
+    const r = copy(A.good);
+    const priced = r.asks.find((x) => x.chain === "solana" && x.ok);
+    const rest = r.asks.filter((x) => x.chain !== "solana");
+    const asks = codes.map((c, i) => (c === "out" ? { ...copy(priced), coin: r.lists.solana.coins[i] } : { chain: "solana", coin: r.lists.solana.coins[i], amount: priced.amount, ok: false, code: c }));
+    r.asks = [...asks, ...rest];
+    return judge(r);
+  };
+  for (const skip of ["venue_not_pinned", "no_table_fits"]) {
+    assert.equal(solana([skip, "out"]).verdict, "PASS", `${skip} then a priced coin`);
+    const all = solana([skip, skip, skip]);
+    assert.equal(all.verdict, "INCONCLUSIVE", `every coin ${skip}: ${all.lines.join("\n")}`);
+    assert.ok(all.lines.some((l) => l.startsWith("no-answer [solana]") && l.includes(skip)), all.lines.join("\n"));
+    assert.equal(solana([skip, "not_funded"]).verdict, "FAIL", `${skip} then not_funded`);
+  }
+  assert.equal(solana(["not_funded", "out"]).verdict, "FAIL", "not_funded on the first coin");
+  assert.equal(solana(["venue_not_pinned", "quote_check_failed", "down"]).verdict, "INCONCLUSIVE", "every coin refused for its own reads");
+});
+
+test("the recorded skip run (the live SIGN_HOST, 22 Nov 21:15Z): Solana's venue_not_pinned coin moves the check on to the coin priced after it, PASS", () => {
+  const solana = A.skip.asks.filter((x) => x.chain === "solana");
+  assert.ok(solana.some((x) => x.code === "venue_not_pinned"), "the run holds a venue_not_pinned coin");
+  const v = judge(A.skip);
+  assert.equal(v.verdict, "PASS", v.lines.join("\n"));
+  assert.ok(v.lines.some((l) => l.startsWith("ok ") && l.includes("[solana]") && l.includes(" out ")), v.lines.join("\n"));
+});

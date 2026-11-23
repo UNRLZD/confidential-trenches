@@ -93,7 +93,7 @@ function fakeProver(note: RestoredNote, l: bigint, j: number, seen: Record<strin
   };
 }
 
-async function build(note: RestoredNote, o: { to?: ExitRecipient; tamper?: (s: string[]) => string[]; keys?: Uint8Array[]; storage?: ExitStorage } = {}) {
+async function build(note: RestoredNote, o: { to?: ExitRecipient; tamper?: (s: string[]) => string[]; keys?: Uint8Array[]; storage?: ExitStorage; order?: string[] } = {}) {
   const { l, j } = exitWithdrawIndex(note);
   const seen: Record<string, unknown>[] = [];
   const st = new VaultTree([note.leaf.commitment]);
@@ -104,10 +104,23 @@ async function build(note: RestoredNote, o: { to?: ExitRecipient; tamper?: (s: s
     o.keys?.push(k.secretKey);
     return k;
   };
-  const out = await exitBuildWithdraw({ seed64: SEED, network: NET, note, to: o.to ?? (await typed()), prover: fakeProver(note, l, j, seen, o.tamper), stateTree: st, labelTree: lt, newestStateRoot: st.root!, newestLabelRoot: lt.root!, storage: o.storage ?? (await storageOf(false)), nowMs: NOW, deadlineMs: NOW + 500_000, read }, keyOf);
+  const prover = fakeProver(note, l, j, seen, o.tamper);
+  const proved: VaultProver = { load: prover.load, prove: async (c, i) => { const r = await prover.prove(c, i); o.order?.push("prove"); return r; } };
+  const readA = async () => {
+    o.order?.push("read");
+    return read;
+  };
+  const out = await exitBuildWithdraw({ seed64: SEED, network: NET, note, to: o.to ?? (await typed()), prover: proved, stateTree: st, labelTree: lt, newestStateRoot: st.root!, newestLabelRoot: lt.root!, storage: o.storage ?? (await storageOf(false)), nowMs: NOW, deadlineMs: NOW + 500_000, read: readA }, keyOf);
   return { out, seen, l, j };
 }
 const txText = (m: BuiltMove) => Buffer.from(m.signed, "base64").toString("latin1");
+
+test("exitBuildWithdraw reads A's nonce and block after the proof, right before it signs: a proof longer than a network's tx validity window never signs on an expired block (near-sandbox: 100 blocks, about 12 s)", async () => {
+  const order: string[] = [];
+  const { out } = await build(noteOf({ kind: "deposit", s: 1n, i: 0 }), { order });
+  assert.deepEqual(order, ["prove", "read"]);
+  assert.ok(out.built.signed.length > 0);
+});
 
 test("exitWithdrawIndex: change note k makes change k + 1; any other note of a label makes change 0, under the note's own label", () => {
   assert.deepEqual(exitWithdrawIndex(noteOf({ kind: "deposit", s: 1n, i: 0 })), { l: LABEL, j: 0 });

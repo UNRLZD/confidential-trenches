@@ -130,8 +130,11 @@ export function nearExitWith(over: NearExitOver = {}): ExitChain {
     const to: ExitRecipient = checked.recipient;
     ctx.say(`reading the vault ${EXIT_NETWORKS[network].vault} on ${network}`);
     const scan = await exitScanSeed(ctx.seed, network, vrpcs);
-    const notes = scan.notes.filter((n: RestoredNote) => n.state === "UNSPENT");
-    const left = notes.reduce((s, n) => s + n.leaf.value, 0n);
+    // a note of value 0 (the change of a whole withdrawal) holds nothing and the vault refuses a withdrawal of 0
+    // (contracts/vault/src/withdraw.rs InvalidWithdrawalAmount), so it is never sent, as evm-out and sol-out skip it
+    const open = (ns: readonly RestoredNote[]) => ns.filter((n) => n.state === "UNSPENT" && n.leaf.value > 0n);
+    let notes = open(scan.notes);
+    let left = notes.reduce((s, n) => s + n.leaf.value, 0n);
     ctx.say(`${notes.length} note(s) to withdraw, ${units(left, 6)} USDC; ${scan.spends.length} spend(s) of ours read`);
     const txs: string[] = [];
     const steps = (signer: string): Omit<ExitWithdrawSteps, "withdraw"> => ({
@@ -169,6 +172,15 @@ export function nearExitWith(over: NearExitOver = {}): ExitChain {
       txs.push(...out.txs);
       if (out.stage !== "closed") stopped ??= `${out.stage}: ${out.why}`;
     }
+    // a settle of refund_pending writes the refund note into the vault, after the scan above: scanned again, so this run
+    // withdraws it and its left counts it (card exit-every-note-kind-on-a-mainnet-copy). Any spend the scan read not
+    // settled can be: one read in_flight may be refund_pending by exitCloseOne's own read and settled here (card
+    // exit-rescan-after-any-open-spend)
+    if (scan.spends.some((s) => s.spend.status !== "settled")) {
+      notes = open((await exitScanSeed(ctx.seed, network, vrpcs)).notes);
+      left = notes.reduce((s, n) => s + n.leaf.value, 0n);
+      ctx.say(`scanned again after the settles: ${notes.length} note(s) to withdraw, ${units(left, 6)} USDC`);
+    }
     let sent = 0n;
     for (const note of notes) {
       const { l, j } = exitWithdrawIndex(note);
@@ -185,9 +197,14 @@ export function nearExitWith(over: NearExitOver = {}): ExitChain {
           ...steps(aId),
           withdraw: async () => {
             const pages = await exitReadPages({ network, rpcs: vrpcs });
-            const read = await readSettle(aId, mrpcs);
             const block = await finalBlock(mrpcs);
-            if (read === null || block === null) throw new Error(`A ${aId} is not read the same on both RPCs`);
+            if (block === null) throw new Error("the final block is not read the same on both RPCs");
+            // A's nonce and block, read after the proof (exitBuildWithdraw), so the tx is signed on a fresh block
+            const read = async () => {
+              const r = await readSettle(aId, mrpcs);
+              if (r === null) throw new Error(`A ${aId} is not read the same on both RPCs`);
+              return r;
+            };
             const rand = globalThis.crypto.getRandomValues(new Uint16Array(1))[0]!;
             ctx.say(`proving the withdrawal of ${units(note.leaf.value, 6)} USDC`);
             return exitBuildWithdraw({ seed64: ctx.seed, network, note, to, prover, ...treesOf(pages), storage, nowMs: block.ms, deadlineMs: block.ms + DEADLINE_MS - rand, read });

@@ -1,0 +1,49 @@
+# The unplug switch's proof on GitHub's runners (card helper-unplug-off): apps/helper/deploy/unplug-proof.sh builds the
+# helper's compose stack from the commit, behind the real Caddyfile on plain http with no vendor key (each on its
+# keyless plan: no secret enters this workflow), runs deploy/unplug.sh off, reads every port of it as answering
+# nothing (scripts/drill/servers-down.mjs, the good answer), runs unplug.sh on, and reads the same ports answering again
+# (the bad answer). The runner has the Docker the switch drives; nothing of the live host is touched. Its two reads are
+# uploaded, for scripts/drill/servers-down.answers.json. It is no required job and holds no merge:
+#   gh workflow run unplug-proof.yml --ref <branch>
+# and on a pull request that changes the switch or the check.
+#
+# Every action is pinned by commit sha, as ci.yml pins them: actions/checkout v7.0.1, actions/setup-node v7.1.0,
+# actions/upload-artifact v7.0.2.
+name: unplug-proof
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "apps/helper/deploy/unplug*"
+      - "scripts/drill/servers-down*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: unplug-proof-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  proof:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - name: the stack off, read as down, on, read as up
+        # on waits for the helper's ready health: a cold start's warm-up on keyless plans (165 s on a Mac, 22 Nov)
+        env:
+          UNPLUG_READY_S: "600"
+        run: bash apps/helper/deploy/unplug-proof.sh "$RUNNER_TEMP/unplug-proof"
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: unplug-proof-reads
+          path: ${{ runner.temp }}/unplug-proof/*.json
+          if-no-files-found: warn
