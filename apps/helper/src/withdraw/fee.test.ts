@@ -19,6 +19,8 @@ import { checkWithdraw, type WithdrawConfig } from "./checks.ts";
 import {
   createFeeQuoter,
   FEE_A_FUND,
+  FEE_EPOCH_MS,
+  feeEpochOf,
   FEE_G_W,
   FEE_POOL_MIN_TOKEN,
   FEE_QUOTE_WINDOW_BLOCKS,
@@ -409,15 +411,14 @@ test("POST prices the body's own register_deposit: 0 and the minimum give two fe
   assert.ok((await reads.feeMin(body(0n))) < 207_609n);
 });
 
-test("two quotes in one block keep the lower: a higher quote after it never raises the held fee", async () => {
+test("two quotes in one block answer one fee: a price that rose since never raises the quote or the held fee", async () => {
   let w: World = { ...base(), pool: LOW };
   let clock = NOW;
   const q = quoterOn(() => w, () => clock);
   assert.equal((await q.quote(USDC)).relay_fee, "25100");
   clock += 2_000;
   w = { ...base(), ms: BigInt(clock - 1_000), pool: ["300000000000", "400000000000000000000000000000"] }; // same block, NEAR at 0.75
-  const higher = BigInt((await q.quote(USDC)).relay_fee);
-  assert.ok(higher > 25_100n);
+  assert.equal((await q.quote(USDC)).relay_fee, "25100", "the epoch's one fee (card relayer-fresh-near)");
   clock += 2_000;
   w = { ...base(), height: base().height + 5, ms: BigInt(clock - 1_000), pool: ["300000000000", "300000000000000000000000000000"] };
   assert.equal(await q.reads("mainnet").feeMin(body(RD_MIN)), 25_100n);
@@ -525,6 +526,51 @@ test("the host's store: its own folder and lock under HELPER_STORE_DIR, opened o
 });
 
 /** A temp folder removed when the test ends. */
+// ---- card relayer-fresh-near: one fee per epoch ----
+
+test("card relayer-fresh-near: one fee per epoch: every quote in a FEE_EPOCH_MS epoch of chain time answers the fee priced first in it, whatever the price did since; the next epoch prices afresh", async () => {
+  const start = feeEpochOf(base().ms);
+  let w: World = { ...base(), pool: LOW };
+  let clock = NOW;
+  const q = quoterOn(() => w, () => clock);
+  const first = (await q.quote(USDC)).relay_fee;
+  assert.equal(first, withdrawFeeMin({ gasPrice: 100_000_000n, poolToken: 300_000_000_000n, poolNear: 600_000n * 10n ** 24n, registerDeposit: RD_MIN }).toString());
+  // later blocks of the same epoch: NEAR's price doubled and the gas price moved; the quote answers the epoch's fee
+  for (const [dh, ms] of [[10, start + 30_000n], [40, start + FEE_EPOCH_MS - 1n]] as const) {
+    clock += 2_000;
+    w = { ...base(), height: base().height + dh, ms, gp: "110000000", pool: ["300000000000", "300000000000000000000000000000"] };
+    assert.equal((await q.quote(USDC)).relay_fee, first, `block +${dh}`);
+  }
+  // the next epoch's first block: priced now
+  clock += 2_000;
+  w = { ...base(), height: base().height + 50, ms: start + FEE_EPOCH_MS, pool: ["300000000000", "300000000000000000000000000000"] };
+  const next = (await q.quote(USDC)).relay_fee;
+  assert.equal(next, withdrawFeeMin({ gasPrice: 100_000_000n, poolToken: 300_000_000_000n, poolNear: 300_000n * 10n ** 24n, registerDeposit: RD_MIN }).toString());
+  assert.notEqual(next, first);
+  // a quote names no recipient: a fresh one's fee is the epoch's fee (A_fund, its creation, is an S_w term of every fee:
+  // "the formula" above)
+});
+
+test("card relayer-fresh-near: the epoch's fee outlives a restart in the durable store; an unreadable record prices the epoch afresh", async (t) => {
+  const dir = tempDir(t);
+  const start = feeEpochOf(base().ms);
+  let w: World = { ...base(), pool: LOW };
+  let clock = NOW;
+  const first = openDurableDir(dir, nodeFs, (d) => d);
+  assert.equal((await quoterOn(() => w, () => clock, first).quote(USDC)).relay_fee, "25100");
+  first.close(); // the restart, inside the epoch, the price doubled
+  clock += 2_000;
+  w = { ...base(), height: base().height + 5, ms: start + FEE_EPOCH_MS - 1n, pool: ["300000000000", "300000000000000000000000000000"] };
+  const again = openDurableDir(dir, nodeFs, (d) => d);
+  assert.equal((await quoterOn(() => w, () => clock, again).quote(USDC)).relay_fee, "25100", "the restarted relayer answers its epoch's fee");
+  again.replace("fee-epoch-mainnet.json", "{not json");
+  again.close();
+  const torn = openDurableDir(dir, nodeFs, (d) => d);
+  clock += 2_000;
+  assert.ok(BigInt((await quoterOn(() => w, () => clock, torn).quote(USDC)).relay_fee) > 25_100n, "no record: priced now");
+  torn.close();
+});
+
 function tempDir(t: TestContext): string {
   const dir = mkdtempSync(join(tmpdir(), "fee-quotes-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
