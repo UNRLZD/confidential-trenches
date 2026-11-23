@@ -336,8 +336,21 @@ export function judge(rec) {
   const connect = Array.isArray(rec.connect) ? rec.connect : [];
   const unlisted = [...new Set(reqs.filter((x) => pinned(x) && !connect.includes(x.host)).map((x) => x.host))];
   const ins = reqs.filter((x) => pinned(x) && signedIn(x));
+  // where each signed-out request sits (card sign-out-stops-every-base-read): its call, the clock it is read on (the
+  // browser's send, or node's route where no send was matched) and the nearest window's edge, so a failing run names
+  // its cause in its own line
+  const who = [...(chrome ? ["the first passkey account"] : []), "the words' account", ...(chrome && reloads ? ["the second passkey account"] : [])];
+  const where = (x) => {
+    const at = sentAt(x);
+    let near = null;
+    held.forEach(([a, b], i) => {
+      for (const [e, end] of [[a, "sign in"], [b, "sign out"]]) if (typeof e === "number" && typeof at === "number" && (near === null || Math.abs(at - e) < Math.abs(at - near.e))) near = { e, end, i };
+    });
+    const what = `${x.host}${x.path} ${x.rpc?.map((c) => c.method ?? "text").join("+") ?? x.method} ${typeof x.sent === "number" ? "sent" : "routed"}`;
+    return near === null ? `${what} at no time` : `${what} ${Math.abs(Math.round(at - near.e))} ms ${at < near.e ? "before" : "after"} ${who[near.i]}'s ${near.end}`;
+  };
   say(out.length === 0 && unlisted.length === 0,
-    `signed out, no request goes past SIGN_HOST and APP_HOST; signed in, only to a pinned pool's host the page's own connect-src names (${out.length} signed out${out.length ? `: ${out.slice(0, 4).map((x) => `${x.host}${x.path}`).join(", ")}` : ""}; ${ins.length} signed in${ins.length ? ` to ${[...new Set(ins.map((x) => x.host))].join(", ")}` : ""}${unlisted.length ? `; not in its connect-src: ${unlisted.join(", ")}` : ""})`);
+    `signed out, no request goes past SIGN_HOST and APP_HOST; signed in, only to a pinned pool's host the page's own connect-src names (${out.length} signed out${out.length ? `: ${out.slice(0, 4).map((x) => `${x.host}${x.path}`).join(", ")}` : ""}; ${ins.length} signed in${ins.length ? ` to ${[...new Set(ins.map((x) => x.host))].join(", ")}` : ""}${unlisted.length ? `; not in its connect-src: ${unlisted.join(", ")}` : ""})${out.length ? `; when: ${out.slice(0, 4).map(where).join(", ")}` : ""}`);
   if (reloads && chrome) {
     // the words' account's names: each address or id its signed-in requests to the pinned hosts carry that no request
     // before it carried (the first passkey account's, the page's constants). From its sign out's new document on, no
@@ -444,9 +457,12 @@ function serveWith(sign, requests) {
 // document's performance.timeOrigin, the browser's clock. On a loaded runner a request the page sent a few ms before
 // another tab's sign out was heard read as sent after it (merge group 44661520805: the pool price read's eth_chainId,
 // 34 to 84 ms before the hearing in 15 local runs). On Chromium the driver keeps each Network.requestWillBeSent's
-// wallTime; `sent` is set from it where the sends and the records of one request's shape (host, path and query,
-// method, what it asks) are as many and in order, and each send is no later than its record. Elsewhere, or for a shape
-// whose counts differ, `t` stands: a send is never placed earlier than a record it cannot be matched to one for one.
+// wallTime, and a record's `sent` is the latest send of its shape (host, path and query, method, what it asks) no later
+// than the record, where the shape has as many sends as records or more. Its own send is one of those, so a record is
+// never read earlier than its send. A send the browser drops before the route sees it leaves its shape a send over
+// (card sign-out-stops-every-base-read: one of SIGN_HOST's /token/base/ loads, canceled); a one-for-one match then read
+// that whole shape at its routes, and a read sent just before a sign out, routed just after it, read as signed out.
+// Elsewhere, or for a shape with fewer sends than records, `t` stands.
 /** One request's shape, the same for a record and a browser send. */
 const shapeOf = (host, pathAndQuery, method, rpc) => JSON.stringify([host, pathAndQuery, method, rpc ?? null]);
 const recordShape = (x) => shapeOf(x.host, `${x.path}${x.query !== undefined ? `?${x.query}` : ""}`, x.method, x.rpc);
@@ -471,10 +487,19 @@ export function stampSends(requests, sends) {
   const recs = of(requests.filter((x) => !x.refused && typeof x.t === "number"), recordShape);
   const browser = of(sends.filter((s) => s !== null), (s) => s.shape);
   for (const [shape, rs] of recs) {
-    const ss = browser.get(shape) ?? [];
-    // a record's t is Date.now(), whole ms rounded down: its request reached node before t + 1
-    if (ss.length !== rs.length || ss.some((s, i) => !(s.ms < rs[i].t + 1) || (i > 0 && s.ms < ss[i - 1].ms))) continue;
-    rs.forEach((x, i) => (x.sent = Math.round(ss[i].ms * 1000) / 1000));
+    const ss = (browser.get(shape) ?? []).map((s) => s.ms).sort((a, b) => a - b);
+    // fewer sends than records: some record's own send is not among them, so none is read from them
+    if (ss.length < rs.length) continue;
+    for (const x of rs) {
+      // a record's t is Date.now(), whole ms rounded down: its request reached node before t + 1, so its own send is one
+      // of the sends before t + 1, and the latest of them is never earlier than it
+      let latest = null;
+      for (const ms of ss) {
+        if (!(ms < x.t + 1)) break;
+        latest = ms;
+      }
+      if (latest !== null) x.sent = Math.round(latest * 1000) / 1000;
+    }
   }
 }
 /** When a record's request was sent: the browser's own time where it was matched, node's route time otherwise. */
