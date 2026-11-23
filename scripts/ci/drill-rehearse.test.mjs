@@ -142,6 +142,24 @@ test("rehearse.sh refuses a bad call before it starts anything", () => {
   }
 });
 
+// the two recorded runs of drill-rehearse.yml (run 45142237963, scripts/drill/rehearse.answers.json): the off job's
+// rehearsal on GitHub's runner, and the left-on job's, as each uploaded its record.json
+const ANS = JSON.parse(readFileSync(`${ROOT}/scripts/drill/rehearse.answers.json`, "utf8"));
+
+test("recorded on GitHub's runner: the off run passes all six steps, the exit sent every kind home with nothing of ours asked; the left-on run fails at servers-down and never runs the exit", () => {
+  const g = judge(ANS.good);
+  assert.equal(g.pass, true, g.lines.join("\n"));
+  assert.equal(g.lines.filter((l) => l.startsWith("ok ")).length, 6, g.lines.join("\n"));
+  assert.match(g.lines[4], /^ok 5\. exit from the words: after the cut; near: done: sent \d+, left 0/);
+  assert.match(g.lines[5], /^ok 6\. nothing of ours asked: [1-9]\d* request\(s\) written down, 0 to a host of ours$/);
+  const b = judge(ANS.left_on);
+  assert.equal(b.pass, false);
+  assert.match(bad(b, 3), /left out \(--leave-on\)/);
+  assert.match(bad(b, 4), /^BAD 4\. servers down: FAIL on 127\.0\.0\.1:\d+,\d+ .*took a connection/);
+  assert.match(bad(b, 5), /not after a passed cut; no done line; no balance read/);
+  assert.ok(!b.lines.some((l) => /^ok 5\./.test(l)), b.lines.join("\n"));
+});
+
 test("exit_every_kind runs DRILL_CUT after the deposits and before the exit command, and stops when it fails", () => {
   const rs = readFileSync(`${ROOT}/contracts/vault/tests/exit_every_kind.rs`, "utf8");
   const [seed, cut, cmd] = [rs.indexOf('println!("seeded on label'), rs.indexOf('std::env::var("DRILL_CUT")'), rs.indexOf('join("packages/exit/test/exit-cli.ts")).arg(&rpc)')];
