@@ -197,7 +197,7 @@ const M = [
   ["FF2 the tap's wait for a bind call removed (a move signed at the call's nonce)", MOVEOUT,
     [["    if (live) return { wait: true };\n", ""]], WM, "BIND-OUT"],
   ["FF2 the tap waits on a bind call past max_block_height + LAPSE_MARGIN (over never ends the wait)", MOVEOUT,
-    [["return calls.some((c) => c.nonce > u.nonce && low <= c.max_block_height + LAPSE_MARGIN);", "return calls.some((c) => c.nonce > u.nonce);"]], WM, "BIND-OVER"],
+    [["      if (c.nonce > u.nonce) return low <= window;\n", "      if (c.nonce > u.nonce) return true;\n"]], WM, "BIND-OVER"],
   ["FF2 the tap reads no notes", MOVEOUT,
     [["const calls = deps.notes === undefined ? [] : (await deps.notes.list())", "const calls = deps.notes === undefined || true ? [] : (await deps.notes.list())"]], WM, "BIND-OUT"],
   // the follow-up: the tap never waits while it holds U's lock (a call written but unsent goes out only in a round)
@@ -206,10 +206,20 @@ const M = [
   ["FF2 the round's wait for a held op's move removed (a bind beside the move)", FOLLOW,
     [["const moving = !heldOnly && (await moveOutLive());", "const moving = false;"]], WT, "MOVE-OUT"],
   ["FF2 the round waits on a move past its block + MOVE_VALIDITY_BLOCKS (over never ends the wait)", FOLLOW,
-    [["u.nonce < BigInt(r.nonce) && low <= BigInt(r.height) + MOVE_VALIDITY_BLOCKS", "u.nonce < BigInt(r.nonce)"]], WT, "MOVE-OVER"],
+    [["      if (u.nonce < BigInt(r.nonce)) return low <= window;\n", "      if (u.nonce < BigInt(r.nonce)) return true;\n"]], WT, "MOVE-OVER"],
   ["FF2 the round's move check after readCredit (U's USDC bound as read before the move's debit)", FOLLOW,
     [["    const moving = !heldOnly && (await moveOutLive());\n    if (moving) fast = true;\n", ""],
      ["    const c = await readCredit(U, token, rpcs);\n", "    const c = await readCredit(U, token, rpcs);\n    const moving = !heldOnly && (await moveOutLive());\n    if (moving) fast = true;\n"]], WT, "MOVE-OUT"],
+  // card held-move-bind-waits-for-its-receipt: U's nonce moves at a call's own receipt and the token debits U up to
+  // REFUND_HEIGHTS later, so a call read used is out until REFUND_HEIGHTS past the first height that read it used
+  ["RH1 the tap reads a used bind call as its debit done (the height bound dropped)", MOVEOUT,
+    [["      return low <= window + REFUND_HEIGHTS && low < callPassedAt.get(c.nonce)! + REFUND_HEIGHTS;\n", "      return false;\n"]], WM, "BIND-RECEIPT a tap"],
+  ["RH2 the tap waits on a bind call used long ago (the window bound dropped)", MOVEOUT,
+    [["      return low <= window + REFUND_HEIGHTS && low < callPassedAt.get(c.nonce)! + REFUND_HEIGHTS;\n", "      return low < callPassedAt.get(c.nonce)! + REFUND_HEIGHTS;\n"]], WM, "BIND-RECEIPT-OLD"],
+  ["RH3 the round reads a used move as its debit done (the height bound dropped)", FOLLOW,
+    [["      return low <= window + REFUND_HEIGHTS && low < movePassedAt.get(r.hash)! + REFUND_HEIGHTS;\n", "      return false;\n"]], WT, "MOVE-RECEIPT a round"],
+  ["RH4 the round holds the bind for a move used long ago (the window bound dropped)", FOLLOW,
+    [["      return low <= window + REFUND_HEIGHTS && low < movePassedAt.get(r.hash)! + REFUND_HEIGHTS;\n", "      return low < movePassedAt.get(r.hash)! + REFUND_HEIGHTS;\n"]], WT, "MOVE-RECEIPT-OLD"],
 ];
 let ok = 0;
 for (const [name, file, edits, [pkg, test], pat] of M) {
