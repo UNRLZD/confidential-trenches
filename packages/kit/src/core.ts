@@ -75,3 +75,11 @@ export { evmExitGasAddress, evmExitSignSend, evmExitW, evmExitWithdrawCalldata, 
 // that wallet, and the program's context of a release, which the exit checks the bind's answer against
 export { freshWallet, solFirstAccount } from "../../wallet/src/derive/keys.ts";
 export { solanaPool, solanaContextOf, type SolanaFeeAnswer, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
+// card wallet-u-restore-exit: the deposit ids' walk (restore step 5) and its NEAR reader on one pass block, so the exit
+// tool finds each one-time id U_{s,i} by the wallet's own rule and miss limit (vault paper 2.12 steps 1 and 5)
+export { restoreDepositIds, DEPOSIT_ID_MARGIN, type IdReader, type IdState, type LaneIds, type DepositIds } from "../../wallet/src/restore/wallets.ts";
+export { nearIdReader, openRestorePass, type RestorePass } from "../../wallet/src/restore/id-reader.ts";
+// and for the pools' one-time wallets U_X: a lane's walk end at the pools' gap (each pool's restore returns notes only),
+// and U^evm_{s,i}'s address, whose plain send evmExitSignSend signs as W's
+export { walkEnd } from "../../wallet/src/notes/restore.ts";
+export { evmExitU } from "../../wallet/src/pool/evm-exit.ts";

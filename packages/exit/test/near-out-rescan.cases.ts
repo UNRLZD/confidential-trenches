@@ -68,7 +68,7 @@ test("a spend read in_flight by the scan whose callback has since bounced (refun
   // exitCloseOne reads the spend again (withdraw.ts l.352): refund_pending now, so it settles it by A (l.360-373) and closes A
   closes = () => ({ stage: "closed", txs: ["settle", "close"], refund: true });
   const said: string[] = [];
-  const r = await nearExitWith({ rpcs: [vrpc(n0), vrpc(n1)] as never, moveRpcs: [mrpc(n0), mrpc(n1)] as never, prover: {} as never, sleep: async () => {} })({ seed: new Uint8Array(64), to: "x.near", rpcs: [n0, n1], say: (l) => said.push(l) });
+  const r = await nearExitWith({ rpcs: [vrpc(n0), vrpc(n1)] as never, moveRpcs: [mrpc(n0), mrpc(n1)] as never, prover: {} as never, sleep: async () => {}, walk: async () => ({ lanes: [], complete: true }) })({ seed: new Uint8Array(64), to: "x.near", rpcs: [n0, n1], say: (l) => said.push(l) });
   // the refund note the settle wrote is in the vault: this run scans again and withdraws it
   assert.deepEqual([r.sent, r.left, scanCalls], ["5000000", "0", 2], `the run says sent ${r.sent}, left ${r.left}, while a 5 USDC refund note sits in the vault (scans: ${scanCalls}; said: ${said.join(" | ")})`);
 });
@@ -79,7 +79,7 @@ test("control: the same run with the spend read refund_pending by the scan resca
   scans.push({ notes: [], spends: [{ l: 1n, j: 0, note: "deposit", spend: { status: "refund_pending", nullifierHash: 11n, index: 0, reserve: 1n, refundValue: 5_000_000n } }] });
   scans.push({ notes: [refundNote(5_000_000n)], spends: [] });
   closes = () => ({ stage: "closed", txs: ["settle", "close"], refund: true });
-  const r = await nearExitWith({ rpcs: [vrpc(n0), vrpc(n1)] as never, moveRpcs: [mrpc(n0), mrpc(n1)] as never, prover: {} as never, sleep: async () => {} })({ seed: new Uint8Array(64), to: "x.near", rpcs: [n0, n1], say: () => {} });
+  const r = await nearExitWith({ rpcs: [vrpc(n0), vrpc(n1)] as never, moveRpcs: [mrpc(n0), mrpc(n1)] as never, prover: {} as never, sleep: async () => {}, walk: async () => ({ lanes: [], complete: true }) })({ seed: new Uint8Array(64), to: "x.near", rpcs: [n0, n1], say: () => {} });
   assert.equal(scanCalls, 2);
   assert.deepEqual([r.sent, r.left], ["5000000", "0"]);
 });
@@ -89,7 +89,7 @@ test("control: a run whose scan read every spend of ours settled has nothing its
   scans.length = 0;
   scans.push({ notes: [refundNote(2_000_000n)], spends: [{ l: 1n, j: 0, note: "deposit", spend: { status: "settled", nullifierHash: 11n, index: 0, reserve: 0n, refundValue: 0n } }] });
   closes = () => ({ stage: "closed", txs: [], refund: false });
-  const r = await nearExitWith({ rpcs: [vrpc(n0), vrpc(n1)] as never, moveRpcs: [mrpc(n0), mrpc(n1)] as never, prover: {} as never, sleep: async () => {} })({ seed: new Uint8Array(64), to: "x.near", rpcs: [n0, n1], say: () => {} });
+  const r = await nearExitWith({ rpcs: [vrpc(n0), vrpc(n1)] as never, moveRpcs: [mrpc(n0), mrpc(n1)] as never, prover: {} as never, sleep: async () => {}, walk: async () => ({ lanes: [], complete: true }) })({ seed: new Uint8Array(64), to: "x.near", rpcs: [n0, n1], say: () => {} });
   assert.equal(scanCalls, 1);
   assert.deepEqual([r.sent, r.left], ["2000000", "0"]);
 });

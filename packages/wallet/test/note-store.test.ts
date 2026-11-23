@@ -96,10 +96,11 @@ test("every state, and every edge: the legal ones move, every other is refused w
       }
     }
   }
-  // the row's chain, the two ways back to UNSPENT and the other device's spend; nothing else
+  // the row's chain, the two ways back to UNSPENT, the other device's spend and a restore's landing of a TAKEN note
+  // (card wallet-u-restore-exit); nothing else
   assert.deepEqual(legal.sort(), [
     "HELD>HELD", "HELD>RESERVED", "HELD>SPENT", "HELD>UNSPENT", "INCOMING>TAKEN", "INCOMING>UNSPENT", "PLANNED>INCOMING", "PLANNED>TAKEN",
-    "RESERVED>SPENT", "RESERVED>UNSPENT", "UNSPENT>HELD", "UNSPENT>SPENT",
+    "RESERVED>SPENT", "RESERVED>UNSPENT", "TAKEN>INCOMING", "UNSPENT>HELD", "UNSPENT>SPENT",
   ]);
 });
 
@@ -559,7 +560,8 @@ test("F4: a PLANNED deposit index with history this store did not record is TAKE
   const a = await t.ns.planDeposit(931n, pc);
   const taken = await t.ns.move(a.id, "PLANNED", "TAKEN");
   assert.equal(taken.state, "TAKEN");
-  for (const to of NOTE_STATES) await assert.rejects(t.ns.move(a.id, "TAKEN", to), /never goes from/);
+  // out of TAKEN only to INCOMING, a restore's landing (../src/notes/restore.ts landNote); the index is never named again
+  for (const to of NOTE_STATES) if (to !== "INCOMING") await assert.rejects(t.ns.move(a.id, "TAKEN", to), /never goes from/);
   const b = await t.ns.planDeposit(931n, pc);
   assert.notEqual(b.id, a.id);
   assert.equal((b.ref as { i: number }).i, (a.ref as { i: number }).i + 8);

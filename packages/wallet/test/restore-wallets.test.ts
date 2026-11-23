@@ -175,6 +175,16 @@ test("step 5: every lane's deposit ids are read to 21 past its highest with a no
   assert.deepEqual(log, want);
 });
 
+// card wallet-u-restore-exit: money left on U_3 and U_7 of a scope with no note there (a remainder 1Click delivered, a
+// refund under the id) is listed by the restore, each as its own index's U
+test("step 5: money left on U_3 and U_7 is listed, both", async () => {
+  const { holds } = idReader([3, 7]);
+  const got = await restoreDepositIds(SEED, SCOPE, { notes: [], laneHighest: Array(8).fill(null), laneWalked: walkedTo(Array(8).fill(null)) }, holds);
+  assert.deepEqual(got.flatMap((x) => x.money), [3, 7]);
+  assert.deepEqual([got[3]!.highest, got[7]!.highest], [3, 7]);
+  assert.equal(id(3), depositAccount(SEED, SCOPE, 3).account);
+});
+
 test("step 5: an id read that fails counts as money (listed, the lane goes on past it); a lane's highest that is not its highest note is refused", async () => {
   const { holds } = idReader([], [at(1, 20)]);
   const got = await restoreDepositIds(SEED, SCOPE, LANES, holds);

@@ -50,6 +50,9 @@ const code = await runCli({
   hidden: next,
   line: next,
   say: (l) => process.stderr.write(`${l}\n`),
-  chains: { near: { run: nearExitWith({ rpcs, moveRpcs, sleep: (ms) => new Promise((ok) => setTimeout(ok, Math.min(ms, 5_000))) }), rpcs: [...pair] as [string, string], asks: "a NEAR account" } },
+  // the deposit ids' walk paces its reads on its own clock, not waited here: the sandbox has no provider limit, and
+  // FastNEAR's public pace (0.39 a second, packages/wallet/src/pace.ts) would hold the walk about 22 minutes, past the
+  // sandbox dropping the walk's pass block (UNKNOWN_BLOCK) and the shard's time
+  chains: { near: { run: nearExitWith({ rpcs, moveRpcs, sleep: (ms) => new Promise((ok) => setTimeout(ok, Math.min(ms, 5_000))), paceSleep: () => new Promise((ok) => setImmediate(ok)) }), rpcs: [...pair] as [string, string], asks: "a NEAR account" } },
 });
 process.exit(code);

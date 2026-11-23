@@ -9,11 +9,14 @@
 // - W_{evm, l, j}, a note's fresh wallet: it signs the pool's EIP-712 Withdraw of its own note (PrivacyPool.sol:
 //   WITHDRAW_TYPEHASH, the Blindfill domain at version 1, the chain and the pool), which makes it the release's
 //   recipient, and then one plain send (no data) of what it holds to the address the user typed.
+// - U^evm_{s,i}, a pool deposit's one-time wallet on Base and Robinhood (card wallet-u-restore-exit): an HKDF key no
+//   outside wallet imports, so what it holds (a delivery 1Click left, a remainder under a deposit's floor) leaves by
+//   one plain send of it to the address the user typed, held to W's shape.
 // - A send is EIP-1559 (type 2) with an empty access list: 0x02 ‖ rlp([chainId, nonce, tip, maxFee, gas, to, value,
 //   data, [], yParity, r, s]), s low.
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { EVM_FIRST_ACCOUNT_PATH, evmAddress, evmFirstAccount, freshWallet } from "../derive/keys.ts";
+import { depositIdEvm, EVM_FIRST_ACCOUNT_PATH, evmAddress, evmFirstAccount, freshWallet } from "../derive/keys.ts";
 import { evmRelayDataBytes, type EvmRelayData } from "./evm.ts";
 
 /** G's path: BIP-44 coin 60, account 0, external chain, index 0 (derive/keys.ts evmFirstAccount). */
@@ -75,6 +78,13 @@ export function evmExitW(seed64: Uint8Array, l: bigint, j: number): string {
   return w.address.toLowerCase();
 }
 
+/** U^evm_{s,i}'s address (lowercase), its key zeroed at once. */
+export function evmExitU(seed64: Uint8Array, s: bigint, i: number): string {
+  const u = depositIdEvm(seed64, s, i);
+  u.secretKey.fill(0);
+  return u.address.toLowerCase();
+}
+
 // ---------- the pool's withdraw ----------
 
 /** The EIP-712 digest of Withdraw(nullifier, context, value) on `pool` at `chainId`, as PrivacyPool.withdraw makes it. */
@@ -123,8 +133,8 @@ export function evmExitWithdrawCalldata(pool: string, relay: EvmRelayData, proof
 
 /** One EIP-1559 send's fields. */
 export type EvmExitTx = { chainId: bigint; nonce: bigint; tip: bigint; maxFee: bigint; gas: bigint; to: string; value: bigint; data: Uint8Array };
-/** Who signs: G, for a call of `pool`'s withdraw (value 0); or W_{evm, l, j}, for a plain send (no data). */
-export type EvmExitSigner = { kind: "gas"; pool: string } | { kind: "w"; l: bigint; j: number };
+/** Who signs: G, for a call of `pool`'s withdraw (value 0); or W_{evm, l, j} or U^evm_{s,i}, for a plain send (no data). */
+export type EvmExitSigner = { kind: "gas"; pool: string } | { kind: "w"; l: bigint; j: number } | { kind: "u"; s: bigint; i: number };
 
 const rlpLen = (n: number, base: number): Uint8Array => (n < 56 ? Uint8Array.of(base + n) : cat([Uint8Array.of(base + 55 + evenHex(BigInt(n)).length / 2), bytesOf(evenHex(BigInt(n)))]));
 const rlpBytes = (b: Uint8Array): Uint8Array => (b.length === 1 && b[0]! < 0x80 ? b : cat([rlpLen(b.length, 0x80), b]));
@@ -135,14 +145,14 @@ const rlpList = (items: readonly Uint8Array[]): Uint8Array => {
 };
 
 /** The signer's raw type 2 send and its hash, after the shape check: G's only to the pool, value 0, a withdraw call;
- *  W's only a plain send (no data) to any address but the zero address and the precompiles. */
+ *  W's and U's only a plain send (no data) to any address but the zero address and the precompiles. */
 export function evmExitSignSend(seed64: Uint8Array, signer: EvmExitSigner, t: EvmExitTx): { raw: Uint8Array; hash: string; from: string } {
   const to = addr(t.to, "to");
   if (t.tip > t.maxFee || t.gas <= 0n) refuse("fee fields");
   if (signer.kind === "gas") {
     if (to !== addr(signer.pool, "pool") || t.value !== 0n || t.data.length !== 1028 || hexOf(t.data.subarray(0, 4)) !== hexOf(WITHDRAW_SELECTOR)) refuse("G signs only the pool's withdraw, value 0");
-  } else if (t.data.length !== 0 || BigInt(to) < 0x10000n) refuse("W signs only a plain send to an address");
-  const key = signer.kind === "gas" ? gasKey(seed64) : freshWallet(seed64, "evm", signer.l, signer.j).secretKey;
+  } else if (t.data.length !== 0 || BigInt(to) < 0x10000n) refuse(`${signer.kind === "w" ? "W" : "U"} signs only a plain send to an address`);
+  const key = signer.kind === "gas" ? gasKey(seed64) : signer.kind === "w" ? freshWallet(seed64, "evm", signer.l, signer.j).secretKey : depositIdEvm(seed64, signer.s, signer.i).secretKey;
   try {
     const fields = [rlpUint(t.chainId), rlpUint(t.nonce), rlpUint(t.tip), rlpUint(t.maxFee), rlpUint(t.gas), rlpBytes(bytesOf(to)), rlpUint(t.value), rlpBytes(t.data), rlpList([])];
     const rec = secp256k1.sign(keccak_256(cat([Uint8Array.of(2), rlpList(fields)])), key, { prehash: false, lowS: true, format: "recovered" });

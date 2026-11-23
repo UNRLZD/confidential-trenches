@@ -932,7 +932,31 @@ test("E5: a PLANNED index the restore finds landed is written landed with its le
   }
 });
 
-test("R3c, R3d and D5: a TAKEN index and an INCOMING note the vault holds come back in leftAlone; notes below TAKEN are written, notes below INCOMING wait", async () => {
+// card wallet-u-restore-exit: TAKEN was terminal, so a note one RPC pair marked taken (a mark it read apart from the
+// note's own send) stayed unshown and unspendable on this device for good, though the restore's own reads on both RPCs
+// find its leaf on the seed's precommitment at the value its send recorded. The restore's reads are the landing's
+// proof, as for a PLANNED note (E5): the TAKEN record itself is landed with that leaf, nothing left alone.
+test("TAKEN by a lying pair: a TAKEN note whose leaf holds its recorded value is restored UNSPENT on honest RPCs", async () => {
+  const v = new Vault();
+  const { ns, close } = await liveStore();
+  try {
+    const t = await ns.planDeposit(SCOPE, (ref) => sec(ref).precommitment);
+    await ns.move(t.id, "PLANNED", "INCOMING"); // its own send left, 25 USDC
+    await ns.move(t.id, "INCOMING", "TAKEN"); // a lying pair read the mark as another deposit's
+    v.deposit(t.precommitment, 25_000_000n, hex64("own send")); // the honest pair: its own send landed
+    const got = await restoreNotes({ seed64: SEED, vault: VAULT, token: TOKEN, rpcs: rpcs(v.views()), gap: TEST_GAP });
+    const out = await writeRestored(ns, got);
+    assert.deepEqual(out.leftAlone, []);
+    const back = out.notes.find((x) => x.id === t.id)!;
+    assert.equal(back.state, "UNSPENT", "the TAKEN record itself is the landed note");
+    assert.equal(back.leaf?.value, 25_000_000n);
+    assert.deepEqual(back.leaf, got.notes.find((x) => refKey(x.ref) === refKey(t.ref))!.leaf);
+  } finally {
+    close();
+  }
+});
+
+test("R3c, R3d and D5: an INCOMING note the vault holds comes back in leftAlone and the notes below it wait; a TAKEN index is landed, spent, with its change below it", async () => {
   const v = new Vault();
   const { ns, close } = await liveStore();
   try {
@@ -952,16 +976,17 @@ test("R3c, R3d and D5: a TAKEN index and an INCOMING note the vault holds come b
     const out = await writeRestored(ns, got);
     const left = out.leftAlone.map((x) => [x.key, x.stored, x.vault, x.why]).sort();
     assert.deepEqual(left, [
-      [refKey(t.ref), "TAKEN", "SPENT", "taken"],
       [refKey(n.ref), "INCOMING", "SPENT", "incoming"],
       [refKey(nref), null, "UNSPENT", "parent"],
     ].sort());
     const states = new Map(out.notes.map((x) => [x.id, x.state]));
-    assert.equal(states.get(t.id), "TAKEN");
+    // the TAKEN record is the other device's note on this seed's P: landed with the leaf read, then spent by its change
+    assert.equal(states.get(t.id), "SPENT");
+    assert.equal(out.notes.find((x) => x.id === t.id)!.leaf?.value, 40_000_000n);
     assert.equal(states.get(n.id), "INCOMING");
-    // TAKEN is terminal: the other device's 30 USDC change is written, spendable, with no parent (D5)
+    // the other device's 30 USDC change is written, spendable, below the landed record (D5)
     const ch = out.notes.find((x) => refKey(x.ref) === refKey(cref));
-    assert.ok(ch && ch.state === "UNSPENT" && ch.parent === undefined && ch.leaf?.value === 30_000_000n, "the change below TAKEN is written UNSPENT");
+    assert.ok(ch && ch.state === "UNSPENT" && ch.parent === t.id && ch.leaf?.value === 30_000_000n, "the change below the TAKEN record is written UNSPENT");
     // INCOMING still lands by the deposit's own confirm: nothing below it is written yet
     assert.equal(out.notes.find((x) => refKey(x.ref) === refKey(nref)), undefined);
     assert.equal(out.notes.length, 3);

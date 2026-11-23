@@ -13,6 +13,12 @@
 //   note's whole value at fee 0, proved against the newest roots both RPCs agree on, signed by W, and sent by the gas
 //   wallet G, which pays its gas. Then W sends what it holds less its own gas to the typed address. A W a spend of the
 //   restore names (an earlier release whose onward send never ran) is swept the same way.
+// - The pool deposits' one-time wallets U^evm_{s,i} (card wallet-u-restore-exit): what 1Click delivered there and no
+//   deposit took, or what a deposit left under the pool's floor. Which ones to read is the wallet's own deposit id walk
+//   (restoreDepositIds: each lane to DEPOSIT_ID_MARGIN never-used ids past its highest note or history), each U read on
+//   both RPCs at one block (money: a balance; used: a nonce); each one holding more than its own gas sends the rest to
+//   the typed address, U its only signer and gas payer, as W's send. Less than its gas is told and stays; an id the two
+//   RPCs read apart stops the chain, named, after the rest were sent.
 // - The keys stay in the wallet: every signature is the wallet's (packages/wallet/src/pool/evm-exit.ts, through the
 //   kit's ./core), which derives its own key from the seed and signs only the shapes it checks. This file holds none.
 // - G is the words' first EVM account at m/44'/60'/0'/0/0, the one any EVM wallet shows for these words, so the user
@@ -27,6 +33,7 @@ import {
   EVM_POOLS,
   evmExitGasAddress,
   evmExitSignSend,
+  evmExitU,
   evmExitW,
   evmExitWithdrawCalldata,
   evmExitWithdrawSignature,
@@ -37,6 +44,11 @@ import {
   evmTreeSync,
   jOf,
   noteSecrets,
+  restoreDepositIds,
+  RESTORE_GAP,
+  RESTORE_LANES,
+  walkEnd,
+  type EvmExitSigner,
   type EvmPoolPin,
   type EvmRelayData,
   type EvmRestoredNote,
@@ -79,6 +91,8 @@ export type ExitEvmOpts = {
   rpcs?: readonly [EvmRpc, EvmRpc];
   /** the prover; else the one exitEvmProver was given */
   prover?: VaultProver;
+  /** tests only: the restore's notes and spends in place of evmRestoreNotes on the pair (a test has no pool's logs) */
+  restore?: () => ReturnType<typeof evmRestoreNotes>;
   wait?: (ms: number) => Promise<void>;
 };
 
@@ -149,9 +163,10 @@ async function land(rpcs: readonly [EvmRpc, EvmRpc], raw: Uint8Array, hash: stri
   return refuse(`${hash}: no receipt on both RPCs in ${EXIT_EVM_RECEIPT_MS / 1000} s`);
 }
 
-/** W_{evm, l, j}'s whole balance less its gas, to `to`: null when W holds less than its gas. */
-async function sweep(rpcs: readonly [EvmRpc, EvmRpc], chain: Chain, chainId: bigint, seed: Uint8Array, l: bigint, j: number, to: string, wait: (ms: number) => Promise<void>): Promise<{ hash: string; value: bigint } | null> {
-  const w = evmExitW(seed, l, j);
+/** A one-time wallet's whole balance less its gas, to `to` (W_{evm, l, j}, or a pool deposit's U^evm_{s,i}), signed by
+ *  it alone: null when it holds nothing; `under` with its balance when it holds no more than its gas. */
+async function sweep(rpcs: readonly [EvmRpc, EvmRpc], chain: Chain, chainId: bigint, seed: Uint8Array, signer: Exclude<EvmExitSigner, { kind: "gas" }>, to: string, wait: (ms: number) => Promise<void>): Promise<{ hash: string; value: bigint } | { under: bigint } | null> {
+  const w = signer.kind === "w" ? evmExitW(seed, signer.l, signer.j) : evmExitU(seed, signer.s, signer.i);
   const b = await newest(rpcs);
   const tag = qty(b.number);
   const bal = await balanceOf(rpcs, w, tag);
@@ -165,9 +180,9 @@ async function sweep(rpcs: readonly [EvmRpc, EvmRpc], chain: Chain, chainId: big
   const hi = est[0] > est[1] ? est[0] : est[1];
   const gas = code ? hi + hi / 5n : hi;
   const bound = gas * maxFee + (await l1Fee(rpcs, chain, gas, 128n, tag));
-  if (bal <= bound) return null;
+  if (bal <= bound) return { under: bal };
   const value = bal - bound;
-  const { raw, hash } = evmExitSignSend(seed, { kind: "w", l, j }, { chainId, nonce, tip, maxFee, gas, to, value, data: new Uint8Array(0) });
+  const { raw, hash } = evmExitSignSend(seed, signer, { chainId, nonce, tip, maxFee, gas, to, value, data: new Uint8Array(0) });
   const end = await land(rpcs, raw, hash, wait);
   if (end !== "ok") refuse(`${w}'s send ${hash} reverted on both RPCs`);
   return { hash, value };
@@ -208,7 +223,7 @@ export async function exitEvm(chain: Chain, ctx: ExitCtx, opts: ExitEvmOpts = {}
   ctx.say(`${name}: reading the pool ${pin.pool} from block ${pin.fromBlock} on ${ctx.rpcs.join(" and ")}`);
   // one hold of the pool's sync: the tree reads after the restore read only the blocks past it
   const held = evmMemoryHold();
-  const r = await evmRestoreNotes({ seed64: ctx.seed, pin, rpcs, wallets: false, held });
+  const r = opts.restore ? await opts.restore() : await evmRestoreNotes({ seed64: ctx.seed, pin, rpcs, wallets: false, held });
   const open = r.notes.filter((n): n is EvmRestoredNote => n.state === "UNSPENT" && n.leaf.value > 0n);
   let left = open.reduce((s, n) => s + n.leaf.value, 0n);
   ctx.say(`${name}: ${open.length} note(s) in the pool, ${exitEth(left)}; ${r.spends.length} spent before`);
@@ -218,8 +233,8 @@ export async function exitEvm(chain: Chain, ctx: ExitCtx, opts: ExitEvmOpts = {}
     const key = `${l}:${j}`;
     if (swept.has(key)) return;
     swept.add(key);
-    const s = await sweep(rpcs, chain, chainId, ctx.seed, l, j, to, wait);
-    if (s === null) return;
+    const s = await sweep(rpcs, chain, chainId, ctx.seed, { kind: "w", l, j }, to, wait);
+    if (s === null || "under" in s) return;
     txs.push(s.hash);
     sent += s.value;
     ctx.say(`${name}: ${exitEth(s.value)} sent to ${ctx.to} (${s.hash})`);
@@ -274,6 +289,35 @@ export async function exitEvm(chain: Chain, ctx: ExitCtx, opts: ExitEvmOpts = {}
     ctx.say(`${name}: released ${exitEth(n.leaf.value)} to its one-time wallet ${w} (${tx.hash})`);
     await sweepW(l, j);
   }
+  // the pool deposits' one-time wallets U^evm_{s,i}, read by the wallet's deposit id walk (the header's)
+  const deposits = r.notes.filter((n) => n.ref.kind === "deposit" && n.ref.s === scope);
+  const laneHighest: (number | null)[] = Array<number | null>(RESTORE_LANES).fill(null);
+  for (const n of deposits) if (n.ref.kind === "deposit") laneHighest[n.ref.i % RESTORE_LANES] = Math.max(laneHighest[n.ref.i % RESTORE_LANES] ?? n.ref.i, n.ref.i);
+  const laneWalked = laneHighest.map((h, lane) => walkEnd(lane, h === null ? [] : [h], RESTORE_GAP));
+  const ids = await restoreDepositIds(ctx.seed, scope, { notes: deposits, laneHighest, laneWalked }, async (_id, i) => {
+    const u = evmExitU(ctx.seed, scope, i!);
+    const tag = qty((await newest(rpcs)).number);
+    if ((await balanceOf(rpcs, u, tag)) > 0n) return "money";
+    return (await nonceOf(rpcs, u, tag)) > 0n ? "used" : "unused";
+  });
+  for (const x of ids.lanes) {
+    for (const i of x.money) {
+      const u = evmExitU(ctx.seed, scope, i);
+      const s = await sweep(rpcs, chain, chainId, ctx.seed, { kind: "u", s: scope, i }, to, wait);
+      if (s === null) continue;
+      if ("under" in s) {
+        left += s.under;
+        ctx.say(`${name}: the deposit wallet ${u} holds ${exitEth(s.under)}, not more than its own gas: it stays`);
+        continue;
+      }
+      txs.push(s.hash);
+      sent += s.value;
+      ctx.say(`${name}: ${exitEth(s.value)} left on the deposit wallet ${u} sent to ${ctx.to} (${s.hash})`);
+    }
+  }
+  const unread = ids.lanes.flatMap((x) => x.unread.map((u) => `unread index ${u.i} (${u.error})`));
+  const reach = ids.lanes.filter((x) => x.reach !== null).map((x) => `history past the walk's end in lane ${x.lane} at ${String(x.reach)}`);
+  if (unread.length > 0 || reach.length > 0) refuse(`${name}: a pool deposit's one-time wallet is not read: ${[...unread, ...reach].join("; ")} (txs so far: ${txs.join(" ") || "none"}); run the exit again to go on`);
   return { chain, txs, sent: sent.toString(), left: left.toString() };
 }
 

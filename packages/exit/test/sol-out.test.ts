@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { createPublicKey, verify } from "node:crypto";
 import { test } from "node:test";
 import { solanaDecodePoolRelease, solanaDecodeTransaction, VaultTree, type SolanaRpc, type VaultSnarkjsProof } from "@blindfill/kit";
-import { solanaContextOf, solanaPoolOf, wordsToSeed64, type SolanaReleaseRequest, type SolanaRestoredNote } from "@blindfill/kit/core";
+import { depositId, solanaContextOf, solanaPoolOf, wordsToSeed64, type SolanaReleaseRequest, type SolanaRestoredNote } from "@blindfill/kit/core";
 import type { ExitCtx } from "../src/chain.ts";
 import { b58decode, b58encode, solExitWith, solFeeWallet, type SolExitOver } from "../src/sol-out.ts";
 import { EXIT_SOL_CLUSTERS } from "../src/sol-rpc.ts";
@@ -25,7 +25,7 @@ const NOW = 1_800_000_000_000n;
 const FEE = 1_700_000n;
 
 /** A chain on two RPCs (the same state, each its own URL): balances, accounts, and every transaction sent. */
-function chain(o: { accounts?: Record<string, { owner: string; executable: boolean }> } = {}) {
+function chain(o: { accounts?: Record<string, { owner: string; executable: boolean }>; history?: string[]; unreadSigs?: string[] } = {}) {
   const balance = new Map<string, bigint>();
   const landed = new Map<string, Uint8Array>();
   const sent: Uint8Array[] = [];
@@ -52,6 +52,11 @@ function chain(o: { accounts?: Record<string, { owner: string; executable: boole
       }
       case "getBalance":
         return { value: Number(balance.get(p[0] as string) ?? 0n) };
+      case "getSignaturesForAddress": {
+        const a = p[0] as string;
+        if (o.unreadSigs?.includes(a)) return null;
+        return o.history?.includes(a) ? [{ signature: "x" }] : [];
+      }
       case "getLatestBlockhash":
         return { context: { slot: 10 }, value: { blockhash, lastValidBlockHeight: 1_000 } };
       case "isBlockhashValid":
@@ -203,6 +208,54 @@ test("(c) a typed address that is a program, the pool program or not base58 is r
   const c = chain({ accounts: { [page]: { owner: PROGRAM, executable: false } } });
   await assert.rejects(solExitWith(over(c))(ctxOf(seed, [], page)), /an account of the pool/);
   assert.equal(c.sent.length, 0);
+});
+
+// card wallet-u-restore-exit: a pool deposit's one-time wallet U_X on Solana is the deposit id's own HKDF key, which no
+// outside wallet imports; money left there (a delivery, a refund carried back, a remainder under a deposit's floor) leaves
+// only by the exit. U_X of (pool scope, i) is the base58 of the id's 32 bytes.
+const uxOf = (seed: Uint8Array, i: number): string => {
+  const k = depositId(seed, SCOPE, i);
+  k.secretKey.fill(0);
+  return b58encode(k.publicKey);
+};
+
+test("(e) money left on U_3 and U_7 of the pool's deposits goes to the typed address, each U_X its own signer; dust under its fee stays, told", async () => {
+  const seed = wordsToSeed64(WORDS);
+  const U3 = uxOf(seed, 3), U7 = uxOf(seed, 7), U15 = uxOf(seed, 15), U23 = uxOf(seed, 23);
+  const c = chain({ history: [U15] });
+  c.balance.set(solFeeWallet(seed).address, 1_000_000_000n);
+  c.balance.set(U3, 7_000_000n); // a remainder a carry left
+  c.balance.set(U7, 120_000_000n); // a delivery 1Click left
+  c.balance.set(U23, 4_000n); // dust under its own fee, past a used and emptied U_15: the walk reads on past it
+  const lines: string[] = [];
+  const r = await solExitWith({ ...over(c), scan: async () => ({ notes: [], spends: [] }) })(ctxOf(seed, lines));
+  assert.equal(c.sent.length, 2, lines.join("\n"));
+  const outs = c.sent.map((w) => solanaDecodeTransaction(w));
+  for (const [k, from, v] of [[0, U3, 7_000_000n], [1, U7, 120_000_000n]] as const) {
+    const t = outs[k]!;
+    assert.equal(t.signatures, 1);
+    assert.equal(t.message.staticKeys[0], from, "U_X pays its own fee");
+    const ix = t.message.instructions[0]!;
+    assert.equal(t.message.instructions.length, 1);
+    assert.equal(t.message.staticKeys[ix.programIndex], SYSTEM);
+    assert.deepEqual(ix.accounts.map((a) => t.message.staticKeys[a]), [from, TO]);
+    assert.equal(new DataView(ix.data.buffer, ix.data.byteOffset).getBigUint64(4, true), v - 5_000n);
+    assert.ok(verify(null, t.messageBytes, ed(from), c.sent[k]!.subarray(1, 65)), "U_X signed");
+    assert.equal(c.balance.get(from), 0n);
+  }
+  assert.equal(c.balance.get(TO), 7_000_000n - 5_000n + 120_000_000n - 5_000n);
+  assert.ok(lines.some((l) => l.includes(U23) && l.includes("stays")), lines.join("\n"));
+  assert.deepEqual(r, { chain: "solana", txs: c.sent.map((w) => b58encode(w.subarray(1, 65))), sent: (127_000_000n - 10_000n).toString(), left: "4000" });
+});
+
+test("(f) a U_X whose history neither RPC can list ends the run stopped, named, after what could be sent", async () => {
+  const seed = wordsToSeed64(WORDS);
+  const U3 = uxOf(seed, 3), U4 = uxOf(seed, 4);
+  const c = chain({ unreadSigs: [U4] });
+  c.balance.set(U3, 7_000_000n);
+  const lines: string[] = [];
+  await assert.rejects(solExitWith({ ...over(c), scan: async () => ({ notes: [], spends: [] }) })(ctxOf(seed, lines)), /U_X is not read: unread index 4 .*run the exit again to go on/);
+  assert.equal(c.sent.length, 1, "U_3 is sent before the stop");
 });
 
 test("(d) a pair of RPCs that is not the release's is refused before any read", async () => {
