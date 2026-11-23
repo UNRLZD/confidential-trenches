@@ -7,12 +7,16 @@
 // (packages/signpage/src/pools.ts poolBuyDryKind, pool-buy-evm.ts evmBuyDry, near-buy.ts nearBuyDry).
 //   Each chain's coins: the helper's own lists (GET /v1/market/lists?chain=<chain> on HELPER_HOST, trending then new),
 //   asked in order until one answers with an out, or a refusal that is no coin's own (a venue the page cannot read,
-//   quote_check_failed; a provider down; no quote of that coin: an answer with no out go on to the next coin).
+//   quote_check_failed; a venue it cannot trade yet, venue_not_pinned or no_table_fits; a provider down; no quote of
+//   that coin: an answer with no out go on to the next coin).
 //   PASS per chain only when the answer is ok with tap_max "0" (one tap spends nothing of a pool with no note), with_cash
 //   absent or "0" (Max $0: no Cash), and `out` a decimal above 0 (You receive: the typed amount priced as the buy from
 //   Cash would run). not_funded (or any refusal not a coin's own), or no out on every coin asked, FAILs: the page
 //   priced no buy for a user with no pool note.
-//   Every coin of a chain refused quote_check_failed or down: INCONCLUSIVE for that chain.
+//   Every coin of a chain refused quote_check_failed, venue_not_pinned, no_table_fits or down: INCONCLUSIVE for that
+//   chain (card buy-quote-check-skips-an-unpinned-venue: a venue with no pinned pool table is refused before any note is
+//   read, packages/wallet/src/pool/solana.ts SOL_POOL_TABLES, so it says nothing of a buy priced with no note; the sign
+//   live run 45066381643, 22 Nov 20:40Z, failed on the first trending Solana coin for it).
 // Records hold public values only: the chain, the coin, the amount asked and the page's answer. Never a key or the words.
 // After: sign
 // Bundle: out a browser and a new account on the live SIGN_HOST
@@ -39,7 +43,8 @@ export const CHAINS = Object.freeze(Object.keys(ASKS));
 export const COINS_MAX = 8;
 const ANSWER_MS = 45_000;
 const DECIMAL = /^(0|[1-9][0-9]*)(\.[0-9]+)?$/;
-const AGAIN = new Set(["quote_check_failed", "down", "busy", "timeout"]);
+/** A coin's own answers: the check asks the next coin, and every coin answered so is INCONCLUSIVE for the chain. */
+const AGAIN = new Set(["quote_check_failed", "venue_not_pinned", "no_table_fits", "down", "busy", "timeout"]);
 /** The kit's hello, sent from the frame before the asks, so the page reads every answer at this kit's level (with_cash
  *  and out in full), whatever kit the deployed terminal names. */
 const HELLO = { v: 1, type: "hello", kit: SIGNPAGE_KIT_VERSION };
@@ -139,7 +144,8 @@ export async function read(sign = SIGN, fetchFn = fetch, site = null) {
         }
         // `coin`, not `token`: a record field named token holding a mint reads to a secret scan as a key
         rec.asks.push({ chain, coin: token, amount: ASKS[chain], ...a });
-        // the next coin only for this coin's own reads: its venue not read, a provider down, or no quote of it (no out)
+        // the next coin only for this coin's own reads: its venue not read or not tradable yet, a provider down, or no
+        // quote of it (no out)
         if (a.ok ? typeof a.result?.out === "string" : !AGAIN.has(a.code)) break;
       }
     }
