@@ -53,6 +53,8 @@ export type NearExitOver = {
   moveRpcs?: readonly [MoveOutRpc, MoveOutRpc];
   prover?: VaultProver;
   sleep?: (ms: number) => Promise<void>;
+  /** the walk's pace and busy waits, on the reads' own clock (`sleep` unless given): a sandbox has no provider limit */
+  paceSleep?: (ms: number) => Promise<void>;
   /** the deposit ids' walk (restoreDepositIds on nearIdReader at one pass block, unless given) */
   walk?: (scope: bigint, scan: ExitScan) => Promise<DepositIds>;
 };
@@ -248,7 +250,8 @@ export function nearExitWith(over: NearExitOver = {}): ExitChain {
       const scope = vaultScopeOf(keccak_256, EXIT_NETWORKS[network as NearNetwork].vault, EXIT_TOKENS[network as NearNetwork]);
       // the reads' own clock when a test gives the sleep (the wallet's reader takes a given sleep only with its clock)
       let t = 0;
-      const clock = over.sleep ? { sleep: async (ms: number) => { t += ms; await sleep(ms); }, now: () => t } : {};
+      const paced = over.paceSleep ?? over.sleep;
+      const clock = paced ? { sleep: async (ms: number) => { t += ms; await paced(ms); }, now: () => t } : {};
       const money: number[] = [];
       try {
         const walk = over.walk

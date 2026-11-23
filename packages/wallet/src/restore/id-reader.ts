@@ -317,7 +317,9 @@ async function view(rpc: NearRpc, params: Obj, what: string, ask: Ask, signal?: 
   if (a.error !== undefined) {
     const cause = isObj(a.error) && isObj(a.error.cause) ? a.error.cause.name : undefined;
     if (params.request_type === "view_account" && cause === "UNKNOWN_ACCOUNT") return { v: null, b: null };
-    throw new Error(`${rpc.name}: ${what}: ${String(isObj(a.error) ? (a.error.name ?? a.error.message) : "an error")}`.slice(0, 200));
+    // the error's name and its cause's (HANDLER_ERROR alone does not say whether the block, the account or the call failed)
+    const named = String(isObj(a.error) ? (a.error.name ?? a.error.message) : "an error");
+    throw new Error(`${rpc.name}: ${what}: ${named}${typeof cause === "string" ? ` (${cause})` : ""}`.slice(0, 200));
   }
   const r = a.result;
   if (!isObj(r) || r.error !== undefined || !Number.isSafeInteger(r.block_height) || (r.block_height as number) <= 0 || typeof r.block_hash !== "string" || !HASH.test(r.block_hash))
