@@ -1,0 +1,115 @@
+# The unplug drill's rehearsal on GitHub's runners (card vault-drill-rehearsal-mainnet-copy): scripts/drill/rehearse.sh
+# brings the helper's compose stack up keyless, deposits on near-sandbox holding the mainnet vault's code and state
+# (contracts/vault/tests/exit_every_kind.rs), runs apps/helper/deploy/unplug.sh off, reads scripts/drill/servers-down.mjs
+# against the stack, then withdraws with the exit tool's command from the published all-zero words alone and reads the
+# balances on chain. No test network, no vendor key and no secret: each vendor on its keyless plan. Two jobs:
+#   off       the rehearsal; passes only when scripts/drill/rehearse.mjs judges its record PASS
+#   left-on   the same run with unplug.sh off left out; passes only when its servers-down read fails, the exit never
+#             runs and the rehearsal exits 1
+# Each job uploads its out dir; the records go to scripts/drill/rehearse.answers.json. No required job, holds no merge:
+#   gh workflow run drill-rehearse.yml --ref <branch>
+# and on a pull request that changes the rehearsal or this workflow (a dispatch reads only the default branch's
+# workflows, so a branch's first run comes from its pull request, as unplug-proof.yml's did).
+#
+# Every action is pinned by commit sha, as ci.yml pins them: actions/checkout v7.0.1, pnpm/action-setup v6.1.0,
+# actions/setup-node v7.1.0, actions/cache v6.1.0, Swatinem/rust-cache v2.9.3, actions/upload-artifact v7.0.2.
+name: drill-rehearse
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "scripts/drill/rehearse*"
+      - ".github/workflows/drill-rehearse.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: drill-rehearse-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rehearse:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [off, left-on]
+    # the same env as ci.yml's vault-sandbox jobs (rust-cache's key)
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # the exit command and its test helpers import the workspace's packages
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - run: pnpm install --frozen-lockfile
+      - name: rust 1.96.0
+        run: bash scripts/ci/retry.sh rustup toolchain install 1.96.0 --profile minimal --target wasm32-unknown-unknown
+      # cargo-near 0.22.0, the release binary checked against the sha256 its release publishes (read 2026-11-02 12:41Z)
+      - id: cargo-near-tgz
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ci-downloads/cargo-near-0.22.0.tgz
+          key: download-cargo-near-0.22.0-9429064e30a427e96523f539cb255f3688d2345e5000d7d4e4873a8247247d1a
+      - name: install cargo-near
+        run: |
+          bash scripts/ci/fetch.sh ~/.cache/ci-downloads/cargo-near-0.22.0.tgz 9429064e30a427e96523f539cb255f3688d2345e5000d7d4e4873a8247247d1a \
+            https://github.com/near/cargo-near/releases/download/cargo-near-v0.22.0/cargo-near-x86_64-unknown-linux-gnu.tar.gz
+          tar -xzf ~/.cache/ci-downloads/cargo-near-0.22.0.tgz -C "$RUNNER_TEMP"
+          install -m 0755 "$RUNNER_TEMP/cargo-near-x86_64-unknown-linux-gnu/cargo-near" "$HOME/.cargo/bin/cargo-near"
+          cargo +1.96.0 near --version
+      - if: steps.cargo-near-tgz.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ci-downloads/cargo-near-0.22.0.tgz
+          key: download-cargo-near-0.22.0-9429064e30a427e96523f539cb255f3688d2345e5000d7d4e4873a8247247d1a
+      # ci.yml vault-sandbox-build's cache, read only
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: vault-sandbox
+          workspaces: |
+            contracts/vault -> target
+            contracts/vault/tests/mock-token -> target
+            contracts/vault/tests/harness/probe -> target
+          cache-bin: "false"
+          save-if: "false"
+      - name: the crates of the vault and its two test contracts
+        run: |
+          bash scripts/ci/retry.sh cargo +1.96.0 fetch --locked --manifest-path contracts/vault/Cargo.toml
+          bash scripts/ci/retry.sh cargo +1.96.0 fetch --locked --manifest-path contracts/vault/tests/mock-token/Cargo.toml
+          bash scripts/ci/retry.sh cargo +1.96.0 fetch --locked --manifest-path contracts/vault/tests/harness/probe/Cargo.toml
+      - name: the rehearsal (${{ matrix.mode }})
+        env:
+          MODE: ${{ matrix.mode }}
+        run: |
+          OUT="$RUNNER_TEMP/rehearse-$MODE"
+          set +e
+          if [ "$MODE" = off ]; then bash scripts/drill/rehearse.sh "$OUT"; exit $?; fi
+          bash scripts/drill/rehearse.sh "$OUT" --leave-on
+          rc=$?
+          node scripts/drill/rehearse.mjs --dry "$OUT/record.json" >"$OUT/verdict.txt"
+          cat "$OUT/verdict.txt"
+          echo "left-on: the rehearsal exited $rc (want 1)"
+          [ "$rc" = 1 ] || exit 1
+          # the read itself ran against the stack and failed (not a run that stopped before it)
+          grep -q '^BAD 4\. servers down: FAIL on 127\.0\.0\.1:' "$OUT/verdict.txt" && grep -qx 'servers-down: FAIL (127.0.0.1)' "$OUT/servers-down.txt" \
+            || { echo "left-on: no servers-down read failed against the stack"; exit 1; }
+          if grep -q '^exit: ' "$OUT/exit.log"; then echo "left-on: the exit command ran past a failed cut"; exit 1; fi
+          echo "left-on: servers-down failed with the stack on, and the exit never ran"
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: drill-rehearse-${{ matrix.mode }}
+          path: |
+            ${{ runner.temp }}/rehearse-${{ matrix.mode }}/record.json
+            ${{ runner.temp }}/rehearse-${{ matrix.mode }}/exit.log
+            ${{ runner.temp }}/rehearse-${{ matrix.mode }}/verdict.txt
+          if-no-files-found: warn
