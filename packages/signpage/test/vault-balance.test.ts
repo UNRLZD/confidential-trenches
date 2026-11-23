@@ -32,7 +32,7 @@ test("signed in: vault_balance is the USDC of the vault's UNSPENT and HELD notes
   assert.deepEqual(out, { ...SIGNED_IN, vault_balance: "12.750001" });
   assert.equal(reads, 1);
   assert.equal(SIGNPAGE_RESULT_SCHEMAS.state(out), true);
-  assert.equal(SIGNED_IN.vault_balance, "0", "the state handed in is not changed");
+  assert.equal(Object.hasOwn(SIGNED_IN, "vault_balance"), false, "the state handed in is not changed: signed in, stateOf names none");
 });
 
 /** A RESERVED note whose stored request withdraws `withdrawn` (public_signals[2], as withdraw/handoff.ts storedRequest reads it). */
@@ -63,7 +63,7 @@ test("review P2-1: a 100 USDC note reserved for a 10 USDC withdrawal reads 90 wh
   assert.equal((await withVaultBalance(SIGNED_IN, async () => [note("r", VAULT, 100_000_000n)], VAULT)).vault_balance, "100");
 });
 
-test("a reserved note whose request is present but malformed or withdraws more than the note: the state as it is, as a failed read", async () => {
+test("a reserved note whose request is present but malformed or withdraws more than the note: no vault_balance, as a failed read", async () => {
   const bad: NoteRecord[] = [
     { ...note("r", VAULT, 100_000_000n, "RESERVED"), request: "" },
     { ...note("r", VAULT, 100_000_000n, "RESERVED"), request: "{not json" },
@@ -74,7 +74,7 @@ test("a reserved note whose request is present but malformed or withdraws more t
     reserved("r", 100_000_000n, "010"),
     reserved("r", 100_000_000n, "100000001"),
   ];
-  for (const r of bad) assert.equal(await withVaultBalance(SIGNED_IN, async () => [note("u", VAULT, 5_000_000n), r], VAULT), SIGNED_IN, String(r.request));
+  for (const r of bad) assert.deepEqual(await withVaultBalance(SIGNED_IN, async () => [note("u", VAULT, 5_000_000n), r], VAULT), SIGNED_IN, String(r.request));
 });
 
 test("whole and small amounts read as exact decimals: no float, no trailing zeros", async () => {
@@ -85,25 +85,36 @@ test("whole and small amounts read as exact decimals: no float, no trailing zero
   assert.equal(await at(123_456_789_012_345_678_901n), "123456789012345.678901");
 });
 
-test("signed out, or no vault on the page's network: the state as it is, the notes never read", async () => {
+test("signed out: the state as it is; no vault on the page's network: \"0\", none held in one; the notes never read", async () => {
   let reads = 0;
   const read = async () => (reads++, [note("a", VAULT, 1n)]);
   const out = signedOutState();
   assert.equal(await withVaultBalance(out, read, VAULT), out);
-  assert.equal(await withVaultBalance(SIGNED_IN, read, null), SIGNED_IN);
+  assert.deepEqual(await withVaultBalance(SIGNED_IN, read, null), { ...SIGNED_IN, vault_balance: "0" });
   assert.equal(reads, 0);
 });
 
-test("a notes read that fails, or a counted note with no leaf value: the state as it is, never a guessed sum, never a throw", async () => {
+// card vault-balance-unread: an unread balance was sent as "0", which the app drew as $0 Cash beside the pools' unread
+// dashes; it is sent as no vault_balance (kit 1.21), even on a state handed in with one
+test("a notes read that fails, or a counted note with no leaf value: no vault_balance, never \"0\", never a guessed sum, never a throw", async () => {
   const sync = () => {
     throw new Error("IndexedDB blocked");
   };
-  assert.equal(await withVaultBalance(SIGNED_IN, sync as never, VAULT), SIGNED_IN);
-  assert.equal(await withVaultBalance(SIGNED_IN, () => Promise.reject(new Error("closed")), VAULT), SIGNED_IN);
+  const held = { ...SIGNED_IN, vault_balance: "0" };
+  const unread = async (r: () => Promise<readonly NoteRecord[]>) => {
+    for (const s of [SIGNED_IN, held]) {
+      const out = await withVaultBalance(s, r, VAULT);
+      assert.deepEqual(out, SIGNED_IN);
+      assert.equal(Object.hasOwn(out, "vault_balance"), false);
+      assert.equal(SIGNPAGE_RESULT_SCHEMAS.state(out), true, "the kit's schema reads a state with none");
+    }
+  };
+  await unread(sync as never);
+  await unread(() => Promise.reject(new Error("closed")));
   const broken = [note("a", VAULT, 1_000_000n), { ...note("b", VAULT, 1n), leaf: undefined }];
-  assert.equal(await withVaultBalance(SIGNED_IN, async () => broken, VAULT), SIGNED_IN);
+  await unread(async () => broken);
   const negative = [note("a", VAULT, -1n)];
-  assert.equal(await withVaultBalance(SIGNED_IN, async () => negative, VAULT), SIGNED_IN);
+  await unread(async () => negative);
 });
 
 test("a state whose ops fill the answer: the oldest ops give way to the longer balance, so the answer still fits", async () => {

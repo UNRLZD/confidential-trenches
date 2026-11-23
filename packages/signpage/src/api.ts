@@ -443,7 +443,7 @@ export function startApi(host: ApiHost): { idle(): Promise<void>; ready(): void;
   // (kit 1.13 reads it; kit 1.14 to 1.18 too), as the hello of the frame's document since its ready named it (a ready's
   // reset still in the queue: none)
   const closed = (id: string): void => {
-    if (!hello || (level !== "current" && level !== "1.19" && level !== "1.18" && level !== "1.17" && level !== "1.16" && level !== "1.15" && level !== "1.14" && level !== "1.13")) return;
+    if (!hello || (level !== "current" && level !== "1.20" && level !== "1.19" && level !== "1.18" && level !== "1.17" && level !== "1.16" && level !== "1.15" && level !== "1.14" && level !== "1.13")) return;
     const msg: ClosedEvent = { v: 1, type: "closed", id };
     post(msg);
   };

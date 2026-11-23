@@ -493,7 +493,7 @@ export interface ReadyEvent {
  * The page sends a client only the states, stages and facts its version reads. A change to what the page may send
  * (a state field, an op kind, a stage, a fact) raises it, and the page maps the version before it down.
  */
-export const SIGNPAGE_KIT_VERSION = "1.20";
+export const SIGNPAGE_KIT_VERSION = "1.21";
 
 /**
  * The client's half of the handshake, app to page (card kit-frame-version): its kit version, posted before every
@@ -751,8 +751,13 @@ export interface SignpageState {
   readonly code_saved: boolean;
   /** The last way in that failed on SIGN_HOST, and why (for example "no_prf", "no_passkey"). */
   readonly signin_failed?: { readonly way: SigninWay; readonly reason: string };
-  /** USDC in the vault. */
-  readonly vault_balance: string;
+  /**
+   * USDC in the vault, read from the device's own notes. Absent (kit 1.21, card vault-balance-unread) while signed in
+   * when the page could not read the notes, or does not read them (a framed page keeps no note data): an app shows the
+   * balance as unread then, never as "0". "0" when the notes hold none, signed out, or no vault is named on the page's
+   * network. A page of an earlier release sends "0" where this one sends nothing; a client below kit 1.21 is sent "0".
+   */
+  readonly vault_balance?: string;
   /**
    * The private balance held in each chain's pool, read from the device's own notes (never from a server): one entry
    * per chain, each amount a decimal string in whole units of the pool's asset, as vault_balance is for USDC (12.5 SOL

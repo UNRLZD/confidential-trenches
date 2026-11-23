@@ -11,13 +11,13 @@
 //
 // - Top-level only, as src/pools.ts: the frame keeps no note data and never opens the note store (src/state.ts).
 // - Never throws, as the API's state() must not (src/api.ts ApiHost.state): a notes read that fails, or a counted note
-//   with no leaf value, gives the state as it is, never a sum guessed from part of the notes. The kit's state type holds
-//   vault_balance required, so that state still says "0" (src/state.ts stateOf); with it, `pools` is absent too, as
-//   src/pools.ts leaves it on the same failed read.
+//   with no leaf value, gives the state with no vault_balance, never a sum guessed from part of the notes, and never "0"
+//   (card vault-balance-unread: the kit's state type holds it optional from kit 1.21, so an app shows it unread; an older
+//   kit is sent "0", src/kit-version.ts); `pools` is absent too, as src/pools.ts leaves it on the same failed read.
 // - What crosses to APP_HOST: the total alone, in whole USDC as an exact decimal string, never a note. The app reads the
 //   state each time the store changes, so two totals in a row can differ by a single note's value (src/pools.ts says the
 //   same of the pools).
-// - Signed out, or no vault named on the page's network: the state as it is, the notes never read.
+// - Signed out: the state as it is. No vault named on the page's network: "0", none held in one, the notes never read.
 // - The answer cap: a longer balance than "0" takes room the ops may fill; the oldest ops give way (src/state.ts pickOps),
 //   as src/pools.ts withPools does for `pools`.
 import type { SignpageState } from "../../kit/src/signpage/messages.ts";
@@ -64,16 +64,20 @@ function decimal(units: bigint, d: number): string {
 
 const utf8 = (v: unknown): number => new TextEncoder().encode(JSON.stringify(v)).length;
 
-/** `state` with vault_balance from the notes `readNotes` gives, when signed in and `scope` names a vault. */
+/** `state` with vault_balance from the notes `readNotes` gives when signed in and `scope` names a vault, "0" when signed
+ *  in and it names none; signed in with the notes unread (a read that fails, a sum the schema refuses, no room left),
+ *  the state with no vault_balance. */
 export async function withVaultBalance(state: SignpageState, readNotes: () => Promise<readonly NoteRecord[]>, scope: bigint | null): Promise<SignpageState> {
-  if (!state.signed_in || scope === null) return state;
+  if (!state.signed_in) return state;
+  const { vault_balance: _v, ...unread } = state;
   try {
-    let out: SignpageState = { ...state, vault_balance: decimal(vaultBalanceOf(await readNotes(), scope), USDC_DECIMALS) };
+    // no vault named on the page's network: none is held in one, and the notes are not read
+    let out: SignpageState = scope === null ? { ...unread, vault_balance: "0" } : { ...unread, vault_balance: decimal(vaultBalanceOf(await readNotes(), scope), USDC_DECIMALS) };
     if (utf8(out) > SIGNPAGE_MAX_ANSWER_BYTES - ANSWER_ROOM) out = { ...out, ops: pickOps({ ...out, ops: [] }, state.ops.map((op, t) => ({ op, t }))) };
-    // the ops gave all they hold and the balance still has no room: the state as it was, which fits
-    if (utf8(out) > SIGNPAGE_MAX_ANSWER_BYTES - ANSWER_ROOM) return state;
-    return SIGNPAGE_RESULT_SCHEMAS.state(out) ? out : state;
+    // the ops gave all they hold and the balance still has no room: the state with none, unread, which fits
+    if (utf8(out) > SIGNPAGE_MAX_ANSWER_BYTES - ANSWER_ROOM) return unread;
+    return SIGNPAGE_RESULT_SCHEMAS.state(out) ? out : unread;
   } catch {
-    return state;
+    return unread;
   }
 }
