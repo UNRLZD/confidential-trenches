@@ -31,13 +31,16 @@ export const SEATS = ["https://solana-rpc.publicnode.com", "https://solana.api.p
 /** The pause between a seat's reads of one stable account each (see read()). */
 export const READ_GAP_MS = 1_200;
 /** Ten accounts whose bytes never change: native and loader-held programs, and the mainnet pool program the page pins
- *  (packages/wallet/src/pool/solana.ts SOL_POOLS.mainnet). Ten is publicnode's cap for one getMultipleAccounts. */
+ *  (packages/wallet/src/pool/solana.ts SOL_POOLS.mainnet). Ten is publicnode's cap for one getMultipleAccounts. None is
+ *  one a seat declines as fat: Pocket refuses the associated token program's account (-32602, "shape targets a
+ *  known-fat account", 23 Nov 17:36Z), a read the page never makes, so the upgradeable loader's native account holds
+ *  its place (the same bytes on publicnode and Pocket, read then). */
 export const STABLE = [
   "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
   "11111111111111111111111111111111",
   "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
   "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
-  "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+  "BPFLoaderUpgradeab1e11111111111111111111111",
   "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr",
   "ComputeBudget111111111111111111111111111111",
   "AddressLookupTab1e1111111111111111111111111",
