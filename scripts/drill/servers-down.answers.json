@@ -1,0 +1,73 @@
+{
+  "_": "servers-down.mjs reads, recorded: live_up, the live helper read once while it served (read-only); good and back_on, the helper's compose stack on a GitHub runner read after unplug.sh off and after unplug.sh on (.github/workflows/unplug-proof.yml, run 45066288636 at 9e0608f5b)",
+  "good": {
+    "at": "2026-11-22T20:25:25.622Z",
+    "helper": {
+      "host": "127.0.0.1",
+      "tcp": {
+        "18090": "refused",
+        "18453": "refused"
+      },
+      "health": {
+        "status": null,
+        "error": "ECONNREFUSED"
+      }
+    },
+    "statics": [
+      {
+        "host": "ct-app.unrealized.trade",
+        "status": 200
+      },
+      {
+        "host": "confidential.unrealized.trade",
+        "status": 200
+      }
+    ]
+  },
+  "back_on": {
+    "at": "2026-11-22T20:28:11.831Z",
+    "helper": {
+      "host": "127.0.0.1",
+      "tcp": {
+        "18090": "open",
+        "18453": "open"
+      },
+      "health": {
+        "status": 200
+      }
+    },
+    "statics": [
+      {
+        "host": "ct-app.unrealized.trade",
+        "status": 200
+      },
+      {
+        "host": "confidential.unrealized.trade",
+        "status": 200
+      }
+    ]
+  },
+  "live_up": {
+    "at": "2026-11-22T18:53:28.139Z",
+    "helper": {
+      "host": "ct-api.unrealized.trade",
+      "tcp": {
+        "80": "open",
+        "443": "open"
+      },
+      "health": {
+        "status": 200
+      }
+    },
+    "statics": [
+      {
+        "host": "ct-app.unrealized.trade",
+        "status": 200
+      },
+      {
+        "host": "confidential.unrealized.trade",
+        "status": 200
+      }
+    ]
+  }
+}
