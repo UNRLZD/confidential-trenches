@@ -12,7 +12,7 @@ const { DEPOSIT_QUOTE_URL } = await import("../../wallet/src/deposit/quote.ts");
 const { RELEASE_INTENTS_URL } = await import("../../wallet/src/deposit/refund.ts");
 const { depositId } = await import("../../wallet/src/derive/keys.ts");
 const { base58 } = await import("@scure/base");
-const { poolRefundMover } = await import("../src/pool-deposit-follow.ts");
+const { poolRefundMover, poolFollows, POOL_RESTORED_OP, POOL_TX_READ_MARGIN_MS } = await import("../src/pool-deposit-follow.ts");
 type Host = Parameters<typeof poolRefundMover>[0];
 type MoveRead = NonNullable<Awaited<ReturnType<Host["read"]>>>;
 
@@ -508,7 +508,6 @@ test("refunded-needs-the-refund: the real refund (at the quote's lowest refund) 
 
 // card restore-carries-pool-refund: a restore's carry of a refund whose pool deposit op was lost with the old store
 // (poolFollows' restoredRefund), through this same mover, its move kept on U_X's restored op
-const { poolFollows, POOL_RESTORED_OP, POOL_TX_READ_MARGIN_MS } = await import("../src/pool-deposit-follow.ts");
 const UX0 = { chain: "solana" as const, s: "777", i: 0, u: SOL_U, refund_id: ID };
 function restoredWorld(o: { read: MoveRead | null; unrecorded?: true; noRefund?: true }, ops: Map<string, any> = new Map()) {
   const w = world(o);
