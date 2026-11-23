@@ -58,6 +58,8 @@ export const SWEEPS = {
     read: ([file, , [name, ...pairs]]) => [{ name, file, finds: pairs.filter((_, k) => k % 2 === 0), seq: pairs.filter((_, k) => k % 2 === 1) }],
   },
   "packages/wallet/scripts/near-prepay-taken-mutants.mjs": { list: "M", read: ([name, file, find]) => [{ name, file, finds: [find] }] },
+  // a mutant with a reason (its 6th field) is listed as equivalent, never planted; one with a 7th plants that second edit too
+  "packages/wallet/scripts/pool-solana-mutants.mjs": { list: "M", read: ([file, find, , , pat, why, pre]) => (why !== undefined ? [] : [{ name: `${pat} ${find}`, file, finds: pre ? [find, pre[0]] : [find] }]) },
   "packages/wallet/scripts/note-restore-refund-mutants.mjs": { list: "M", vars: ["PICK"], once: true, read: ([name], g, r) => [{ name, file: path.join(r, "packages/wallet/src/notes/restore.ts"), finds: [g.PICK] }] },
   "packages/wallet/scripts/refund-move-mutants.mjs": { list: "M", vars: ["P"], read: ([name, file, edits], g) => [{ name, file: path.join(g.P, file), finds: edits.map(([f]) => f), seq: edits.map(([, t]) => t) }] },
   "packages/wallet/scripts/restore-wallets-mutants.mjs": { list: "M", vars: ["P"], read: ([name, file, edits], g) => [{ name, file: path.join(g.P, file), finds: edits.map(([f]) => f), seq: edits.map(([, t]) => t) }] },
@@ -69,7 +71,6 @@ export const SWEEPS = {
 export const NOT_SWEPT = {
   "packages/wallet/scripts/pool-evm-restore-mutants.mjs": "no test:mutants or CI line runs it",
   "packages/wallet/scripts/pool-evm-sell-bans-mutants.mjs": "no test:mutants or CI line runs it",
-  "packages/wallet/scripts/pool-solana-mutants.mjs": "no test:mutants or CI line runs it",
   "packages/wallet/scripts/pool-solana-review-mutants.mjs": "no test:mutants or CI line runs it",
 };
 

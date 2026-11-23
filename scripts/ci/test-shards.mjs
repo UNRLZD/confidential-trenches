@@ -292,6 +292,9 @@ export const MUTANT_SECONDS = {
   "packages/wallet: node scripts/refund-move-mutants.mjs": 45, // PR run (5) 44.4
   "packages/wallet: node scripts/exit-scan-mutants.mjs": 142, // PR run (3) 141.6
   "packages/wallet: node scripts/restore-wallets-mutants.mjs": 141, // queue (9) 140.3
+  // card pool-solana-mutants-plant-what-they-name: the Solana pool's sweep, run by no command before it, 90 mutants (89
+  // planted, 1 equivalent) in 82 s on a shared local runner (23 Nov 17:08:08-17:09:30Z), listed at twice that
+  "packages/wallet: node scripts/pool-solana-mutants.mjs": 164,
 };
 // a sweep with no measured time yet: about the middle ones measured (162 and 223 s)
 export const NEW_SWEEP_SECONDS = 200;
