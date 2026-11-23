@@ -1076,6 +1076,25 @@ test("the next load's settle refuses an open trade op that sent nothing, and lea
   assert.deepEqual(s.m.ops!.get("ended"), op("filled"));
 });
 
+// card signpage-sent-end-recorded-evm: a Base or Robinhood pool buy's op reads "sent" with no tx until its release is
+// read back (src/pool-buy-evm.ts), and its end comes from the chain's read (the run's or the load's follow), never from
+// this settle: it is left as it is, and it never makes a settle due. A Solana or unchained open op with no tx is still
+// refused "failed".
+test("card signpage-sent-end-recorded-evm: the load's settle leaves a Base or Robinhood buy op at sent with no tx, and still refuses a Solana or unchained one", async () => {
+  const s = store();
+  const op = (chain?: string) => ({ kind: "buy", stage: "sent", txs: [], created_ms: 1, ...(chain === undefined ? {} : { chain, token: "0xab" }) });
+  s.m.ops!.set("evm-base", op("base"));
+  s.m.ops!.set("evm-robinhood", op("robinhood"));
+  assert.equal(await tradeSettleDue(s, navigator.locks), false, "an EVM buy's sent op makes no settle due");
+  s.m.ops!.set("sol", op("solana"));
+  s.m.ops!.set("none", op());
+  await settleTradeOps(s, navigator.locks, [noRpc, noRpc]);
+  assert.deepEqual(s.m.ops!.get("evm-base"), op("base"), "a Base buy's sent op is left");
+  assert.deepEqual(s.m.ops!.get("evm-robinhood"), op("robinhood"), "a Robinhood buy's sent op is left");
+  assert.deepEqual(s.m.ops!.get("sol"), { ...op("solana"), stage: "refused", code: "failed" });
+  assert.deepEqual(s.m.ops!.get("none"), { ...op(), stage: "refused", code: "failed" });
+});
+
 test("a sell with one leg failed and one unknown never stays sent: each leg's end goes on the op before its mark goes, and the settle ends the op (re-check of 91fb908e, P2)", async () => {
   const pos = { state: "IN_POSITION" as const, token: MINT };
   const s = store({ [armKey("sol", L, 0)]: rec(0, 1_000n, pos), [armKey("sol", L, 1)]: rec(1, 1_000n, pos) });

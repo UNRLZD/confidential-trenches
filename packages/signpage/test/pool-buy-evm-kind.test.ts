@@ -217,6 +217,25 @@ test("kind: a run that ends with an error answers it, never sent", async () => {
   assert.equal(h.ends, 1);
 });
 
+// card signpage-sent-end-recorded-evm: the kind hands the run its request's id, so the op the app reads for the request
+// is under that id, at "sent" by the time the kind answers sent
+test("kind: the request's op is written under the request's own id, at sent when the kind answers sent", async () => {
+  let open!: () => void;
+  const gate = new Promise<void>((r) => (open = r));
+  const { h, ended } = sending({ gate });
+  const m = new Map<string, unknown>();
+  const ops = async (id: string, f: (v: unknown) => unknown): Promise<void> => void ((n: unknown) => n !== undefined && m.set(id, structuredClone(n)))(f(structuredClone(m.get(id))));
+  const { locks } = lockManager();
+  const { ctx } = context();
+  const r = poolBuyEvmKind(() => ({ ...h, ops }) as typeof h, locks)(ASK, ctx) as { after: Promise<unknown>; answer(): unknown };
+  await within(r.after, "the answer");
+  assert.deepEqual(r.answer(), { result: { stage: "sent", txs: [] } });
+  assert.deepEqual([...m.keys()], ["r1"], "under the request's id, ctx.id");
+  assert.equal((m.get("r1") as { stage?: unknown }).stage, "sent");
+  open();
+  await within(ended, "the run's end");
+});
+
 test("kind: once the bytes have left, it answers sent before the run ends; the run's end goes out as progress", async () => {
   let open!: () => void;
   const gate = new Promise<void>((r) => (open = r));
