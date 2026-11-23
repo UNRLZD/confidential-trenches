@@ -415,6 +415,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
+      # card hung-test-file-named-in-ci: this job's limit ends it and names nothing; a test file still running a minute
+      # before it is stopped by name (scripts/test-bound-watch.cjs), scripts/ci/test-bound.test.mjs holds the minutes
+      - name: the test runs' deadline, a minute before this job's limit
+        run: echo "TEST_BOUND_DEADLINE=$(( ($(date +%s) + 14 * 60) * 1000 ))" >> "$GITHUB_ENV"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -444,6 +448,10 @@ jobs:
       matrix:
         part: [1, 2, 3]
     steps:
+      # card hung-test-file-named-in-ci: this job's limit ends it and names nothing; a test file still running a minute
+      # before it is stopped by name (scripts/test-bound-watch.cjs), scripts/ci/test-bound.test.mjs holds the minutes
+      - name: the test runs' deadline, a minute before this job's limit
+        run: echo "TEST_BOUND_DEADLINE=$(( ($(date +%s) + 14 * 60) * 1000 ))" >> "$GITHUB_ENV"
       # the whole history: release.test.mjs holds the newest SIGN_HOST release list to this runner's clean build when the
       # list's tree has HEAD's build inputs, and reads that tree (card signpage-generated-merge-free, review P1(a))
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

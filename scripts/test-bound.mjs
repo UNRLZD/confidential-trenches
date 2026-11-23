@@ -16,3 +16,8 @@ export const TEST_MS = 300_000;
 export const FILE_MS = 900_000;
 /** The whole run (the node --test process): CI's longest job (ci.yml timeout-minutes: 30). */
 export const RUN_MS = 1_800_000;
+/** Card hung-test-file-named-in-ci: a CI job's own limit ends it and names nothing, and the bounds above cannot know when
+ *  the job started (release 197's first queue run lost test-packages (1) to its 15 minutes, no file named). Each CI job
+ *  that runs a package's tests sets TEST_BOUND_DEADLINE (ms since the epoch) a minute before its limit: a file still
+ *  running then is stopped by name, and the run this long after it, so the file's name reaches the log first. */
+export const DEADLINE_GRACE_MS = 20_000;
