@@ -8,7 +8,10 @@
 // token takes its row from the lists and never searches). Each read is judged cold on its own answer: the page's
 // Jupiter row (risk.holders, src "jupiter") was read at or after the moment the request was sent, less SKEW_MS for the
 // two clocks, so it was searched for this read, not served from what the helper held. A read that is not cold is
-// listed and left out of the timing.
+// listed with its row's age and left out of the timing. Card helper-token-page-cold-draws: a token the helper already
+// held is no fault of the page and was the run's red at every helper deploy (helper-28's live run 45167566673: 17 of 32
+// read cold), so while fewer than COLD_MIN (or the pairs asked, if fewer) reads came in cold, the check draws another
+// pair, PAIRS more at most.
 //
 // The reads go in pairs, PAIR_GAP_MS apart: the first of a pair, then the second as soon as the first answers (within
 // a second of the first's search). PAIR_GAP_MS keeps the check's own searches at 12 a minute, under the search's 16 a
@@ -91,17 +94,18 @@ export async function read(base = BASE, fetchFn = fetch, pairs = PAIRS, wait = (
   const p = await fetchFn(POOL_URL, { headers: { accept: "application/json" } });
   const pool = p.status === 200 ? JSON.parse(await p.text()) : [];
   const ids = [...new Set((Array.isArray(pool) ? pool : []).map((t) => t?.id).filter((id) => typeof id === "string" && ADDRESS.test(id) && !lists.tokens?.has(id)))];
-  // a random draw without repeats: the first pairs x 2 of a shuffle
+  // a random draw without repeats: a shuffle, read in order, pairs x 2 first and more while too few came in cold
   for (let i = ids.length - 1; i > 0; i--) {
     const j = Math.floor(rand() * (i + 1));
     [ids[i], ids[j]] = [ids[j], ids[i]];
   }
-  const mints = ids.slice(0, pairs * 2);
   const reads = [];
-  for (let i = 0; i + 1 < mints.length; i += 2) {
+  const want = Math.min(COLD_MIN, pairs * 2);
+  const colds = () => reads.filter((r) => r.status === 200 && Number.isSafeInteger(r.rttMs) && cold(r)).length;
+  for (let i = 0; i + 1 < ids.length && (i < pairs * 2 || (i < pairs * 4 && colds() < want)); i += 2) {
     if (i > 0) await wait(PAIR_GAP_MS);
-    reads.push({ pair: i / 2, order: 0, ...(await page(base, mints[i], fetchFn)) });
-    reads.push({ pair: i / 2, order: 1, ...(await page(base, mints[i + 1], fetchFn)) });
+    reads.push({ pair: i / 2, order: 0, ...(await page(base, ids[i], fetchFn)) });
+    reads.push({ pair: i / 2, order: 1, ...(await page(base, ids[i + 1], fetchFn)) });
   }
   return { base, at, pairs, lists: { status: lists.status, size: lists.tokens?.size ?? 0 }, pool: { status: p.status, size: ids.length }, reads };
 }
@@ -146,7 +150,7 @@ export function judge(run) {
   const ok = reads.filter((r) => r.status === 200 && Number.isSafeInteger(r.rttMs));
   const c = ok.filter(cold);
   const warm = ok.filter((r) => !cold(r));
-  say(c.length >= COLD_MIN, `${c.length} of ${ok.length} read cold (the Jupiter row read for the request)${warm.length ? `; not cold: ${warm.map((r) => r.mint).join(", ")}` : ""}`);
+  say(c.length >= COLD_MIN, `${c.length} of ${ok.length} read cold (the Jupiter row read for the request)${warm.length ? `; not cold: ${warm.map((r) => `${r.mint} (${r.jupAt === null ? `no Jupiter row, src ${r.src}` : `its row read ${r.sentAt - r.jupAt} ms before the read was sent`})`).join(", ")}` : ""}`);
   if (c.length === 0) return { ok: false, lines };
   const t = c.map(helperMs);
   const second = c.filter((r) => r.order === 1).map(helperMs);
