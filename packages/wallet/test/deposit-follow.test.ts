@@ -332,24 +332,32 @@ test("MOVE-OUT a round while another op of U has its move out (nonce above U's, 
   await heldWithMove(t, n + 1n, t.chain.a.height);
   // before the move: U holds the held op's 3 USDC and this op's delivery; the move takes the 3 USDC
   t.chain.credit(CREDIT + 3_000_000n);
-  // the move lands at the first key read after round 3 (a debit landing between two reads of one round)
-  let armed = false;
+  // the move's nonce moves at the first key read after round 3; its debit lands at the key read REFUND_HEIGHTS later
+  // (a debit landing between two reads of one round: the round reads the move before U's USDC)
+  let stage = 0;
+  let passedAt = 0n;
   const rpcs = t.chain.rpcs().map((r) => ({
     ...r,
     query: async (p: Parameters<FollowRpc["query"]>[0]) => {
-      if (armed && p.request_type === "view_access_key_list") {
-        armed = false;
-        t.chain.a.nonce = t.chain.b.nonce = n + 1n;
-        t.chain.credit(CREDIT);
+      if (p.request_type === "view_access_key_list") {
+        if (stage === 1) {
+          stage = 2;
+          passedAt = t.chain.a.height;
+          t.chain.a.nonce = t.chain.b.nonce = n + 1n;
+        } else if (stage === 2 && t.chain.a.height >= passedAt + REFUND_HEIGHTS) {
+          stage = 3;
+          t.chain.credit(CREDIT);
+        }
       }
       return r.query(p);
     },
   })) as unknown as [FollowRpc, FollowRpc];
   t.onTick.fn = (k) => {
-    if (k !== 3) return;
-    assert.deepEqual(t.binds, [], "no bind while the move is out");
-    assert.equal(t.seeds.length, 0, "the seed is not opened while the move is out");
-    armed = true;
+    if (stage < 3) {
+      assert.deepEqual(t.binds, [], "no bind while the move is out");
+      assert.equal(t.seeds.length, 0, "the seed is not opened while the move is out");
+    }
+    if (k === 3) stage = 1;
   };
   const out = await followDeposit(t.args, { ...t.deps, rpcs });
   assert.equal(out.kind, "done");
