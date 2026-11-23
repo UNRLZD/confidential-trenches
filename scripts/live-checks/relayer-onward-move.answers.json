@@ -1,0 +1,55 @@
+{
+ "_runs": "good: apps/helper at this card (e81807fb5) run with node src/server.ts on 127.0.0.1, mainnet bind carried under a stand-in relayer id with no account and a key made for the run (its relayer can never start), read 2026-11-23T10:02:39.978Z: amount 0 answered 400 bad_shape before any read, amount 1 400 no_account, flipped 400 bad_signature: PASS. bad_deployed: the deployed helper before this card (d17190c21), read 2026-11-23T10:00:09.097Z: amount 0 answered 400 no_account (the deposit checks read the key first): FAIL.",
+ "good": {
+  "base": "http://127.0.0.1:18431",
+  "commit": "e81807fb5225cd0f18884967233898ab113ff3f0",
+  "readAt": "2026-11-23T10:02:39.978Z",
+  "health": {
+   "status": 200,
+   "commit": "e81807fb5225cd0f18884967233898ab113ff3f0",
+   "body": "{\"ok\":true,\"commit\":\"e81807fb5225cd0f18884967233898ab113ff3f0\",\"release\":1,\"ready\":false,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"up\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"},\"solana\":{\"rpc\":\"public\",\"trades\":\"public\",\"stream\":\"public\"},\"rpc\":{\"solana\":[],\"base\":[],\"robinhood\":[],\"near\":[]},\"bind\":{\"mainnet\":\"46e8245bced20aefbf9990b0c4f4b3919eca9700a948302bb30e3f4d11c0d8bd\"}}"
+  },
+  "sender": "629cd4b4f24a2aa127b864a51cf0cc841bde47064afce4c9123b307ba9c5174c",
+  "to": "177eb0126a0d4954893b1a65723ebb4125c7e2b8f847a57c2522f223e42ed081",
+  "probes": {
+   "shape": {
+    "status": 400,
+    "body": "{\"error\":{\"code\":\"bad_shape\"}}"
+   },
+   "fresh": {
+    "status": 400,
+    "body": "{\"error\":{\"code\":\"no_account\"}}"
+   },
+   "flipped": {
+    "status": 400,
+    "body": "{\"error\":{\"code\":\"bad_signature\"}}"
+   }
+  }
+ },
+ "bad_deployed": {
+  "base": "https://ct-api.unrealized.trade",
+  "commit": "d17190c217fcab829c7b8a35e906de740ab6c0a8",
+  "readAt": "2026-11-23T10:00:09.097Z",
+  "health": {
+   "status": 200,
+   "commit": "d17190c217fcab829c7b8a35e906de740ab6c0a8",
+   "body": "{\"ok\":true,\"commit\":\"d17190c217fcab829c7b8a35e906de740ab6c0a8\",\"release\":235,\"ready\":true,\"parts\":{\"proxy\":\"up\",\"relay\":\"up\",\"intents\":\"up\",\"delegate\":\"up\",\"orders\":\"down\",\"log\":\"down\"},\"solana\":{\"rpc\":\"keyed\",\"holders\":\"keyed\",\"trades\":\"keyed\",\"stream\":\"keyed\"},\"rpc\":{\"solana\":[\"helius-rpc.com spent\",\"quiknode.pro answers\"],\"base\":[\"quiknode.pro answers\",\"drpc.live key1 answers\",\"drpc.live key2 answers\",\"drpc.live key3 answers\"],\"robinhood\":[\"alchemy.com answers\",\"quiknode.pro answers\",\"drpc.live key1 answers\",\"drpc.live key2 answers\",\"drpc.live key3 answers\"],\"near\":[\"fastnear.com answers\",\"drpc.live answers\"]},\"bind\":{\"mainnet\":\"f874a24241077a92d78daebf0e20585b2b6c89f7da30b05a67fb1969f70388cc\",\"testnet\":\"g-2b700409.bf-vt-20261102t071444.testnet\"}}"
+  },
+  "sender": "d0e0419cf2895b1d4329a37d93283fd228bfd7dd30f06e5414cdd755bab31115",
+  "to": "5aa342a303dcb79cb3de0bfbae437b78cb199cbe58e49d3e32dc517360c455ba",
+  "probes": {
+   "shape": {
+    "status": 400,
+    "body": "{\"error\":{\"code\":\"no_account\"}}"
+   },
+   "fresh": {
+    "status": 400,
+    "body": "{\"error\":{\"code\":\"no_account\"}}"
+   },
+   "flipped": {
+    "status": 400,
+    "body": "{\"error\":{\"code\":\"bad_signature\"}}"
+   }
+  }
+ }
+}

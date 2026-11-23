@@ -2,7 +2,7 @@
 // same refusals at start as the withdrawal relayer's (withdraw/send.ts withdrawSenderFromEnv). The carry itself, per
 // network under its own watch, is networks.test.ts's.
 import assert from "node:assert/strict";
-import { createPrivateKey, createPublicKey } from "node:crypto";
+import { createHash, createPrivateKey, createPublicKey, sign } from "node:crypto";
 import { mkdtempSync, promises as fsPromises, readFileSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
@@ -11,6 +11,7 @@ import { test } from "node:test";
 import { base58 } from "./checks.ts";
 import { BIND_ENV, bindSenderFromEnv, createLine, MARGIN_K_ENV, registerLine } from "./env.ts";
 import { MAINNET_VAULT } from "../withdraw/send.ts";
+import { WATCHED } from "../token-status/status.ts";
 
 const keyOf = (fill: number) => {
   const seed = Buffer.alloc(32, fill);
@@ -276,5 +277,48 @@ test("card relayer-near-trade: a body with `trade` goes to the trade carry of th
   assert.equal(fetched, 0);
   assert.equal(code(await s.carry(trade("testnet"))), "upstream");
   assert.ok(fetched > 0);
+  s.stop();
+});
+
+test("card relayer-onward-move: an onward ft_transfer on mainnet USDC is checked with no relayer start: an id our helper never paid is id_not_ours (main started the relayer first and answered upstream); armed, it is not_paid while it holds nothing", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "benv-onward-"));
+  const env = { BIND_VAULT_MAINNET: MAINNET_VAULT, BIND_RELAYER_MAINNET: "bind.test.near", BIND_RELAYER_KEY_MAINNET: key, BIND_MARGIN_K: "20", HELPER_RELEASE: "1", HELPER_STORE_DIR: dir };
+  // A: the all-zero seed's implicit id (packages/wallet/test/vectors/a8.json's public seed), its key read FullAccess
+  const priv = createPrivateKey({ key: Buffer.concat([Buffer.from("302e020100300506032b657004220420", "hex"), Buffer.alloc(32)]), format: "der", type: "pkcs8" });
+  const pub = Buffer.from(createPublicKey(priv).export({ format: "jwk" }).x as string, "base64url");
+  const a = pub.toString("hex");
+  const FINAL = 225_838_388;
+  const HASH = base58(Buffer.alloc(32, 7));
+  const methods: string[] = [];
+  const fetchFn = (async (_u: string, init: RequestInit) => {
+    const q = JSON.parse(String(init.body)) as { id: unknown; method: string; params: Record<string, unknown> };
+    const p = q.params;
+    methods.push(q.method === "query" ? String(p.request_type === "call_function" ? p.method_name : p.request_type) : q.method);
+    const ok = (result: unknown) => new Response(JSON.stringify({ jsonrpc: "2.0", id: q.id, result }), { status: 200 });
+    if (q.method === "block") return ok({ header: { height: FINAL, hash: HASH } });
+    if (q.method === "query" && p.request_type === "view_access_key" && p.account_id === a) return ok({ nonce: 127_743_253_000_001, permission: "FullAccess", block_height: FINAL, block_hash: HASH });
+    if (q.method === "query" && p.method_name === "ft_balance_of") return ok({ result: [...Buffer.from('"0"')], logs: [], block_height: FINAL, block_hash: HASH });
+    return new Response("{}", { status: 500 });
+  }) as typeof fetch;
+  const s = bindSenderFromEnv(env, {}, fetchFn);
+  // the move as the device writes it: TOKEN.ft_transfer({receiver_id, amount}), 1 yocto, 30 Tgas, max_block_height 1
+  const le = (n: bigint, len: number) => {
+    const b = Buffer.alloc(len);
+    for (let i = 0; i < len; i++) b[i] = Number((n >> BigInt(8 * i)) % 256n);
+    return b;
+  };
+  const str = (x: string) => Buffer.concat([le(BigInt(Buffer.byteLength(x)), 4), Buffer.from(x)]);
+  const args = JSON.stringify({ receiver_id: "d".repeat(64), amount: "1" });
+  const action = Buffer.concat([Buffer.from([2]), str("ft_transfer"), str(args), le(30_000_000_000_000n, 8), le(1n, 16)]);
+  const d = Buffer.concat([str(a), str(WATCHED.mainnet.token), le(1n, 4), action, le(127_743_253_000_002n, 8), le(1n, 8), Buffer.from([0]), pub]);
+  const sig = sign(null, createHash("sha256").update(le(BigInt(2 ** 30 + 366), 4)).update(d).digest(), priv);
+  const body = { signed_delegate: Buffer.concat([d, Buffer.from([0]), sig]).toString("base64") };
+  const first = await s.carry(body);
+  assert.deepEqual([first.status, code(first)], [403, "id_not_ours"]);
+  assert.ok(!methods.includes("config") && !methods.includes("view_account"), `no vault read and no relayer start: ${methods.join(", ")}`);
+  assert.ok(!methods.includes("ft_balance_of"), "an unseen id's money is never read");
+  s.armed!(a); // a mainnet withdrawal of ours landed to A (withdraw/send.ts onLanded)
+  const armed = await s.carry(body);
+  assert.deepEqual([armed.status, code(armed)], [409, "not_paid"]);
   s.stop();
 });

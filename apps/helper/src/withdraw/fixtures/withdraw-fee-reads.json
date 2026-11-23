@@ -1,5 +1,5 @@
 {
- "note": "fee.ts's reads, recorded 2026-11-02T09:18:51.848Z",
+ "note": "fee.ts's reads, recorded 2026-11-02T09:18:51.848Z; answers are fee.ts's at these reads, relay_fee re-priced 2026-11-23 when S_w counted the onward move's registration (card relayer-onward-move)",
  "now_ms": 1793611131848,
  "relayer": {
   "relayer_account": "relayer.confidential.unrlzd.near",
@@ -19,7 +19,7 @@
   "mainnet": {
    "relayer_account": "relayer.confidential.unrlzd.near",
    "fee_recipient": "relayer.confidential.unrlzd.near",
-   "relay_fee": "207609",
+   "relay_fee": "212779",
    "gp": "100000000",
    "px": "4.135781763845",
    "g_w": "92505000000000",
@@ -28,7 +28,7 @@
   "testnet": {
    "relayer_account": "relayer.confidential.unrlzd.near",
    "fee_recipient": "relayer.confidential.unrlzd.near",
-   "relay_fee": "207609",
+   "relay_fee": "212779",
    "gp": "100000000",
    "px": "4.135781763845",
    "g_w": "92505000000000",

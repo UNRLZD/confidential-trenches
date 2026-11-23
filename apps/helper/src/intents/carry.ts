@@ -42,6 +42,7 @@ import { randomUUID } from "node:crypto";
 import { HELPER_CODE_STATUS, type HelperIntentsCode, type HelperSignedIntent } from "@blindfill/kit";
 import { base58decode, RELAYER_FLOOR_YOCTO, type Relayer, type TxOutcome, type TxRef } from "../bind/send.ts";
 import { isAccountId } from "../withdraw/checks.ts";
+import type { OnwardCode, OnwardMove } from "../bind/onward.ts";
 import { STRUCK_AT, type IntentsStore, type Registration, type SignerRecord } from "./records.ts";
 
 export const INTENTS_CONTRACT = "intents.near";
@@ -71,7 +72,7 @@ export const INTENTS_FLOOR_YOCTO = RELAYER_FLOOR_YOCTO + 10n ** 24n;
 /** How often a send whose outcome was not read is read again, until its intent's deadline passes. */
 export const RESOLVE_EVERY_MS = 2_000;
 
-export type IntentsCode = HelperIntentsCode | "signer_cap" | "upstream";
+export type IntentsCode = HelperIntentsCode | OnwardCode | "signer_cap" | "upstream";
 export type IntentsAnswer = { status: number; body: { tx_hash: string } | { error: { code: IntentsCode } } };
 
 export type IntentsReads = {
@@ -178,6 +179,13 @@ export type IntentsCarry = {
   registerSeen(signer: string): Promise<IntentsCode | "registered">;
   /** One pass over the signers still owed their own registration (records.ts owing), each due one tried once. */
   sweep(): Promise<void>;
+  /**
+   * POST /v1/bind's onward move (card relayer-onward-move), once bind/onward.ts checkOnward passed it: the signer's
+   * strike and cap, the send lock, the deposit address's registration (9b's rule, once per signer, on the relayer), the
+   * token watch's hold, the gas account and the expiry again, then A's delegate sent from the relayer as signed, paying
+   * gas only. `finalHeight` is the bind reads' final height (the delegate's expiry is a height). Never throws.
+   */
+  onward(move: OnwardMove, finalHeight: () => Promise<bigint>): Promise<IntentsAnswer>;
   /** Starts the sweep: one pass now, then one every SWEEP_MS; returns its stop. */
   start(): () => void;
   /** Every send's background read done (a test's wait; a stop does not need it: the chain keeps the outcome). */
@@ -221,11 +229,13 @@ export function createIntentsCarry(deps: IntentsDeps): IntentsCarry {
     store.putSigner({ ...rec, failed: rec.failed + 1 });
   };
   const sleep = (ms: number) => new Promise((ok) => setTimeout(ok, ms).unref?.());
-  /** The intent `i` is the one its signer's receiver registration reserved a slot for. */
-  const reservedFor = (rec: SignerRecord, i: Transfer | Withdraw) => {
+  /** A send to `receiver` on `token` is the one its signer's receiver registration reserved a slot for. */
+  const reservedTo = (rec: SignerRecord, token: string, receiver: string) => {
     const g = rec.registration;
-    return i.intent === "ft_withdraw" && i.token === usdc && g !== null && g.receiver === i.receiver_id && g.reserved === true;
+    return token === usdc && g !== null && g.receiver === receiver && g.reserved === true;
   };
+  /** The intent `i` is the one its signer's receiver registration reserved a slot for. */
+  const reservedFor = (rec: SignerRecord, i: Transfer | Withdraw) => i.intent === "ft_withdraw" && reservedTo(rec, i.token, i.receiver_id);
   /**
    * Slots a stopped process left taken with nothing signed (review PROBE-5), given back, with no await: an intent's in
    * `taking` that no send here holds (`out`), and a receiver's claim with no transaction that no registration here
@@ -686,10 +696,116 @@ export function createIntentsCarry(deps: IntentsDeps): IntentsCarry {
     }
   };
 
+  /**
+   * The onward move after bind/onward.ts's checks (card relayer-onward-move), in the kit's onward order from
+   * sender_struck: the strike, the cap, the send lock (in_flight), the deposit address's registration on USDC (9b's
+   * rule: once per signer, paid by the relayer, its slot and the move's reserved together; receiver_not_registered for a
+   * second receiver, registration_failed for one that did not run), the token watch's hold (token_halted: a paused USDC
+   * refuses ft_transfer), the gas account (relayer_low) and the expiry again (a registration can take until it). Then
+   * A's SignedDelegateAction goes as A signed it, wrapped by the relayer, nothing attached but what A's own action
+   * carries (its 1 yocto, from A). A send that fails on chain counts toward A's three.
+   */
+  const onwardOne = async (m: OnwardMove, finalHeight: () => Promise<bigint>): Promise<IntentsAnswer> => {
+    const a = m.sender;
+    if (store.signer(a).failed >= STRUCK_AT) return no("sender_struck");
+    reclaim(a);
+    const nonce = m.nonce.toString();
+    const capped = (rec: SignerRecord) => (rec.sent ?? 0) >= INTENTS_SENDS_MAX && !reservedTo(rec, usdc, m.receiver);
+    if (capped(store.signer(a))) return no("signer_cap");
+    // the send lock: test-and-set with no await between
+    const key = `${a}/${nonce}`;
+    if (out.has(key)) return no("in_flight");
+    out.add(key);
+    let held = true;
+    try {
+      let final: bigint;
+      try {
+        final = await finalHeight();
+      } catch {
+        return no("upstream");
+      }
+      if (m.max_block_height <= final) return no("expired");
+      // the delegate can land until max_block_height: its outcome is read until then, at 2 s a block (NEAR makes one
+      // about every second), and a minute past it
+      const untilMs = now() + Number(m.max_block_height - final) * 2_000 + 60_000;
+      // the deposit address's registration on USDC, once per signer, before the move
+      const r = await register(a, usdc, m.receiver, untilMs);
+      if (r !== null) return r;
+      if (await holds()) return no("token_halted");
+      if ((await relayer.balance()) < INTENTS_FLOOR_YOCTO) return no("relayer_low");
+      try {
+        if (m.max_block_height <= (await finalHeight())) return no("expired");
+      } catch {
+        return no("upstream");
+      }
+      // the move's slot under the cap, taken with no await since the check (the one its registration reserved), written
+      // in `taking` until its transaction is signed, given back only when nothing was signed (as carryOne's step 11)
+      const rec = store.signer(a);
+      if (capped(rec)) return no("signer_cap");
+      const spend = reservedTo(rec, usdc, m.receiver);
+      const spentFrom = spend ? idOf(rec.registration) : undefined;
+      store.putSigner({ ...rec, sent: (rec.sent ?? 0) + (spend ? 0 : 1), taking: [...(rec.taking ?? []), nonce], registration: spend ? { ...rec.registration!, reserved: false } : rec.registration });
+      const giveBack = () => {
+        const g = store.signer(a);
+        const taking = (g.taking ?? []).filter((n) => n !== nonce);
+        if (spend && cas(a, "registration", spentFrom, (reg, c) => ({ ...c, taking, registration: { ...reg, reserved: true } }))) return;
+        store.putSigner({ ...g, taking, sent: Math.max(0, (g.sent ?? 0) - 1) });
+      };
+      const refs: TxRef[] = [];
+      let o: TxOutcome | { kind: "guarded"; code: string };
+      try {
+        // the hold read again in the relayer queue's guard, right before the signing
+        o = await relayer.send(
+          { kind: "delegate", signed: m.signed_delegate, receiver: a },
+          async () => ((await holds()) ? "token_halted" : null),
+          (t) => {
+            refs.push(t);
+            const g = store.signer(a);
+            store.putSigner({ ...g, taking: (g.taking ?? []).filter((n) => n !== nonce) });
+          },
+          { wait: false },
+        );
+      } catch (e) {
+        if (refs.length === 0) giveBack();
+        throw e;
+      }
+      const tx = refs[0];
+      if (o.kind === "guarded" || tx === undefined) {
+        if (tx === undefined) giveBack();
+        return no(o.kind === "guarded" && o.code === "token_halted" ? "token_halted" : "upstream");
+      }
+      // the answer goes now; the outcome is read after it, and a failure on chain counts
+      held = false;
+      const first = o;
+      const task = (async () => {
+        try {
+          const end = await settle(tx, first, untilMs);
+          if (end.kind === "final" && !ran(end)) strike(a);
+        } catch {
+          // an outcome not read is never counted
+        } finally {
+          out.delete(key);
+        }
+      })();
+      tasks.add(task);
+      void task.finally(() => tasks.delete(task));
+      return sent(tx.tx_hash);
+    } finally {
+      if (held) out.delete(key);
+    }
+  };
+
   return {
     async carry(body) {
       try {
         return await carryOne(body);
+      } catch {
+        return no("upstream");
+      }
+    },
+    async onward(move, finalHeight) {
+      try {
+        return await onwardOne(move, finalHeight);
       } catch {
         return no("upstream");
       }
