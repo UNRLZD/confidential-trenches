@@ -27,8 +27,8 @@ const M = [
   [B, "  await store.update(\"meta\", key, (rec) => {", "  const rec0 = await (store as unknown as WalletStore).get(\"meta\", key);\n  await store.update(\"meta\", key, () => {\n    const rec = rec0;", T, "two tabs banning at once"],
   [B, "    after = next.slice(-EVM_SELL_BANS_MAX);", "    after = next.slice(0, EVM_SELL_BANS_MAX);", T, "at most"],
   // the store's own key: no seed move, never the frame's
-  [ST, " || e.key.startsWith(WALLET_BAN_PREFIX))));", ")));", T, "a ban's write is no seed move"],
-  [ST, " || x.startsWith(WALLET_BAN_PREFIX))));", ")));", T, "a ban's write is no seed move"],
+  [ST, " || e.key.startsWith(WALLET_BAN_PREFIX)", "", T, "a ban's write is no seed move"],
+  [ST, " || x.startsWith(WALLET_BAN_PREFIX)", "", T, "a ban's write is no seed move"],
   [ST, "const BAN_KEY = /^evm-bans\\/[^/]{1,40}\\/[^/]{1,200}$/;", "const BAN_KEY = /^evm-bans\\//;", T, "a ban's write is no seed move"],
 ];
 let ok = 0;

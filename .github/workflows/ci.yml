@@ -535,7 +535,9 @@ jobs:
   # Sixteen parts (card round-trip-costs-less): the rent back's sweep grew to 126 plants; it runs as fourteen commands of
   # 9 plants (244 s at the table's 27.06 s a plant), and 16 parts plan the heaviest at 502 s (15 would plan 566 s).
   # Seventeen parts (card pool-solana-mutants-plant-what-they-name): the Solana pool's sweep, which no command ran, joined
-  # the wallet's (164 s listed); 16 parts plan the heaviest at 560 s, 17 plan it at 512 s.
+  # the wallet's (164 s listed); 16 parts plan the heaviest at 560 s, 17 plan it at 512 s. Card
+  # wallet-sweeps-plant-what-they-name joined the wallet's two EVM sweeps and grew the Solana pool's (290, 5 and 142 s
+  # listed): 17 parts plan the heaviest at 519 s (16 would plan 566 s).
   # scripts/ci/test-shards.test.mjs fails when any ci.yml line but a comment names test:mutants, in any runner's form.
   # Nightly on main and by hand only (card ci-fast-checks-on-the-pr): no pull request, queue group or push waits on the
   # sweeps, and the required check test does not need this job. It needs no changes job (that one skips a scheduled
