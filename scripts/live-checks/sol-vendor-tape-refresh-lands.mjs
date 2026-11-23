@@ -24,13 +24,15 @@
 // And, a second rule on every answer, hold and gap: one whose rows are past SOL_VENDOR_REACH_MS says `filling`, so the
 // page never draws it as live (card sol-vendor-tape-gap-served-inside-reach). It is its own BAD line; an answer past the
 // reach that says filling is still BAD by the rule above.
-// No coin served from the vendor long enough to judge, or no gap answer from the vendor: error (exit 2), never a pass.
+// No coin served from the vendor long enough to judge, or no gap answer from the vendor: INCONCLUSIVE (exit 2,
+// provider-answer.mjs nothingToJudge), never a pass.
 // Each gap answer's time (Server-Timing total) is printed beside it, so a red run shows whether the helper waited for a
 // refresh or answered at once.
 // After: helper
 //   node scripts/live-checks/sol-vendor-tape-refresh-lands.mjs [--base <url>] [--record <file>]
-//   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
+//   PASS exit 0, FAIL exit 1, error or INCONCLUSIVE (nothing to judge) exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";
+import { nothingToJudge } from "./provider-answer.mjs";
 import { writeFileSync } from "node:fs";
 import { SOL_VENDOR_REACH_MS } from "../../apps/helper/src/data/solana/trades.ts";
 import { TAPE_FRESH_MS } from "../../apps/helper/src/data/solana/token.ts";
@@ -189,8 +191,9 @@ if (import.meta.main) {
     const { ok, lines } = judge(r);
     for (const l of lines) console.log(l);
     if (ok === null) {
-      console.error(`live-check ${KEY}: ERROR: nothing to judge (${r.base})`);
-      process.exit(2);
+      const n = nothingToJudge(KEY, r.base);
+      console.log(n.line);
+      process.exit(n.code);
     }
     console.log(`live-check ${KEY}: ${ok ? "PASS" : "FAIL"} (${r.base})`);
     process.exit(ok ? 0 : 1);

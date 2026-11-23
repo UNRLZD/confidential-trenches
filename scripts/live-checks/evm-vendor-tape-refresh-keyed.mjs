@@ -11,12 +11,14 @@
 //   - at least MIN_VENDOR answers are the vendor's rows (named in Server-Timing), spanning more than TAPE_FRESH_MS, so a
 //     refresh had to land; a coin whose tape turns to our own chain reads part way is left and the next one read;
 //   - every vendor answer's rows were read at most BEHIND_MAX[chain].ms before, by the helper's word.
-// A chain with no coin served from the vendor long enough to judge: error (exit 2), never a pass.
+// A chain with no coin served from the vendor long enough to judge: INCONCLUSIVE (exit 2, provider-answer.mjs
+// nothingToJudge), never a pass.
 // After: helper
 // Serial: evm-keyed 360 (its Base and Robinhood tape reads draw the keyed providers)
 //   node scripts/live-checks/evm-vendor-tape-refresh-keyed.mjs [--base <url>] [--record <file>]
-//   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
+//   PASS exit 0, FAIL exit 1, error or INCONCLUSIVE (nothing to judge) exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";
+import { nothingToJudge } from "./provider-answer.mjs";
 import { writeFileSync } from "node:fs";
 import { BEHIND_MAX } from "../../apps/helper/src/data/evm/swaps.ts";
 import { TAPE_FRESH_MS } from "../../apps/helper/src/data/solana/token.ts";
@@ -137,8 +139,9 @@ if (import.meta.main) {
     const { ok, lines } = judge(r);
     for (const l of lines) console.log(l);
     if (ok === null) {
-      console.error(`live-check ${KEY}: ERROR: nothing to judge (${r.base})`);
-      process.exit(2);
+      const n = nothingToJudge(KEY, r.base);
+      console.log(n.line);
+      process.exit(n.code);
     }
     console.log(`live-check ${KEY}: ${ok ? "PASS" : "FAIL"} (${r.base})`);
     process.exit(ok ? 0 : 1);

@@ -13,12 +13,13 @@
 //   - every chart answer after its first vendor bars is 200 with bars;
 //   - the reads whose open ran past OPEN_BOUND_MS (`evm-open;dur=`) are named with what they answered.
 // The helper's no-answer (a fetch that failed, its 429, a body that is not JSON) is left out, never judged. A chain with
-// no coin held from the vendor for HOLD_MS: error (exit 2), never a pass. No JSON-RPC read: the helper's answers only.
+// no coin held from the vendor for HOLD_MS: INCONCLUSIVE (exit 2, provider-answer.mjs nothingToJudge), never a pass. No JSON-RPC read: the helper's answers only.
 // After: helper
 // Serial: evm-keyed 370 (its Base and Robinhood tape and chart reads draw the keyed providers)
 //   node scripts/live-checks/evm-vendor-tape-late-open-serves-held.mjs [--base <url>] [--record <file>]
-//   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
+//   PASS exit 0, FAIL exit 1, error or INCONCLUSIVE (nothing to judge) exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";
+import { nothingToJudge } from "./provider-answer.mjs";
 import { writeFileSync } from "node:fs";
 import { NONE_MS, OPEN_BOUND_MS } from "../../apps/helper/src/data/evm/swaps.ts";
 
@@ -171,8 +172,9 @@ if (import.meta.main) {
     const { ok, lines } = judge(r);
     for (const l of lines) console.log(l);
     if (ok === null) {
-      console.error(`live-check ${KEY}: ERROR: nothing to judge (${r.base})`);
-      process.exit(2);
+      const n = nothingToJudge(KEY, r.base);
+      console.log(n.line);
+      process.exit(n.code);
     }
     console.log(`live-check ${KEY}: ${ok ? "PASS" : "FAIL"} (${r.base})`);
     process.exit(ok ? 0 : 1);

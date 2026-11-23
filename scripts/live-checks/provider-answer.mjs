@@ -39,6 +39,11 @@ export const LIMIT_CODES = new Set([429, -32005]);
 export const PAGE_THROTTLE_CODES = new Set([-32029, -32429, -429, 15]);
 
 export const EXIT = Object.freeze({ PASS: 0, FAIL: 1, ERROR: 2, INCONCLUSIVE: 3 });
+/** The last line and exit of a check that read nothing to judge (no coin in the case it checks: a quiet market), card
+ *  nothing-to-judge-is-inconclusive. No fault of the deploy and no pass: INCONCLUSIVE, which the live run lists by key on
+ *  every run. Exit 2, so it is never run again (scripts/ci/live-rerun.mjs reads an exit 2 whose last verdict line is
+ *  INCONCLUSIVE as inconclusive): a market stays quiet past the rerun's pauses, and each rerun would hold a serial job. */
+export const nothingToJudge = (key, base) => ({ line: `live-check ${key}: INCONCLUSIVE: nothing to judge (${base})`, code: EXIT.ERROR });
 export const RPC_TIMEOUT_MS = 10_000;
 
 const reverted = (e) => e?.code === 3 || (typeof e?.message === "string" && /^execution reverted/i.test(e.message));
