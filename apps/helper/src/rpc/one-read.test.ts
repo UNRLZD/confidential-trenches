@@ -28,13 +28,14 @@ const priceRead = (id: number | string, account = PYTH, method = "getMultipleAcc
 /** A keyed provider in memory: answers in `lateMs`, 429 past `perSecond` requests in any 1 s. Each answer carries the
  *  slot it was read at, one a 400 ms slot on the clock. */
 function provider(perSecond: number, lateMs: number) {
-  const p = { calls: 0, throttled: 0, sent: [] as number[], bodies: [] as string[] };
+  const p = { calls: 0, throttled: 0, sent: [] as number[], bodies: [] as string[], at: [] as number[] };
   const fetch = async (_u: string, init: RequestInit): Promise<Response> => {
     const t = Date.now();
     p.sent = p.sent.filter((x) => x > t - 1000);
     p.sent.push(t);
     p.calls++;
     p.bodies.push(String(init.body));
+    p.at.push(t);
     await new Promise((go) => setTimeout(go, lateMs));
     if (p.sent.length > perSecond) return (p.throttled++, new Response("slow down", { status: 429 }));
     const r = JSON.parse(String(init.body)) as { id: unknown; method: string; params: unknown[] };
@@ -46,14 +47,28 @@ function provider(perSecond: number, lateMs: number) {
   return { p, fetch };
 }
 
-/** 200 pages on 67 addresses reading the price every 3 s for `ms`: the answers by status, and the provider's count. */
-async function crowd(ms = 60_000) {
+/** `pages` pages on a third as many addresses reading the price every `everyMs` (3 s when not given) for `ms`: the
+ *  answers by status, and the provider's count. With `own`, one more caller at its own address reads a one-time account
+ *  of its own (WALLET, as a buy reads its fresh wallet) every second beside them: its answers by status, and the price
+ *  reads the provider saw in each 1 s. */
+async function crowd(ms = 60_000, o: { pages?: number; everyMs?: number; own?: boolean } = {}) {
   const pv = provider(50, 120);
+  const pages = o.pages ?? 200;
+  const every = o.everyMs ?? 3_000;
   const { value } = await onVirtualTime(9_000_000, async () => {
     const r = createRpc({ SOLANA_RPC_URL: URL_KEYED }, { fetch: pv.fetch as never, log: () => {} });
     const status = new Map<number, number>();
     const bad: string[] = [];
     const end = Date.now() + ms;
+    const own = new Map<number, number>();
+    const buyer = async (): Promise<void> => {
+      for (let n = 0; Date.now() < end; n++) {
+        const at = Date.now();
+        const a = await r.handle("solana", JSON_T, priceRead(`own-${n}`, WALLET, "getAccountInfo"), "203.0.113.9");
+        own.set(a.status, (own.get(a.status) ?? 0) + 1);
+        await new Promise((go) => setTimeout(go, Math.max(0, at + 1_000 - Date.now())));
+      }
+    };
     const page = async (i: number): Promise<void> => {
       // each page's own phase inside the same 300 ms of each 3 s (every shown page polls in the same seconds)
       await new Promise((go) => setTimeout(go, (i * 37) % 300));
@@ -65,13 +80,16 @@ async function crowd(ms = 60_000) {
           const j = JSON.parse(a.body) as { id: unknown; result?: { value?: unknown[] } };
           if (j.id !== `p${i}-${n}` || j.result?.value?.length !== 1) bad.push(a.body.slice(0, 120));
         }
-        await new Promise((go) => setTimeout(go, Math.max(0, at + 3_000 - Date.now())));
+        await new Promise((go) => setTimeout(go, Math.max(0, at + every - Date.now())));
       }
     };
-    await Promise.all(Array.from({ length: 200 }, (_, i) => page(i)));
-    return { status, bad };
+    await Promise.all([...Array.from({ length: pages }, (_, i) => page(i)), ...(o.own ? [buyer()] : [])]);
+    return { status, bad, own };
   });
-  return { ...value, upstream: pv.p.calls, providerThrottled: pv.p.throttled };
+  // the price reads the provider saw, by the 1 s they were sent in (pv.p.sent keeps only the last second's times)
+  const priceSeconds = new Map<number, number>();
+  pv.p.bodies.forEach((b, i) => b.includes(PYTH) && priceSeconds.set(Math.floor(pv.p.at[i]! / 1000), (priceSeconds.get(Math.floor(pv.p.at[i]! / 1000)) ?? 0) + 1));
+  return { ...value, upstream: pv.p.calls, providerThrottled: pv.p.throttled, priceSeconds };
 }
 
 test("card helper-rpc-one-read-many-pages: 200 pages on 67 addresses reading the SOL price every 3 s in the same seconds cost the keyed provider about one read a slot, and no page is refused: a hit draws nothing of the route's total (red at 4a449c499: 4,000 asks a minute, 100 sent upstream within the route's budget and 3,900 refused 429)", async () => {
@@ -83,6 +101,20 @@ test("card helper-rpc-one-read-many-pages: 200 pages on 67 addresses reading the
   // 20 rounds of 3 s, each in one 300 ms burst: one upstream read joins the burst, and a burst crossing a held answer's
   // end at most one more
   assert.ok(c.upstream <= 2 * 20, `more than one read a slot: ${line}`);
+});
+
+// card helper-sol-price-read-own-budget: many open pages reading the SOL price in step never make the helper refuse
+// another Solana read, a buy's included (the price fix's review at ac39d0ee, P2: 36 shown pages polling in step filled
+// the route's shared budget and every other read in those seconds was refused). The shared read above holds it: a hit
+// draws nothing of the route's total, so the price readers leave the route's room to every other caller.
+test("card helper-sol-price-read-own-budget: 40 pages reading the SOL price every second while one caller reads its own wallet each second: that read answers every time, and the provider sees at most one price read a slot", async () => {
+  const c = await crowd(60_000, { pages: 40, everyMs: 1_000, own: true });
+  const line = `own ${[...c.own].map(([s, n]) => `${s} x${n}`).join(", ")}; price ${[...c.status].map(([s, n]) => `${s} x${n}`).join(", ")}; upstream ${c.upstream}`;
+  assert.deepEqual([...c.own.keys()], [200], `the caller's own read refused: ${line}`);
+  assert.ok((c.own.get(200) ?? 0) >= 59, `the caller read each second: ${line}`);
+  assert.equal([...c.status.keys()].filter((s) => s !== 200).length, 0, `a page refused: ${line}`);
+  // one 400 ms slot's answer serves the slot: at most three slots start in any 1 s
+  assert.ok(Math.max(...c.priceSeconds.values()) <= 3, `more than one price read a slot: ${[...c.priceSeconds.values()].join(",")}`);
 });
 
 test("card helper-rpc-one-read-many-pages: a request naming any account the route holds no word for (a user's one-time account) is never held or joined: each is its own upstream read, at once or a moment apart", async () => {
