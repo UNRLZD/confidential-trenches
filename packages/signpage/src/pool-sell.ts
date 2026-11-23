@@ -2513,18 +2513,25 @@ async function rentBackOwed(h: PoolSellHost, given: RentBack, o: OwedRentBack, h
   // (sol-buy-records.ts, `rebuilt`: the helper's word, review of 42a99f81, P1) or the rebuild's "no buy" mark only once
   // the public seat reads W's history the same (provenBuy), kept on W's record so it is read once. With neither, no
   // provider is asked: the pass holds, W's lamports kept on W under the 12 words, until the rebuild writes its record
+  // a found W (card a-found-wallet-old-strand-records-sweep): its record's `found`, or every note of the user's at W's
+  // (l, j) in the store UNSPENT or HELD (the states pool-found.ts ownWs finds a W by). W's buy is its own note's tag 3, which spends that note,
+  // so a buy recorded but never landed (its note freed), or a strand's record from before `found`, is a found W: its pass
+  // names no mint, and the found W's rule decides (foundPast, then foundSpentOf reading the pool's own spend at W's
+  // (l, j)), so a landed buy's coin still holds W. A W the helper lists after a buy or a sale has its note SPENT (or
+  // RESERVED while a tap runs), so it never matches; no buy evidence is read for a found W
+  const found = o.found === true || (await notesOpen(given.store, given.scope, given.w));
   const ev = await evidenceOf(h, given.w.address);
-  let buy: SolanaBuy | undefined = ev.rec && ev.rec.rebuilt !== true ? { mint: ev.rec.mint, program: ev.rec.program } : undefined;
+  let buy: SolanaBuy | undefined = !found && ev.rec && ev.rec.rebuilt !== true ? { mint: ev.rec.mint, program: ev.rec.program } : undefined;
   let proven = o.buy;
   // the reads that plainly disagreed so far (`differs`), this pass's among them: only they count toward the passes (with
   // no evidence at all no read is made, and each pass counts, as before)
   let differs = o.differs ?? 0;
-  if (buy === undefined && proven === undefined && (ev.rec !== undefined || ev.none)) {
+  if (!found && buy === undefined && proven === undefined && (ev.rec !== undefined || ev.none)) {
     const p = await provenBuy(given.rpcs[0], given.program, given.w.address, ev.rec ? { mint: ev.rec.mint, program: ev.rec.program } : null);
     if (p === "differs") differs++;
     else proven = p;
   }
-  if (buy === undefined && proven) buy = proven;
+  if (!found && buy === undefined && proven) buy = proven;
   // no proof: held, read again on each load to its third pass, then as W's own state. W's note paid a plain release with
   // no buy (proven null): held as W's own state at once, its record kept and never listed empty, so a W holding more than
   // its rent with no proven buy is never dropped (review of 20ba2481b, P2-6: a buy in several pieces can leave released
@@ -2532,10 +2539,10 @@ async function rentBackOwed(h: PoolSellHost, given: RentBack, o: OwedRentBack, h
   // a W found holding SOL with no buy recorded (o.found, card buy-spends-several-pieces): the pass runs, and its sweep is
   // built only on the found W's rule (foundPast before its teardown, foundSince in its sweep); its reads name token
   // accounts the finding read does not, so no `seen` of it is kept and every load passes it
-  const unproven = buy === undefined && proven === undefined && o.found !== true ? ((ev.rec === undefined && !ev.none ? o.passes + 1 : differs) >= POOL_RENT_BACK_UNPROVEN_PASSES ? ("steady" as const) : ("again" as const)) : undefined;
+  const unproven = buy === undefined && proven === undefined && !found ? ((ev.rec === undefined && !ev.none ? o.passes + 1 : differs) >= POOL_RENT_BACK_UNPROVEN_PASSES ? ("steady" as const) : ("again" as const)) : undefined;
   // a found W's pass names no mint of its record (review of 359f71639, M1): no coin of W's is the user's by a record
   // alone, so a stranger's unit of a mint a record names never holds W; a buy recorded or proven adds its mint back
-  const x: RentBack = buy ? { ...given, mints: mintsOf(given.mints, [buy]), buy } : { ...given, buy: null, ...(o.found === true ? { bare: true as const, mints: [] } : unproven ? { unproven } : {}) };
+  const x: RentBack = buy ? { ...given, mints: mintsOf(given.mints, [buy]), buy } : found ? { ...given, buy: null, bare: true, mints: [] } : { ...given, buy: null, ...(unproven ? { unproven } : {}) };
   let lamports: bigint | undefined;
   let unlisted = false;
   let spaced: number | undefined;
@@ -2856,6 +2863,12 @@ async function foundPast(rpcs: Rpcs, owner: string): Promise<{ signature: string
   return at.every((x) => Number.isSafeInteger(x.height) && Number.isSafeInteger(x.slot) && (x.slot as number) >= 0 && (x.height as number) > (heights[0] as number) + FOUND_BLOCKHASH_LIFE + FOUND_ROUND_GAP)
     ? { signature: last.signature, slots: [at[0]!.slot as number, at[1]!.slot as number] }
     : null;
+}
+/** Whether every note of the user's at W's (l, j) in the store is UNSPENT or HELD, and one at least (the states
+ *  pool-found.ts ownWs finds a W by; foundSpentOf reads the same notes' spend on the pool). */
+async function notesOpen(store: NoteStore, scope: bigint, w: { l: bigint; j: number }): Promise<boolean> {
+  const mine = (await store.list()).filter((n) => n.scope === scope && n.leaf !== undefined && n.leaf.label === w.l && jOf(n.ref) === w.j);
+  return mine.length > 0 && mine.every((n) => n.state === "UNSPENT" || n.state === "HELD");
 }
 /** A blockhash's life in block heights, as the buy reads it (pool-buy.ts BLOCKHASH_LIFE). */
 const FOUND_BLOCKHASH_LIFE = 151;

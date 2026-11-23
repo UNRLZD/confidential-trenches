@@ -76,16 +76,19 @@ export const MARKS = Object.freeze({
     // card every-lamport-can-move, review P1: a fault or a read that cannot tell is no answer (undefined) and counts
     // nothing; only a read that plainly disagrees ("differs") counts toward the unproven passes
     re(R`async function (?<pb>${I})\((?<rp>${I}),(?<pr>${I}),(?<ad>${I}),(?<cl>${I})\)\{let (?<a>${I});try\{\k<a>=await ${I}\(\k<rp>,\k<pr>\)\.read\(\k<ad>\)\}catch\{return\}if\(\k<a>!==null\)return \k<cl>===null\?\k<a>===` + "`none`" + R`\?null:` + "`differs`" + R`:\k<a>!==` + "`none`" + R`&&\k<a>\.mint===\k<cl>\.mint&&\k<a>\.program===\k<cl>\.program\?\{mint:\k<a>\.mint,program:\k<a>\.program\}:` + "`differs`" + R`\}`),
-    (g) => [R`(${I})=(${I})\.buy,(${I})=\2\.differs\?\?0;if\((${I})===void 0&&\1===void 0&&\((${I})\.rec!==void 0\|\|\5\.none\)\)\{let (${I})=await ${esc(g.pb)}\((${I})\.rpcs\[0\],[^;]{0,200}?\);\6===` + "`differs`" + R`\?\3\+\+:\1=\6\}`],
+    (g) => [R`(${I})=(${I})\.buy,(${I})=\2\.differs\?\?0;if\(!${I}&&(${I})===void 0&&\1===void 0&&\((${I})\.rec!==void 0\|\|\5\.none\)\)\{let (${I})=await ${esc(g.pb)}\((${I})\.rpcs\[0\],[^;]{0,200}?\);\6===` + "`differs`" + R`\?\3\+\+:\1=\6\}`],
   ),
   "an unproven W tried again on each load to its third pass, then held as its own state": tied(
     // a W found holding SOL with no buy recorded (card buy-spends-several-pieces) is never an unproven one
     // card every-lamport-can-move, review P1: with buy evidence, only reads that plainly disagree count (differs)
-    re(R`(?<c>${I})=(?<o>${I})===void 0&&(?<s>${I})===void 0&&(?<n>${I})\.found!==!0\?\((?<ev>${I})\.rec===void 0&&!\k<ev>\.none\?\k<n>\.passes\+1:(?<df>${I})\)>=3\?` + "`steady`:`again`" + R`:void 0`),
+    re(R`(?<c>${I})=(?<o>${I})===void 0&&(?<s>${I})===void 0&&!(?<fd>${I})\?\((?<ev>${I})\.rec===void 0&&!\k<ev>\.none\?(?<n>${I})\.passes\+1:(?<df>${I})\)>=3\?` + "`steady`:`again`" + R`:void 0`),
     (g) => [R`\|\|(${I})\.end===` + "`owed`" + R`\|\|${esc(g.c)}===` + "`again`", R`;try\{if\(!(${I})\.buy&&\1\.bare!==!0\)return (${I})\(` + "`holds`,`no buy of W's is recorded`" + R`,\1\.unproven!==` + "`again`" + R`\);`,
       // a found W's pass on the found W's rule (bare), naming no mint (review of 359f71639, M1), and no `seen` of it kept:
       // its reads name token accounts the finding read does not, so every load passes it
-      R`\.\.\.${esc(g.n)}\.found===!0\?\{bare:!0,mints:\[\]\}:${esc(g.c)}\?\{unproven:${esc(g.c)}\}:\{\}`,
+      // card a-found-wallet-old-strand-records-sweep: a W found by its record's `found` or by its notes all open; the
+      // found pass before any unproven one
+      R`${esc(g.fd)}=${esc(g.n)}\.found===!0\|\|await ${I}\(`,
+      R`:${esc(g.fd)}\?\{\.\.\.${I},buy:null,bare:!0,mints:\[\]\}:\{\.\.\.${I},buy:null,\.\.\.${esc(g.c)}\?\{unproven:${esc(g.c)}\}:\{\}\}`,
       R`(${I})\.steady&&(${I})\.bare!==!0\?(${I}):void 0`],
   ),
   "the positions' passes held only while a W is read": tied(
