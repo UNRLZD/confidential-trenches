@@ -96,3 +96,11 @@ test("a coin the page cannot trade yet (venue_not_pinned, no_table_fits) moves o
   assert.equal(solana(["not_funded", "out"]).verdict, "FAIL", "not_funded on the first coin");
   assert.equal(solana(["venue_not_pinned", "quote_check_failed", "down"]).verdict, "INCONCLUSIVE", "every coin refused for its own reads");
 });
+
+test("the recorded skip run (the live SIGN_HOST, 22 Nov 21:15Z): Solana's venue_not_pinned coin moves the check on to the coin priced after it, PASS", () => {
+  const solana = A.skip.asks.filter((x) => x.chain === "solana");
+  assert.ok(solana.some((x) => x.code === "venue_not_pinned"), "the run holds a venue_not_pinned coin");
+  const v = judge(A.skip);
+  assert.equal(v.verdict, "PASS", v.lines.join("\n"));
+  assert.ok(v.lines.some((l) => l.startsWith("ok ") && l.includes("[solana]") && l.includes(" out ")), v.lines.join("\n"));
+});
