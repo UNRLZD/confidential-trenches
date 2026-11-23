@@ -20,7 +20,8 @@
 //     here, never the helper's code); the pool being the emitter (and for v4 the pool id) of the Swap log every sampled
 //     receipt shares among those whose emitter (for v4 the PoolManager) sent or received the token in a Transfer of
 //     the receipt, never a pool the route only passed through (coinKeys: WETH/USDC in a USDC buy of 0x2713d97a)
-//     (where they share more than one, each a route through two pools of the token, the one with most
+//     (where they share more than one, each a route through two pools of the token, the pool the tape names in its
+//     Server-Timing, evm-pool, which every sampled receipt must hold; for a helper that names none, the one with most
 //     swap transactions over the window, each key's logs read on two providers), a v4 trade's `amt` is exactly this pool's own Swap leg of the token in the receipt the two
 //     providers agreed on (two that answered and differ fail, naming each one's leg), less a hook's cut where one is
 //     read: what the trade's sender, whose one swap it is, moved with the PoolManager (helper-v4-hook-liquidity's
@@ -30,7 +31,9 @@
 //     asked a Transfer of the token for exactly `amt` to the pool (a sell) or from it (a buy), and at least half of
 //     those asked carry one;
 //   - no swap is missing: every swap of that pool in the blocks the tape covers, up to 120 blocks (24 s) behind the
-//     providers' newest, is on the tape.
+//     providers' newest and no later than the block the tape says it is read to (Server-Timing evm-read-to; how far
+//     behind the head a complete tape may be is base-tape-never-complete-behind-the-index's, on Base and Robinhood),
+//     is on the tape.
 // On Robinhood (--chain robinhood), which has no fixed block clock, a trade's time must be its block's own time and the
 // providers' newest block's time within 20 s of their read, each block time read on two providers that agree; its swaps
 // include the Pons v2 curve's CurveBuy and CurveSell, and its pool's logs are read in the 100-block spans its keyless
@@ -178,6 +181,22 @@ const isAmount = (data, want) => /^0x[0-9a-f]{64}$/.test(data ?? "") && BigInt(d
 const topicAddr = (t) => (typeof t === "string" && /^0x0{24}[0-9a-f]{40}$/.test(t) ? `0x${t.slice(26)}` : null);
 /** The pool key of a Swap log: its emitter, and for the PoolManager the pool id. */
 const poolKey = (l, net = "base") => (l.address === VENUES[net].poolManager ? `${l.address}:${l.topics[1]}` : l.address);
+const NAMED = /(?:^|,)\s*evm-pool;desc="([a-z0-9]+) (0x[0-9a-fA-F]+)"/;
+const READ_TO = /(?:^|,)\s*evm-read-to;desc="block (\d+) of head \d+, read \d+ s ago"/;
+/** The pool key (poolKey's form) of the pool a tape answer's Server-Timing names (swaps.ts readTo, card
+ *  tape-names-its-pool), or null. A coin's tape follows the pool it trades on: helper live run 45256973001 judged
+ *  Robinhood STATICS's tape against another pool every one of its transactions also swapped in. */
+export function namedKey(timing, net = "base") {
+  const m = NAMED.exec(typeof timing === "string" ? timing : "");
+  if (m === null) return null;
+  const id = m[2].toLowerCase();
+  return m[1] === "v4" ? `${VENUES[net].poolManager}:${id}` : id;
+}
+/** The block a tape answer's Server-Timing says its rows hold every swap to (swaps.ts readTo), or null. */
+export function readToOf(timing) {
+  const m = READ_TO.exec(typeof timing === "string" ? timing : "");
+  return m === null ? null : Number(m[1]);
+}
 /**
  * The pool keys of receipt `r`'s Swap logs whose emitter (for a v4 key, the PoolManager) sent or received `coin` in a
  * Transfer of the same receipt: the coin's pools, never a pool a route passes through. Base tx 0xb3fa9883 (block
@@ -358,9 +377,14 @@ export function judge(run) {
   // (card helper-live-run-green-after-122: live run 43250937996 took the first key of the first receipt, PENNY's 6%
   // side pool, though its other pool carried 44 of the 1,000 blocks' swaps to its 7)
   const common = keys.length === 0 ? [] : [...keys[0]].filter((k) => keys.every((s) => s.has(k)));
-  const counted = common.length > 1 ? sharedCounts(c.shared, common) : null;
-  const pool = counted === null ? common[0] : counted[0]?.key;
-  say(common.length === 1 || (counted !== null && counted.length === common.length), `the sampled trades share a pool: ${show(common)}${common.length > 1 ? (counted !== null && counted.length === common.length ? `; judged on the busiest over the window, ${counted.map((x) => `${x.key} ${x.txs} swap transaction${x.txs === 1 ? "" : "s"}`).join(", ")}` : "; no swap count read for each of them") : ""}`);
+  // card tape-names-its-pool: the pool the tape names, where every sampled receipt holds it, is the one judged; the
+  // busiest is judged only for a helper that names none (STATICS's triangle: the busier shared pool was not the tape's)
+  const named = namedKey(run.reads?.trades?.headers?.["server-timing"], net);
+  const byName = common.length > 1 && named !== null && common.includes(named);
+  const counted = common.length > 1 && !byName ? sharedCounts(c.shared, common) : null;
+  const pool = byName ? named : counted === null ? common[0] : counted[0]?.key;
+  if (named !== null && common.length > 0) say(common.includes(named), `the pool the tape names, ${named}, is one every sampled trade swaps in`);
+  say(common.length === 1 || byName || (counted !== null && counted.length === common.length), `the sampled trades share a pool: ${show(common)}${byName ? "; judged on the pool the tape names" : common.length > 1 ? (counted !== null && counted.length === common.length ? `; judged on the busiest over the window, ${counted.map((x) => `${x.key} ${x.txs} swap transaction${x.txs === 1 ? "" : "s"}`).join(", ")}` : "; no swap count read for each of them") : ""}`);
   const poolAddr = pool === undefined ? null : pool.split(":")[0];
   const agreedReceipt = (t) => (isObj(c.receipts?.[t.tx]) && !Array.isArray(c.receipts[t.tx].differ) ? c.receipts[t.tx] : null);
   const v4 = pool !== undefined && poolAddr === VENUES[net].poolManager;
@@ -447,11 +471,17 @@ export function judge(run) {
   if (isObj(pl) && Array.isArray(pl.logs) && timed) {
     const onTape = new Set(trades.trades.map((t) => t.tx));
     const from = Math.max(pl.from, net === "base" ? oldestBlock + 1 : pl.from); // the oldest trade's block may hold more swaps than the tape
-    const inWindow = (l) => Number.parseInt(l.blockNumber, 16) >= from && Number.parseInt(l.blockNumber, 16) <= last && (net === "base" || l.t * 1000 > oldestT);
+    // card tape-names-its-pool: no later than the block the tape says it holds every swap to (evm-read-to), which the
+    // helper keeps within BEHIND_MAX of the head or answers filling (base-tape-never-complete-behind-the-index judges
+    // that). Helper live run 45256973001 counted Robinhood 0x96dea7ce's swap 0x68a877eb in block 121685048
+    // missing from a tape read to block 121685044, MARGIN behind a head the check read 3 s after the answer.
+    const readTo = readToOf(run.reads?.trades?.headers?.["server-timing"]);
+    const upTo = readTo === null ? last : Math.min(last, readTo);
+    const inWindow = (l) => Number.parseInt(l.blockNumber, 16) >= from && Number.parseInt(l.blockNumber, 16) <= upTo && (net === "base" || l.t * 1000 > oldestT);
     const due = [...new Set(pl.logs.filter(inWindow).map((l) => l.transactionHash))];
     const missing = due.filter((t) => !onTape.has(t));
     // the tape is full (50) when it covers fewer than 50 swaps on the window: a full tape's oldest rows are cut, not missing
-    say(missing.length === 0, `${due.length} swap transaction${due.length === 1 ? "" : "s"} of the pool in blocks ${from} to ${last}${net === "base" ? "" : ` after the oldest trade's time`}, ${missing.length} missing from the tape${missing.length ? `: ${missing.slice(0, 3).join(", ")}` : ""}`);
+    say(missing.length === 0, `${due.length} swap transaction${due.length === 1 ? "" : "s"} of the pool in blocks ${from} to ${upTo}${upTo < last ? " (the block the tape is read to)" : ""}${net === "base" ? "" : ` after the oldest trade's time`}, ${missing.length} missing from the tape${missing.length ? `: ${missing.slice(0, 3).join(", ")}` : ""}`);
   }
   return withReads(run, lines);
 }
@@ -669,14 +699,17 @@ export async function read(base = BASE, token, fetchFn = fetch, rpcs, net = "bas
     };
     if (common.length === 1) run.chain.poolLogs = await poolLogsOf(common[0]);
     else {
-      // more than one shared key: each one's logs (SHARED_MAX at most), so judge() takes the busiest
+      // more than one shared key: each one's logs (SHARED_MAX at most, the pool the tape names first), so judge() takes
+      // the named one, or the busiest for a helper that names none
+      const named = namedKey(reads.trades?.headers?.["server-timing"], net);
+      const order = common.includes(named) ? [named, ...common.filter((k) => k !== named)] : common;
       run.chain.shared = [];
-      for (const k of common.slice(0, SHARED_MAX)) {
+      for (const k of order.slice(0, SHARED_MAX)) {
         const got = await poolLogsOf(k);
         if (got !== null) run.chain.shared.push(got);
       }
-      const busiest = sharedCounts(run.chain.shared, common)?.[0]?.key;
-      run.chain.poolLogs = run.chain.shared.find((x) => x.pool === busiest) ?? null;
+      const judged = common.includes(named) ? named : sharedCounts(run.chain.shared, common)?.[0]?.key;
+      run.chain.poolLogs = run.chain.shared.find((x) => x.pool === judged) ?? null;
     }
   }
   if (net !== "base") {

@@ -755,6 +755,68 @@ test("card helper-live-run-green-after-122: read() reads each shared key's logs 
   assert.equal(again.chain.poolLogs.pool, BUSY);
 });
 
+// Card tape-names-its-pool: helper live run 45256973001 judged Robinhood STATICS's tape, pool 0x20aa1721's, against the
+// busier pool of a triangle every one of its transactions also swapped in, and counted Robinhood 0x96dea7ce's swap in
+// block 121685048 missing from a tape read to block 121685044. A tape names its pool and the block it is read to
+// (Server-Timing evm-pool, evm-read-to): the check judges that pool, up to that block.
+/** `rec`'s tape answer naming pool key `key` (poolKey's form) and read to block `to`. */
+const naming = (rec, key, to) => {
+  rec.reads.trades.headers["server-timing"] = `evm-open;dur=0, evm-read-to;desc="block ${to} of head ${to}, read 0 s ago", evm-pool;desc="v4 ${key.split(":")[1]}"`;
+  return rec;
+};
+
+test("card tape-names-its-pool: PENNY's side-pool tape naming its pool PASSES though the other pool is busier; naming the busy pool, or a pool no sampled trade swaps in, FAILs", () => {
+  const to = PENNY.chain.shared[0].to;
+  const side = run(naming(withSwaps(BUSY, 3), SIDE, to));
+  assert.deepEqual(bad(side), [], side.lines.join("\n"));
+  assert.ok(side.lines.some((l) => l.startsWith("ok ") && l.includes("judged on the pool the tape names")), side.lines.join("\n"));
+  const busy = run(naming(withSwaps(BUSY, 3), BUSY, to));
+  assert.ok(bad(busy).some((l) => /3 missing from the tape/.test(l)), bad(busy).join("\n"));
+  const other = `${BUSY.split(":")[0]}:0x${"cd".repeat(32)}`;
+  const none = run(naming(withSwaps(BUSY, 3), other, to));
+  assert.ok(bad(none).some((l) => l.includes(`the pool the tape names, ${other}, is one every sampled trade swaps in`)), bad(none).join("\n"));
+});
+
+test("card tape-names-its-pool: read() reads the named pool's logs first and keeps them as the pool's, though the other pool is busier", async () => {
+  const rec = naming(withSwaps(BUSY, 2), SIDE, PENNY.chain.shared[0].to);
+  const f = async (url, init) => {
+    if (url.startsWith("https://ct-api.unrealized.trade")) return replay(rec)(url, init);
+    const req = JSON.parse(init.body);
+    if (req.method !== "eth_getLogs") return replay(rec)(url, init);
+    const q = req.params[0];
+    const s = rec.chain.shared.find((x) => x.pool === `${q.address}:${q.topics[1]}`);
+    const [lo, hi] = [Number.parseInt(q.fromBlock, 16), Number.parseInt(q.toBlock, 16)];
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: req.id, result: s.logs.filter((l) => Number.parseInt(l.blockNumber, 16) >= lo && Number.parseInt(l.blockNumber, 16) <= hi).map((l) => ({ ...l, logIndex: "0x0" })) }), { headers: { "content-type": "application/json" } });
+  };
+  const again = await read("https://ct-api.unrealized.trade", rec.coin, f, undefined, "base", candlesReader(), async () => undefined);
+  assert.deepEqual(again.chain.shared.map((x) => [x.pool, x.logs.length]), [[SIDE, 0], [BUSY, 2]]);
+  assert.equal(again.chain.poolLogs.pool, SIDE);
+});
+
+test("card tape-names-its-pool: a swap past the block the tape is read to is not missing (0x96dea7ce's 0x68a877eb); at or before it, it is", () => {
+  const rec = structuredClone(A.robinhood_good);
+  rec.reads.trades.headers ??= {};
+  const pl = rec.chain.poolLogs;
+  pl.logs.push({ blockNumber: hex(pl.to), transactionHash: `0x${"ab".repeat(32)}`, t: Math.floor(Date.parse(rec.readAt) / 1000) });
+  rec.reads.trades.headers["server-timing"] = `evm-read-to;desc="block ${pl.to - 1} of head ${pl.to + 32}, read 4 s ago"`;
+  const past = run(rec);
+  assert.deepEqual(bad(past), [], past.lines.join("\n"));
+  assert.ok(past.lines.some((l) => l.includes(`to ${pl.to - 1} (the block the tape is read to)`)), past.lines.join("\n"));
+  rec.reads.trades.headers["server-timing"] = `evm-read-to;desc="block ${pl.to} of head ${pl.to + 32}, read 4 s ago"`;
+  assert.ok(bad(run(rec)).some((l) => /1 missing from the tape/.test(l)), run(rec).lines.join("\n"));
+});
+
+test("card tape-names-its-pool: namedKey and readToOf read the helper's Server-Timing, nothing else", () => {
+  const t = `evm-open;dur=7, evm-read-to;desc="block 121685044 of head 121685076, read 4 s ago", evm-pool;desc="v4 0x${"AB".repeat(32)}"`;
+  assert.equal(check.namedKey(t, "robinhood"), `0x8366a39cc670b4001a1121b8f6a443a643e40951:0x${"ab".repeat(32)}`);
+  assert.equal(check.namedKey('evm-pool;desc="v3 0x9331f571f79d1e186a095c93756b5680a43932ac"', "base"), "0x9331f571f79d1e186a095c93756b5680a43932ac");
+  assert.equal(check.readToOf(t), 121685044);
+  for (const x of [undefined, "", "total;dur=0", 'x-evm-pool;desc="v4 0x01"', 'x-evm-read-to;desc="block 5 of head 9, read 2 s ago"']) {
+    assert.equal(check.namedKey(x), null);
+    assert.equal(check.readToOf(x), null);
+  }
+});
+
 test("card charts-say-coingecko: a Base chart from CoinGecko's paid plan before our first bar (recorded good_coingecko, X-Helper-Source chain,coingecko) PASSES; the same chart named by the vendor alone, or by a name the helper never gives, FAILs", () => {
   const r = run(A.good_coingecko);
   assert.deepEqual(bad(r), []);
