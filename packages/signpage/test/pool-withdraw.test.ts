@@ -570,6 +570,51 @@ test("an onward send that never lands leaves the part on W, in_transit and owed;
   assert.equal(wd.onwards().length, 1);
 });
 
+type OnwardRead = "seen" | "none" | "throw";
+type OnwardStatus = "chain" | "none";
+// card withdraw-onward-reads-gone-on-both: W's onward send gives up its blockhash for a fresh one only once both RPCs
+// prove it can never land (pool-sell.ts goneOnBoth, each status held to that RPC's finalized slot past the blockhash).
+// Before, both RPCs' height past the blockhash and one more read that was not ok on both gave it up, a throwing read
+// counted as none: a landed send read through one lagging, failing or lying RPC was given up, W then read empty, and
+// what reached To was never recorded as arrived.
+test("withdraw-onward-reads-gone-on-both: a landed onward send that one RPC reads late, or reads by a throw, is read on until both see it: one send, its amount arrived", async () => {
+  for (const [name, onwardRead] of [
+    ["lagging", (p: 0 | 1, n: number): OnwardRead => (p === 1 && n < 3 ? "none" : "seen")],
+    ["throwing", (p: 0 | 1, n: number): OnwardRead => (p === 0 && n < 3 ? "throw" : "seen")],
+  ] as const) {
+    const wd = await world([30_000_000n], { onwardRead });
+    const amount = 2_000_000n + MIN;
+    const a = await runPoolWithdraw(wd.host, ASK, TO, amount, COST);
+    const sig = base58.encode(wd.onwards()[0]!.subarray(1, 65));
+    assert.equal(a.stage, "sent", name);
+    assert.equal(wd.onwards().length, 1, `${name}: one onward send`);
+    assert.deepEqual(a.arrived, { [sig]: amount.toString() }, `${name}: what reached To is recorded`);
+    assert.equal(wd.balance.get(TO), amount, name);
+  }
+});
+
+test("withdraw-onward-reads-gone-on-both: a landed onward send one RPC never shows, or both read as none while one's status holds it, is never given up: it stays this signature's, in_transit and owed, never built again", async () => {
+  for (const [name, plant] of [
+    // a lying RPC: none for the send and a null status, the other RPC reading it landed
+    ["lying", { onwardRead: (p: 0 | 1): OnwardRead => (p === 1 ? "none" : "seen"), onwardStatus: (p: 0 | 1): OnwardStatus => (p === 1 ? "none" : "chain") }],
+    // both read the send as none (each a lagging index), RPC 0's status holding it landed: no proof it is gone
+    ["both none, one status", { onwardRead: (): OnwardRead => "none", onwardStatus: (p: 0 | 1): OnwardStatus => (p === 1 ? "none" : "chain") }],
+  ] as const) {
+    const wd = await world([30_000_000n], plant);
+    const amount = 2_000_000n + MIN;
+    const a = await runPoolWithdraw(wd.host, ASK, TO, amount, COST);
+    const W = wd.binds[0]!.recipient;
+    const sig = base58.encode(wd.onwards()[0]!.subarray(1, 65));
+    assert.equal(a.stage, "in_transit", name);
+    assert.ok(a.txs.some((t) => t.hash === sig), `${name}: the onward send's signature kept in the op`);
+    assert.ok(a.pending, `${name}: the part stays owed, the state reads' finish reads it again`);
+    assert.equal(wd.onwards().length, 1, name);
+    assert.equal(wd.balance.get(TO), amount, name);
+    // one onward message, priced on each of the two RPCs: no fresh blockhash, nothing built again
+    assert.equal(wd.fees.filter((m) => solanaDecodeMessage(m).staticKeys[0] === W).length, 2, `${name}: one onward message priced`);
+  }
+});
+
 // ---------- fold 2: the re-review of e694200 (review #232b) ----------
 
 // HIGH 1: a release that read back but whose spend is not read at finalized in time is "sent" to sendAndSettle; the

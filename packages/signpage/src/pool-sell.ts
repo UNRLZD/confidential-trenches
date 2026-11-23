@@ -664,9 +664,11 @@ async function keptVerdict(rpcs: Rpcs, k: KeptSell): Promise<"filled" | "refused
  * True only when `signature` can never land and has not: both RPCs' finalized height past `last` (pastAt, each RPC's
  * slot of that block), then each RPC's status of the signature, over its whole history, null at a context slot at or
  * past that RPC's own (review F3 of b38cd8c2: a backend lagging behind a balancer never reads a landed transaction as
- * none, as the note's mark is read at minContextSlot). A read that fails, or a slot behind, is "not yet".
+ * none, as the note's mark is read at minContextSlot). A read that fails, or a slot behind, is "not yet". W's onward
+ * send after a withdraw gives up its blockhash on this proof alone (pool-withdraw.ts sendOnward, card
+ * withdraw-onward-reads-gone-on-both).
  */
-async function goneOnBoth(rpcs: Rpcs, signature: string, last: number): Promise<boolean> {
+export async function goneOnBoth(rpcs: Rpcs, signature: string, last: number): Promise<boolean> {
   const at = await pastAt(rpcs, last);
   if (at === null) return false;
   try {

@@ -66,7 +66,7 @@ import { checkSolanaOnwardSend, checkSolanaWithdraw, PoolRuleRefused, signSolana
 // moved to rules/pool.ts (card sol-buy-rent-back: the sweep's floor is the withdraw's note floor); named here still
 export { solanaWithdrawMinPart, withdrawNoteFloor, type WithdrawCosts } from "./rules/pool.ts";
 import { spendOwner, type HistoryPlaces } from "./pool-spend.ts";
-import { legCause, type PoolRide } from "./pool-sell.ts";
+import { goneOnBoth, legCause, type PoolRide } from "./pool-sell.ts";
 import { within } from "./trade.ts";
 import { clockOf, ReadBusy, readWaits, ReadStopped, waitsOn, waitUnless } from "./read-waits.ts";
 // moved to pool-spend.ts (card signpage-buy-own-spend: pool-buy.ts reads them too, with no import cycle); named here still
@@ -672,9 +672,13 @@ export async function finishPoolOnward(
   }
 }
 
-/** How long W's send onward goes on: resends of the same bytes while its blockhash lives, then a fresh blockhash. */
+/** How long W's send onward goes on: resends of the same bytes while its blockhash lives, then a fresh blockhash once
+ *  both RPCs prove the send gone (pool-sell.ts goneOnBoth). */
 export const POOL_ONWARD_TRIES = 3;
 export const POOL_ONWARD_RESEND_MS = 2_000;
+/** The reads, POOL_ONWARD_RESEND_MS apart, a send past its last block on both RPCs gets to be read the same on both or
+ *  proved gone; past them it is "unknown", its signature kept in the op, never built again on a fresh blockhash. */
+export const POOL_ONWARD_SETTLE_READS = 30;
 
 /** W's send onward: all W holds less its own fee to To, W the only signer and fee payer, so W ends at 0. Built,
  *  checked by the rule (checkSolanaOnwardSend), signed by W, sent and read back on both of the page's RPCs. The fee is
@@ -730,18 +734,18 @@ async function sendOnward(
       signed.set(sig, 1);
       signature = base58.encode(sig);
       const b64 = base64.encode(signed);
-      // the same bytes to both RPCs until both read it back, while its blockhash lives
-      for (;;) {
-        await Promise.all(h.rpcs.map((rpc) => Promise.resolve().then(() => rpc("sendTransaction", [b64, { encoding: "base64", preflightCommitment: "confirmed", maxRetries: 0 }])).catch(() => null)));
-        const got = await Promise.all(h.rpcs.map((rpc) => readBack(rpc, signature, signed).catch(() => "none" as const)));
-        if (got[0] === "ok" && got[1] === "ok") return { state: "ok", signature, amount: balance - fee };
-        if (got[0] === "failed" && got[1] === "failed") return { state: "failed", signature, amount: 0n };
-        if (await pastOnBoth(h.rpcs, bh.lastHeight)) {
-          // past its last block on both: it can never land; one more read decides, then a fresh blockhash
-          const last = await Promise.all(h.rpcs.map((rpc) => readBack(rpc, signature, signed).catch(() => "none" as const)));
-          if (last[0] === "ok" && last[1] === "ok") return { state: "ok", signature, amount: balance - fee };
-          break;
-        }
+      // the same bytes to both RPCs while its blockhash lives, read back on both until they agree. A fresh blockhash only
+      // once both prove this send can never land and has not (goneOnBoth, each RPC's status held to its own finalized
+      // slot past the blockhash): a read that throws is no RPC's word, and one RPC that lags or lies never reads a landed
+      // send as none (card withdraw-onward-reads-gone-on-both, as the buy and the sell read theirs)
+      for (let past = 0; ; ) {
+        if (past === 0) await Promise.all(h.rpcs.map((rpc) => Promise.resolve().then(() => rpc("sendTransaction", [b64, { encoding: "base64", preflightCommitment: "confirmed", maxRetries: 0 }])).catch(() => null)));
+        const got = await Promise.all(h.rpcs.map((rpc) => readBack(rpc, signature, signed))).catch(() => null);
+        if (got?.[0] === "ok" && got[1] === "ok") return { state: "ok", signature, amount: balance - fee };
+        if (got?.[0] === "failed" && got[1] === "failed") return { state: "failed", signature, amount: 0n };
+        if (got?.[0] === "none" && got[1] === "none" && (await goneOnBoth(h.rpcs, signature, bh.lastHeight))) break;
+        // past its last block on both and not decided: read on, and past the settle reads it stays this send's, unknown
+        if ((await pastOnBoth(h.rpcs, bh.lastHeight)) && ++past > POOL_ONWARD_SETTLE_READS) return { state: "unknown", signature, amount: 0n };
         await wait(POOL_ONWARD_RESEND_MS);
       }
     }

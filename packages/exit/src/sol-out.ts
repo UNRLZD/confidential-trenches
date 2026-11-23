@@ -65,6 +65,9 @@ import { exitSolScanSeed } from "./sol-scan.ts";
 export const SOL_EXIT_RELEASE_CU = 400_000;
 /** Between two reads of a sent transaction, and between two sends of the same bytes. */
 const TX_POLL_MS = 2_000;
+/** The reads, TX_POLL_MS apart, a send past its last block on both RPCs gets to be read the same on both or proved gone
+ *  (signpage pool-withdraw.ts POOL_ONWARD_SETTLE_READS); past them the run stops with it unread, never "did not land". */
+const TX_SETTLE_READS = 30;
 /** A part's wait for an epoch or newest root that holds its leaf: one epoch and 30 s (pool-withdraw.ts WITHDRAW_BOUNDARY_LAG_MS). */
 const LEAF_LAG_MS = 30_000n;
 /** How many times W's balance is read again while the two RPCs differ (one is a slot behind the release). */
@@ -236,6 +239,39 @@ async function pastOnBoth(rpcs: Pair, last: number): Promise<boolean> {
   }
 }
 
+/** Each RPC's finalized slot once both are past `last`: one getEpochInfo at finalized per RPC, so the height and the slot
+ *  are one node's, of one block; null while either is not past, or a read fails (signpage pool-sell.ts pastAt). */
+async function pastAt(rpcs: Pair, last: number): Promise<[number, number] | null> {
+  try {
+    const got = await both(rpcs, async (rpc) => {
+      const e = (await rpc("getEpochInfo", [{ commitment: "finalized" }])) as { blockHeight?: unknown; absoluteSlot?: unknown } | null;
+      return intOf(e?.blockHeight) > last ? intOf(e?.absoluteSlot) : null;
+    });
+    return got[0] !== null && got[1] !== null ? [got[0], got[1]] : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * True once both RPCs prove `signature` can never land and has not: each past `last` at finalized, and each listing no
+ * status for it over its whole history at a slot at or past its own finalized one (signpage pool-sell.ts goneOnBoth). A
+ * read that fails, or a slot behind, is "not yet": one RPC that lags or lies never reads a landed send as gone.
+ */
+async function goneOnBoth(rpcs: Pair, signature: string, last: number): Promise<boolean> {
+  const at = await pastAt(rpcs, last);
+  if (at === null) return false;
+  try {
+    const got = await Promise.all(rpcs.map(async (rpc, i) => {
+      const s = (await rpc("getSignatureStatuses", [[signature], { searchTransactionHistory: true }])) as { context?: { slot?: unknown }; value?: unknown } | null;
+      return intOf(s?.context?.slot) >= at[i]! && Array.isArray(s?.value) && s.value.length === 1 && s.value[0] === null;
+    }));
+    return got[0] === true && got[1] === true;
+  } catch {
+    return false;
+  }
+}
+
 /** This very transaction under its signature on one RPC: "none", "ok", "failed" or "other" (pool-buy.ts readBackMeta). */
 async function readBack(rpc: SolanaRpc, signature: string, signed: Uint8Array): Promise<"none" | "ok" | "failed" | "other"> {
   const r = (await rpc("getTransaction", [signature, { encoding: "base64", commitment: "confirmed", maxSupportedTransactionVersion: 0 }])) as { transaction?: unknown; meta?: unknown } | null;
@@ -248,22 +284,29 @@ async function readBack(rpc: SolanaRpc, signature: string, signed: Uint8Array): 
   return r.meta.err === null ? "ok" : "failed";
 }
 
-/** The signed bytes, sent to the first RPC (again every TX_POLL_MS while its blockhash lives) and read back on both. */
-async function sendAndRead(rpcs: Pair, signed: Uint8Array, signature: string, lastHeight: number, sleep: (ms: number) => Promise<void>): Promise<"ok" | "failed" | "not_landed"> {
+/**
+ * The signed bytes, sent to the first RPC (again every TX_POLL_MS while its blockhash lives) and read back on both until
+ * they agree. "not_landed" only once both prove it gone (goneOnBoth): a read that throws is no RPC's word (card
+ * withdraw-onward-reads-gone-on-both). Past its last block on both and still not decided after TX_SETTLE_READS reads,
+ * "unread": it may have landed, so the run never says it did not.
+ */
+async function sendAndRead(rpcs: Pair, signed: Uint8Array, signature: string, lastHeight: number, sleep: (ms: number) => Promise<void>): Promise<"ok" | "failed" | "not_landed" | "unread"> {
   const wire = b64(signed);
-  for (;;) {
-    await rpcs[0]("sendTransaction", [wire, { encoding: "base64", preflightCommitment: "confirmed", maxRetries: 0 }]).catch(() => null);
-    const got = await both(rpcs, (rpc) => readBack(rpc, signature, signed).catch(() => "none" as const));
-    if (got[0] === "ok" && got[1] === "ok") return "ok";
-    if (got[0] === "failed" && got[1] === "failed") return "failed";
-    if (got.includes("other")) stop(`an RPC answers another transaction under ${signature}`);
-    if (await pastOnBoth(rpcs, lastHeight)) {
-      const last = await both(rpcs, (rpc) => readBack(rpc, signature, signed).catch(() => "none" as const));
-      return last[0] === "ok" && last[1] === "ok" ? "ok" : "not_landed";
-    }
+  for (let past = 0; ; ) {
+    if (past === 0) await rpcs[0]("sendTransaction", [wire, { encoding: "base64", preflightCommitment: "confirmed", maxRetries: 0 }]).catch(() => null);
+    const got = await both(rpcs, (rpc) => readBack(rpc, signature, signed)).catch(() => null);
+    if (got?.[0] === "ok" && got[1] === "ok") return "ok";
+    if (got?.[0] === "failed" && got[1] === "failed") return "failed";
+    if (got?.includes("other")) stop(`an RPC answers another transaction under ${signature}`);
+    if (got?.[0] === "none" && got[1] === "none" && (await goneOnBoth(rpcs, signature, lastHeight))) return "not_landed";
+    if ((await pastOnBoth(rpcs, lastHeight)) && ++past > TX_SETTLE_READS) return "unread";
     await sleep(TX_POLL_MS);
   }
 }
+
+/** A send's end that is not "ok", as a stop says it. */
+const notSent = (got: "failed" | "not_landed" | "unread"): string =>
+  got === "failed" ? "failed" : got === "not_landed" ? "did not land" : "is not read the same on both RPCs: run the exit again to read it";
 
 /** The network's fee for a message, the same on both RPCs (pool-withdraw.ts feeOf). */
 async function feeOf(rpcs: Pair, message: Uint8Array): Promise<bigint> {
@@ -343,7 +386,7 @@ async function sendOnward(rpcs: Pair, keyOf: SolKeyOf, who: string, to: string, 
   const signed = wireOf(message, [sig]);
   const signature = b58encode(sig);
   const got = await sendAndRead(rpcs, signed, signature, bh.lastHeight, sleep);
-  if (got !== "ok") stop(`${who}'s send onward ${signature} ${got === "failed" ? "failed" : "did not land"}`);
+  if (got !== "ok") stop(`${who}'s send onward ${signature} ${notSent(got)}`);
   return { signature, amount: balance - fee };
 }
 
@@ -528,7 +571,7 @@ export function solExitWith(over: SolExitOver = {}): ExitChain {
         const signed = wireOf(message, sigs);
         const signature = b58encode(sigs[0]!);
         const got = await sendAndRead(rpcs, signed, signature, bh.lastHeight, sleep);
-        if (got !== "ok") stop(`the release ${signature} ${got === "failed" ? "failed" : "did not land"}`);
+        if (got !== "ok") stop(`the release ${signature} ${notSent(got)}`);
         txs.push(signature);
         left -= leaf.value;
         ctx.say(`released ${units(leaf.value, 9)} SOL to ${w.address}: tx ${signature}`);
