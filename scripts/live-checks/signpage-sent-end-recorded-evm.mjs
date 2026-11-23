@@ -17,7 +17,7 @@
 //   - restore: a load's restore writes no trade/<chain>/<tx> op for a buy one of the device's own buy ops names
 //     (src/pool-sell-evm.ts restoreEvmTrades), so a buy is one row.
 // What each does is held by packages/signpage/test/pool-buy-evm.test.ts, pool-carry-evm.test.ts, trade.test.ts and
-// restore-evm-trades.test.ts (the card's tests and their mutants); a real Base buy is the owner's next trade.
+// restore-evm-trades.test.ts (the card's tests and their mutants); a real Base buy is the next real trade.
 // The recorded answers are facts() over a built tree's index.html and app.js (good: this card's branch, built with
 // packages/signpage/scripts/build-app.mjs --out; bad: main 58f22d390's sign sources, built the same way with --pkg).
 // After: sign
