@@ -1,0 +1,24 @@
+{
+ "good": {
+  "index": "<!doctype html>\n<html lang=\"en\" translate=\"no\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-8y2tWtMdo0FPM+8Wyl9g58QYIcdCBpokPO32wlc2+CBZc8zFpRt2eQDgwVAWsMux\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-8y2tWtMdo0FPM+8Wyl9g58QYIcdCBpokPO32wlc2+CBZc8zFpRt2eQDgwVAWsMux",
+  "sent": true,
+  "end": true,
+  "legs": true,
+  "skip": true,
+  "carry": true,
+  "freed": true,
+  "restore": true
+ },
+ "bad": {
+  "index": "<!doctype html>\n<html lang=\"en\" translate=\"no\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-lPvmkgO6mSDnH532FiN/hlRFN/gwniB9NxtSBbkYGmpCUV28FV/uxtfqGsZw8sin\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-lPvmkgO6mSDnH532FiN/hlRFN/gwniB9NxtSBbkYGmpCUV28FV/uxtfqGsZw8sin",
+  "sent": false,
+  "end": false,
+  "legs": false,
+  "skip": false,
+  "carry": false,
+  "freed": false,
+  "restore": false
+ }
+}

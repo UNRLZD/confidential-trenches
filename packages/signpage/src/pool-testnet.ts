@@ -82,7 +82,8 @@ import { spendOwner, spendOwnerOne } from "./pool-spend.ts";
 import { evmPoolFee, evmPoolGas } from "../../kit/src/trade/evm/pool-fee.ts";
 import { poolDepositEvmKind, type EvmDepositRound } from "./pool-deposit-evm.ts";
 import { EVM_POSITION_COSTS_KEY, evmBuyHost, followPendingEvmBuys, poolBuyEvmKind, type EvmBuyPage } from "./pool-buy-evm.ts";
-import { carryEvmOwed } from "./pool-carry-evm.ts";
+import { carryEvmOwed, noteFreedRests } from "./pool-carry-evm.ts";
+import { noteSecrets } from "../../wallet/src/notes/secrets.ts";
 import { rebuildEvmHoldings } from "./pool-holdings-evm.ts";
 import type { EvmPoolChain } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import { EVM_POSITIONS_REARM_MS, EVM_POSITIONS_STAGGER_MS, evmPositionsPass, evmPositionsRetryMs, evmSaleHolds, staggered, type EvmSaleHolds } from "./positions-evm.ts";
@@ -1736,6 +1737,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
               // a carried note is a landing too: its pass is the landing's, one a tick (evmLanded)
               landed: evmLanded(chain),
               signal,
+              // a rest leg's end onto its buy's request op, in the store while it is open (card signpage-sent-end-recorded-evm)
+              ops: async (id, change) => void (await (await (page.held ? page.held() : Promise.reject(new Error("no wallet store is open")))).update("ops", id, change)),
               ...(idle ? { idle: helper } : {}),
             });
             if (signal.aborted) return;
@@ -2143,6 +2146,12 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         const pass = await evmSettleReserved({ seed64, notes, scope: e.scope, round: (s) => e.passSync.events(s), signal });
         // a freed note's release never landed: a withdraw op owing its send is settled stopped, nothing sent
         if (pass.freed.length > 0) await settleFreedOps(await page.store(), pass.freed);
+        // and a buy's rest leg on it ends not_landed on its request op (card signpage-sent-end-recorded-evm)
+        if (pass.freed.length > 0) {
+          const ws = await page.store();
+          const freed = (await notes.list()).filter((n) => pass.freed.includes(n.id)).map((n) => noteSecrets(seed64!, n.ref).nullifierHash);
+          await noteFreedRests(ws, async (id, change) => void (await ws.update("ops", id, change)), chain, freed).catch(() => {});
+        }
         if (pass.freed.length > 0 || pass.spent.length > 0) void evmProofs(chain);
       } finally {
         seed64?.fill(0);
