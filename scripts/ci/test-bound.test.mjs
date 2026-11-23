@@ -91,3 +91,73 @@ test("a process a test leaves behind holding the run's output is stopped at the 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// Card hung-test-file-named-in-ci: a job's own limit (timeout-minutes) ends the job and names nothing. Release 197's first
+// merge queue run lost test-packages (1) that way (run 45216828809: its signpage suite printed nothing from 16:33:04Z to
+// the cancel at 16:43:29Z), FILE_MS being the job's whole 15 minutes and several tests naming 600 or 900 s of their own.
+// TEST_BOUND_DEADLINE (ms since the epoch) is the job's: a file still running then is stopped by name, and the run
+// DEADLINE_GRACE_MS after it, so the names reach the log before the job's limit.
+test("a job's deadline stops a hung file by name long before the file's own bound, and runs the file beside it", async () => {
+  const dir = plant();
+  try {
+    const { flags } = packages().find((p) => p.dir === "packages/wallet");
+    const files = ["never.test.mjs", "fine.test.mjs"].map((f) => path.join(dir, f));
+    const r = await run(process.execPath, ["--test", ...flags, ...files], { cwd: path.join(ROOT, "packages/wallet"), env: { ...ENV, TEST_BOUND_DEADLINE: String(Date.now() + FILE_MS) }, timeoutMs: 60_000 });
+    const out = r.stdout + r.stderr;
+    assert.equal(r.timedOut, false, "the run is still going at 60 s");
+    assert.ok(out.includes(`test-bound: the test file still running at the job's deadline, stopped: ${path.join(dir, "never.test.mjs")}`), out);
+    assert.match(out, /✔ fine/);
+    assert.match(out, /ℹ fail 1\n/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a deadline that is no time, or one past the file's bound, changes nothing: the file stops at its bound", async () => {
+  const dir = plant();
+  try {
+    const { flags } = packages().find((p) => p.dir === "packages/wallet");
+    for (const deadline of ["soon", String(Date.now() + 10 * 60_000)]) {
+      const r = await run(process.execPath, ["--test", ...flags, path.join(dir, "never.test.mjs")], { cwd: path.join(ROOT, "packages/wallet"), env: { ...ENV, TEST_BOUND_FILE_MS: String(FILE_MS), TEST_BOUND_DEADLINE: deadline }, timeoutMs: 60_000 });
+      const out = r.stdout + r.stderr;
+      assert.equal(r.timedOut, false, `${deadline}: the run is still going at 60 s`);
+      assert.ok(out.includes(`test-bound: the test file still running at its bound (${FILE_MS} ms), stopped: ${path.join(dir, "never.test.mjs")}`), `${deadline}\n${out}`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/** Each ci.yml job whose steps run a package's test script (the ones that load the watch): its timeout-minutes and
+ *  whether its first step sets TEST_BOUND_DEADLINE a minute before that limit. */
+function deadlineProblems(ci) {
+  const out = [];
+  const jobs = [...ci.matchAll(/^ {2}([a-z0-9-]+):\n((?: {4}.*\n|\s*\n|\s*#.*\n)*)/gm)];
+  let seen = 0;
+  for (const [, name, body] of jobs) {
+    if (!/pnpm --filter \S+ run test\n|test-shards\.mjs packages tests /.test(body)) continue;
+    seen++;
+    const minutes = Number(/^ {4}timeout-minutes: (\d+)$/m.exec(body)?.[1]);
+    // the first step: past any comment lines under steps:, its "- " line and the lines indented under it
+    const first = /^ {4}steps:\n(?: {6}#.*\n)*( {6}- .*\n(?: {8}.*\n)*)/m.exec(body)?.[1] ?? "";
+    const want = `run: echo "TEST_BOUND_DEADLINE=$(( ($(date +%s) + ${minutes - 1} * 60) * 1000 ))" >> "$GITHUB_ENV"`;
+    if (!first.includes(want)) out.push(`${name}: its first step does not set TEST_BOUND_DEADLINE ${minutes - 1} minutes on (timeout-minutes ${minutes})`);
+  }
+  if (seen < 2) out.push(`ci.yml: ${seen} job(s) run a package's test script, want test-wallet and test-packages`);
+  return out;
+}
+
+test("ci.yml: each job that runs a package's test script sets the deadline first, a minute before its own limit", () => {
+  const ci = readFileSync(path.join(ROOT, ".github/workflows/ci.yml"), "utf8");
+  assert.deepEqual(deadlineProblems(ci), []);
+  const step = /\n {6}- name: the test runs' deadline[^\n]*\n {8}run: echo "TEST_BOUND_DEADLINE[^\n]*\n/;
+  const plants = {
+    "no deadline step": [new RegExp(step.source), "\n", /test-wallet: its first step does not set/],
+    "the deadline at the job's limit": [/\+ 14 \* 60\) \* 1000 \)\)" >> "\$GITHUB_ENV"/, '+ 15 * 60) * 1000 ))" >> "$GITHUB_ENV"', /does not set TEST_BOUND_DEADLINE 14 minutes on \(timeout-minutes 15\)/],
+  };
+  for (const [what, [find, repl, want]] of Object.entries(plants)) {
+    const planted = ci.replace(find, repl);
+    assert.notEqual(planted, ci, what);
+    assert.match(deadlineProblems(planted).join("\n"), want, what);
+  }
+});
