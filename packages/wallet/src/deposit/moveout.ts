@@ -1394,10 +1394,11 @@ async function moveOut(opId: string, to: string | null, deps: MoveOutDeps, again
 
   // a bind call U signed (follow.ts bindPhase, a NEP-366 delegate from U's same key) that can still land: U's key nonce at
   // final on both RPCs below its nonce and the lower final height not past its max_block_height + LAPSE_MARGIN. null: no
-  // equal read of U (re-review FIX FIRST 2). A call whose nonce U's key passed is out too until the lower final height is
-  // REFUND_HEIGHTS past the first that read it passed: the nonce moves at the call's own receipt, the token debits U at a
-  // later one (follow.ts REFUND_HEIGHTS), so U's USDC read in between still holds what the bind takes. A call whose window
-  // and REFUND_HEIGHTS were past at that first read ran long ago.
+  // equal read of U (re-review FIX FIRST 2)
+  // A call whose nonce U's key passed is out too until the lower final height is REFUND_HEIGHTS past the first that read
+  // it passed: the nonce moves at the call's own receipt, the token debits U at a later one (follow.ts REFUND_HEIGHTS),
+  // so U's USDC read in between still holds what the bind takes. A call whose window and REFUND_HEIGHTS were past at
+  // that first read ran long ago.
   const callPassedAt = new Map<bigint, bigint>(); // call nonce -> the lower final height U's nonce was first read past it at
   const bindOut = async (): Promise<boolean | null> => {
     const calls = deps.notes === undefined ? [] : (await deps.notes.list()).flatMap((n) => (n.calls ?? []).filter((c) => c.sender_id === U));
