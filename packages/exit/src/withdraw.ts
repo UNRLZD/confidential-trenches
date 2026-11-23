@@ -86,8 +86,12 @@ export type ExitWithdrawArgs = {
   /** the vault's block time now and the deadline, ms (block time, never the device clock) */
   nowMs: number;
   deadlineMs: number;
-  /** readSettle's read of A: its nonce and the block the transaction names */
-  read: SettleReadFor;
+  /**
+   * readSettle's read of A: its nonce and the block the transaction names. Called after the proof, right before A signs,
+   * so the signed transaction names a block no older than the read, however long the proof took (a network's validity
+   * window: about a day on mainnet, 100 blocks in near-sandbox, about 12 s there)
+   */
+  read: () => Promise<SettleReadFor>;
 };
 
 /**
@@ -142,9 +146,10 @@ export async function exitBuildWithdraw(a: ExitWithdrawArgs, keyOf: typeof exitK
     });
     // before A's key is derived: a note read under another scope (another vault's or token's) proves another context
     if (proved.publicSignals[7] !== req.context) throw new ExitRpcRefused("the proof's context is not the request's: the note's scope is not this vault's");
+    const read = await a.read();
     const key = keyOf(seed64, { kind: "A", l, j });
     try {
-      const built = buildVaultWithdrawOut({ read: a.read, key, vault, to: to.account, withdrawal: req.withdrawal, proof: vaultProof(proved.proof), publicSignals: proved.publicSignals, storageMin, registered, nowMs: a.nowMs });
+      const built = buildVaultWithdrawOut({ read, key, vault, to: to.account, withdrawal: req.withdrawal, proof: vaultProof(proved.proof), publicSignals: proved.publicSignals, storageMin, registered, nowMs: a.nowMs });
       return { built, l, j, nullifierHash: own.nullifierHash };
     } finally {
       key.secretKey.fill(0);
