@@ -61,8 +61,8 @@ export function hookOf(id, key) {
 const TX = /^0x[0-9a-f]{64}$/;
 const arr = (v) => (Array.isArray(v) ? v : []);
 
-/** The pool's Swap logs over `from` to `to` on `url`, a span at a time (halved on a refusal), each as {tx, b, ts}; or
- *  {noAnswer}. */
+/** The pool's Swap logs over `from` to `to` on `url`, a span at a time (halved on a refusal), each as {tx, b, i, ts}
+ *  (i: its log index in its block); or {noAnswer}. */
 async function swapsOn(url, span, pm, id, from, to, fetchFn) {
   const out = [];
   let a = from;
@@ -77,7 +77,7 @@ async function swapsOn(url, span, pm, id, from, to, fetchFn) {
       }
       return { noAnswer: r.noAnswer ?? JSON.stringify(r.error ?? r).slice(0, 200) };
     }
-    for (const l of r.result) out.push({ tx: l.transactionHash, b: parseInt(l.blockNumber, 16), ts: parseInt(l.blockTimestamp ?? "0x0", 16), s: typeof l.topics?.[2] === "string" ? `0x${l.topics[2].slice(26)}` : null });
+    for (const l of r.result) out.push({ tx: l.transactionHash, b: parseInt(l.blockNumber, 16), i: typeof l.logIndex === "string" ? parseInt(l.logIndex, 16) : null, ts: parseInt(l.blockTimestamp ?? "0x0", 16), s: typeof l.topics?.[2] === "string" ? `0x${l.topics[2].slice(26)}` : null });
     a = b + 1;
   }
   return { logs: out };
@@ -203,7 +203,13 @@ export function judge(run) {
       }
       judged++;
       const newest = Math.max(...logs.filter((l) => tape.has(l.tx)).map((l) => l.b));
-      const inside = new Set(logs.filter((l) => l.b <= newest).map((l) => l.tx));
+      // card busy-v4-check-from-the-oldest-row: a tape is its newest rows, cut anywhere inside its oldest block, so the
+      // swaps judged start at its oldest row, by block, then log index (a record without one keeps eth_getLogs' own block
+      // and log order). Helper live run 45167566673 counted 49 swaps of Robinhood pool 0x38ba6ce6's oldest block before
+      // the tape's right 50 rows as missing.
+      const at = logs.map((l, k) => ({ l, b: l.b, i: l.i ?? k }));
+      const first = at.filter((x) => tape.has(x.l.tx)).reduce((m, x) => (x.b < m.b || (x.b === m.b && x.i < m.i) ? x : m));
+      const inside = new Set(at.filter((x) => x.b <= newest && (x.b > first.b || (x.b === first.b && x.i >= first.i))).map((x) => x.l.tx));
       const missing = [...inside].filter((t) => !tape.has(t));
       const asOf = Math.floor((last.as_of_ms ?? 0) / 1000);
       const late = logs.filter((l) => l.b > newest && l.ts > 0 && l.ts <= asOf - LAG_S && !tape.has(l.tx));

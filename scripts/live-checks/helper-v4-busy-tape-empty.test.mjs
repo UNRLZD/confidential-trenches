@@ -45,6 +45,32 @@ test("planted: a swap inside the tape's blocks not on it: FAIL", () => {
   assert.match(bad(r).join("\n"), /1 missing/);
 });
 
+// Card busy-v4-check-from-the-oldest-row: a tape is its newest rows, cut anywhere inside its oldest block. Helper live run
+// 45167566673 failed Robinhood pool 0x38ba6ce6's right 50-row tape: block 121393480 held 51 of its swaps, the tape the
+// newest 2 of them and block 121393481's 48, and the 49 before its oldest row were counted missing.
+test("planted: older swaps of the tape's oldest block, before its oldest row: PASS, by log index or by the logs' order", () => {
+  const old = `0x${"ab".repeat(32)}`;
+  // no log index recorded: eth_getLogs' own order puts the older swap first
+  const run = copy(A.good);
+  for (const read of mow(run).reads) read.logs.unshift({ ...read.logs[0], tx: old });
+  assert.equal(judge(run).verdict, "PASS", judge(run).lines.join("\n"));
+  // log indexes recorded: the older swap's lower index puts it before the oldest row, wherever it sits in the list
+  const indexed = copy(A.good);
+  for (const read of mow(indexed).reads) {
+    read.logs.forEach((l, k) => (l.i = 10 + k));
+    read.logs.push({ ...read.logs[0], tx: old, i: 3 });
+  }
+  assert.equal(judge(indexed).verdict, "PASS", judge(indexed).lines.join("\n"));
+  // the same swap after the oldest row in that block is one the tape left out
+  const after = copy(A.good);
+  for (const read of mow(after).reads) {
+    read.logs.forEach((l, k) => (l.i = 10 + k));
+    read.logs.push({ ...read.logs[0], tx: old, i: 11 });
+  }
+  assert.equal(judge(after).verdict, "FAIL");
+  assert.match(bad(judge(after)).join("\n"), /1 missing/);
+});
+
 test("planted: the newest swap left off a tape whose own time is past it by LAG_S: FAIL; within LAG_S: PASS", () => {
   const run = copy(A.good);
   const c = mow(run);
