@@ -2894,7 +2894,9 @@ const VSCOPE = vaultScope("mainnet")!;
 const VAULT_ONLY: readonly RestorePool[] = [{ chain: "near", network: "mainnet", scope: VSCOPE, rpcs: () => [{ name: FAST, query: async () => null }, { name: DRPC, query: async () => null }] as never }];
 const vaultWalk = (async () => ({ scope: VSCOPE, notes: [] })) as never;
 // `used`: ids registered on the vault's token and empty (an id a quote used, nothing left under it)
-function vaultChain(money: ReadonlyMap<string, readonly [bigint, bigint]>, fail: ReadonlyMap<string, number> = new Map(), used: ReadonlySet<string> = new Set()) {
+// `intents`: ids holding NEAR USDC inside intents.near (a refund 1Click left there), each provider's amount (card
+// restore-carries-pool-refund)
+function vaultChain(money: ReadonlyMap<string, readonly [bigint, bigint]>, fail: ReadonlyMap<string, number> = new Map(), used: ReadonlySet<string> = new Set(), intents: ReadonlyMap<string, readonly [bigint, bigint]> = new Map()) {
   let tip = 2_000;
   const hashes = new Map<string, number>();
   const hashOf = (h: number): string => {
@@ -2918,7 +2920,9 @@ function vaultChain(money: ReadonlyMap<string, readonly [bigint, bigint]>, fail:
         if (fail.get(u) === k) throw new Error("HTTP 400");
         return { jsonrpc: "2.0", result: { result: bytes(String(m)), ...b } };
       }
-      if (p.method_name === "mt_tokens_for_owner") return { jsonrpc: "2.0", result: { result: bytes([]), ...b } };
+      const r = intents.get(u)?.[k];
+      if (p.method_name === "mt_tokens_for_owner") return { jsonrpc: "2.0", result: { result: bytes(r === undefined ? [] : [{ token_id: `nep141:${NEAR_NETWORKS.mainnet.usdc}` }]), ...b } };
+      if (p.method_name === "mt_batch_balance_of" && r !== undefined) return { jsonrpc: "2.0", result: { result: bytes([String(r)]), ...b } };
       throw new Error(`unexpected view ${JSON.stringify(p)}`);
     },
     block: async (p: { block_id: number } | { finality: "final" }) => {
@@ -3184,4 +3188,154 @@ test("card pool-late-send-carried: a U_X step 5 carried in a try is not read aga
   planted.set(solUx(id), "held");
   assert.equal(await whole(w), "stalled");
   assert.equal(ux.deposits.length, 1, JSON.stringify(why5(w)));
+});
+
+// ---------------------------------------------------------------------------------------- card restore-carries-pool-refund
+// A refund 1Click left under U_{s,i} inside intents.near, its pool deposit op lost with the old store: the restore hands
+// it to the pool follow's own refund carry (PoolUxReads' restoredRefund: poolRefundMover with its checks whole), which
+// moves it back to U_X, and the scope is done only once U_X is read holding it (and carried) or nothing is left.
+const REFUND_ASSET = `nep141:${NEAR_NETWORKS.mainnet.usdc}`;
+/** Ids holding REFUND_ASSET inside intents.near at each provider's planted amount (the "intents" record otherwise); a
+ *  test changes the plant between tries. */
+function intentsPlanted(plant: Map<string, readonly [bigint, bigint]>, as: Map<string, As> = new Map()) {
+  for (const id of plant.keys()) if (!as.has(id)) as.set(id, "intents");
+  const n = nearOf(as);
+  const rpcs = n.ids.rpcs;
+  const wrap = (rpc: NearRpc, k: 0 | 1): NearRpc => ({
+    name: rpc.name,
+    query: async (params) => {
+      const u = argsOf(params).account_id as string;
+      if (params.account_id !== "intents.near" || !plant.has(u)) return rpc.query(params);
+      const at = (x: unknown) => ({ jsonrpc: "2.0", id: "dontcare", result: { result: [...new TextEncoder().encode(JSON.stringify(x))], logs: [], block_height: REC.pass.h, block_hash: REC.pass.hash } });
+      if (params.method_name === "mt_tokens_for_owner") return at([{ token_id: REFUND_ASSET }]);
+      if (params.method_name === "mt_batch_balance_of") return at([plant.get(u)![k].toString()]);
+      return rpc.query(params);
+    },
+  });
+  n.ids.rpcs = () => {
+    const [a, b] = rpcs();
+    return [wrap(a, 0), wrap(b, 1)];
+  };
+  return n;
+}
+type Refunded = { f: unknown; asset: string };
+/** uxOf's reads with the follow's refund carry answering `answer` (its calls kept) and its in-flight list `moving`. */
+function refundUx(planted: Map<string, UxAs>, answer: (f: { i: number }) => Promise<"moved" | "moving" | "held" | "none">, moving: () => Promise<number[]> = async () => []) {
+  const u = uxOf(planted);
+  const asked: Refunded[] = [];
+  const reads: PoolUxReads = { ...u.reads, restoredRefund: async (f, asset) => (asked.push({ f, asset }), answer(f)), restoredMoving: async () => moving() };
+  return { ...u, reads, asked };
+}
+
+test("card restore-carries-pool-refund (review PROBE-A): a refund under U_{s,i} inside intents.near is moved back to U_X; the next try carries U_X into the pool: done", async () => {
+  const id = idOf(SOL_SCOPE, 3);
+  const plant = new Map([[id, [25_000_000n, 25_000_000n] as const]]);
+  const as = new Map<string, As>();
+  const n = intentsPlanted(plant, as);
+  const planted = new Map<string, UxAs>();
+  let moving: number[] = [];
+  const ux = refundUx(planted, async (f) => ((moving = [f.i]), "moved"), async () => moving);
+  const steps: Step5End[] = [];
+  // the move lands between the tries: the money leaves intents.near and reaches U_X
+  const landed = () => void (plant.delete(id), as.delete(id), planted.set(solUx(id), "held"));
+  const w = await world({ pools: () => SOL_ONLY, solana: emptyWalk, ids: n.ids, ux: () => ux.reads, pausesMs: [1], step5: (e) => void (steps.push(e), e.tries === 1 && landed()) });
+  assert.equal(await w.r.auto(), "done");
+  await w.r.idle();
+  // a move sent is a read to try again (step 5's held reasons), never a finding
+  assert.deepEqual(steps.map((x) => [x.tries, x.last, x.named.length, x.retry.length, x.held.length > 0]), [[1, false, 0, 0, true], [2, true, 0, 0, false]], JSON.stringify(steps));
+  assert.match(steps[0]!.held.join(" | "), new RegExp(`deposit index 3's id ${id} held 25000000 of ${REFUND_ASSET.replace(/[.]/g, "\\.")} inside intents\\.near, moved back to its one-time wallet`));
+  // the record built from the chain's reads and the seed alone: U_X and U_{s,i} from the seed, the asset from the id's holdings
+  assert.deepEqual(ux.asked, [{ f: { chain: "solana", s: SOL_SCOPE.toString(), i: 3, u: solUx(id), refund_id: id }, asset: REFUND_ASSET }]);
+  // carried into the pool on the second try, from U_{s,3}
+  assert.deepEqual(ux.deposits.map((d) => [d.i, d.u, d.refund_id]), [[3, solUx(id), id]]);
+});
+
+test("card restore-carries-pool-refund: a move on its way (sent, U_X not yet holding it) keeps the scope from done; U_X read holding it carries it: done", async () => {
+  const id = idOf(SOL_SCOPE, 3);
+  // the carry answers moving: the move is in its window
+  {
+    const ux = refundUx(new Map(), async () => "moving");
+    const w = await world({ pools: () => SOL_ONLY, solana: emptyWalk, ids: intentsPlanted(new Map([[id, [25_000_000n, 25_000_000n] as const]])).ids, ux: () => ux.reads, pausesMs: [1] });
+    assert.equal(await whole(w), "stalled");
+    assert.deepEqual(w.steps[0]!.named, []);
+    assert.match(w.steps[0]!.held.join(" | "), /moved back to its one-time wallet on the pool's chain: restore again to carry it into the pool/);
+  }
+  // the money left intents.near (nothing there now) and U_X is empty: the follow's in-flight list names index 3
+  {
+    const ux = refundUx(new Map(), async () => assert.fail("nothing under the id to move"), async () => [3]);
+    const w = await world({ pools: () => SOL_ONLY, solana: emptyWalk, ids: nearOf().ids, ux: () => ux.reads, pausesMs: [1] });
+    assert.equal(await whole(w), "stalled");
+    assert.deepEqual(w.steps[0]!.named, []);
+    assert.deepEqual(w.steps[0]!.held, [`solana: deposit index 3's refund, moved back from intents.near, has not reached its one-time wallet yet: restore again to carry it into the pool`]);
+  }
+  // U_X read holding it: carried this try, nothing left on its way
+  {
+    const ux = refundUx(new Map([[solUx(id), "held"]]), async () => assert.fail("nothing under the id to move"), async () => [3]);
+    const w = await world({ pools: () => SOL_ONLY, solana: emptyWalk, ids: nearOf().ids, ux: () => ux.reads });
+    assert.equal(await whole(w), "done", JSON.stringify(w.steps));
+    assert.equal(ux.deposits.length, 1);
+  }
+  // the in-flight list unread: a read to try again, never done
+  {
+    const ux = refundUx(new Map(), async () => "none", async () => Promise.reject(new Error("store closed")));
+    const w = await world({ pools: () => SOL_ONLY, solana: emptyWalk, ids: nearOf().ids, ux: () => ux.reads, pausesMs: [1] });
+    assert.equal(await whole(w), "stalled");
+    assert.deepEqual(w.steps[0]!.held, ["solana: the refunds this device moved back were not read (store closed): read again"]);
+  }
+});
+
+test("card restore-carries-pool-refund: the kept unit alone ends done and two RPCs apart never carry; neither asks the refund carry", async () => {
+  const id = idOf(SOL_SCOPE, 2);
+  {
+    const ux = refundUx(new Map(), async () => assert.fail("the kept unit is never moved"));
+    const w = await world({ pools: () => SOL_ONLY, solana: emptyWalk, ids: intentsPlanted(new Map([[id, [KEEP, KEEP] as const]])).ids, ux: () => ux.reads });
+    assert.equal(await whole(w), "done", JSON.stringify(w.steps));
+    assert.deepEqual(ux.asked, []);
+  }
+  for (const pair of [[25_000_000n, 25_000_001n], [KEEP, 25_000_000n]] as const) {
+    const ux = refundUx(new Map(), async () => assert.fail("two RPCs apart never carry"));
+    const w = await world({ pools: () => SOL_ONLY, solana: emptyWalk, ids: intentsPlanted(new Map([[id, pair]])).ids, ux: () => ux.reads });
+    assert.equal(await whole(w), "stalled", String(pair));
+    assert.deepEqual(ux.asked, []);
+    assert.match([...w.steps[0]!.named, ...w.steps[0]!.retry, ...w.steps[0]!.held].join(" | "), new RegExp(`holds ${pair[0]} and ${pair[1]} of .* on NEAR's two RPCs: read again`));
+  }
+  // the id's own token (not inside intents.near) above the kept unit stays named: a restore does not carry it
+  {
+    const ux = refundUx(new Map(), async () => assert.fail("the id's own token is not a refund inside intents.near"));
+    const w = await world({ pools: () => SOL_ONLY, solana: emptyWalk, ids: nearPlanted(new Map([[id, [KEEP + 1n, KEEP + 1n] as const]])).ids, ux: () => ux.reads });
+    assert.equal(await whole(w), "stalled");
+    assert.deepEqual(ux.asked, []);
+    assert.deepEqual(w.steps[0]!.named, [`solana: deposit index 2's id ${id} holds ${KEEP + 1n} of ${NEAR_NETWORKS.mainnet.usdc} on NEAR, above the 1 a move out keeps; a restore does not carry it yet, and it stays under the 12 words`]);
+  }
+});
+
+test("card restore-carries-pool-refund: a carry that does not move (held, none now, a throw) is a read to try again, never done", async () => {
+  const id = idOf(SOL_SCOPE, 3);
+  const want = {
+    held: `holds 25000000 of ${REFUND_ASSET} inside intents.near, not moved back this try: restore again to move it`,
+    none: `held 25000000 of ${REFUND_ASSET} inside intents.near at this pass, none now: read again`,
+    throw: `holds 25000000 of ${REFUND_ASSET} inside intents.near, not moved back this try: restore again to move it`,
+  };
+  for (const [k, why] of Object.entries(want)) {
+    const ux = refundUx(new Map(), async () => (k === "throw" ? Promise.reject(new Error("quote refused")) : (k as "held" | "none")));
+    const w = await world({ pools: () => SOL_ONLY, solana: emptyWalk, ids: intentsPlanted(new Map([[id, [25_000_000n, 25_000_000n] as const]])).ids, ux: () => ux.reads, pausesMs: [1] });
+    assert.equal(await whole(w), "stalled", k);
+    assert.deepEqual(w.steps[0]!.named, [], k);
+    assert.deepEqual(w.steps[0]!.held, [`solana: deposit index 3's id ${id} ${why}`], k);
+    // asked again on the second try; its last try tells the reason by name (the stalled sheet), never done
+    assert.equal(ux.asked.length, 2, k);
+    assert.deepEqual(w.steps[1]!.named, [`solana: deposit index 3's id ${id} ${why}`], k);
+  }
+});
+
+test("card restore-carries-pool-refund: a refund that lands under U_{s,i} inside intents.near after step 5 read the id is moved back to U_X on the next load", async (t) => {
+  const ux = refundUx(new Map(), async () => "moved");
+  const w = await vworld(t, { pools: () => SOL_ONLY, solana: emptyWalk, ids: vaultChain(new Map()).ids, ux: (chain) => (chain === "solana" ? ux.reads : null) });
+  const i = (w.store.lane + 1) % 8;
+  const id = idOf(SOL_SCOPE, i);
+  assert.equal(await whole(w), "done", JSON.stringify(w.steps));
+  assert.deepEqual(ux.asked, []);
+  await reload(w, { ids: vaultChain(new Map(), new Map(), new Set(), new Map([[id, [25_000_000n, 25_000_000n] as const]])).ids });
+  assert.deepEqual(ux.asked, [{ f: { chain: "solana", s: SOL_SCOPE.toString(), i, u: solUx(id), refund_id: id }, asset: REFUND_ASSET }]);
+  assert.equal(why5(w).filter((x) => x === `solana: deposit index ${i}'s id ${id} held 25000000 of ${REFUND_ASSET} inside intents.near, moved back to its one-time wallet on the pool's chain: restore again to carry it into the pool`).length, 1, JSON.stringify(why5(w)));
 });

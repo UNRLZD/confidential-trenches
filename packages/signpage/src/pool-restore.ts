@@ -99,7 +99,11 @@
 //   - Each id NEAR reads as money (a refund 1Click left under U_{s,i} inside intents.near, or the token) is read again by
 //     asset on both NEAR providers at the same block (the wallet's nearIdHeldReader): an asset above the base unit a move
 //     out keeps (ID_KEEP, the way out's own), or one the two read apart, is named and the run ends stalled; only the kept
-//     unit is a moved-out id. No restore carries that money yet (card restore-carries-pool-refund).
+//     unit is a moved-out id. A fungible token inside intents.near (a nep141 asset: a refund 1Click left under U_{s,i})
+//     read alike above the kept unit is moved back to X's coin at U_X by the pool follow's own refund carry (the host's
+//     `ux` restoredRefund, src/pool-deposit-follow.ts poolFollows; card restore-carries-pool-refund), and the scope is read
+//     again while that money may be on its way there: the next try carries what reaches U_X into the pool as it carries
+//     any U_X. The scope is done only once nothing above the kept unit is left under the id and no move is on its way.
 //   - Every deposit note the walk gave for a pool is of that pool's scope; one of another scope is a drift that stalls
 //     the run by name, and that pool's ids are not read on it.
 //   - Each reason a run ends stalled is named (the host's `ended`, told once however the run ends: an abort and a throw
@@ -132,9 +136,9 @@
 //   read. Each re-read id's U_X is read on both of its chain's RPCs and carried as step 5 carries one (carryUx: planFound
 //   first where the store holds no note, two RPCs apart read again, under the floor left, a refused or unfilled carry
 //   named), but for an index step 5 found this try and one whose note this device planned on its own (its deposit
-//   follow's). Each one's NEAR id is read by asset on step 7's own pass and named as step 5 names an id holding money;
-//   nothing is carried from NEAR here (card restore-carries-pool-refund). A pass with no block time (a test's readers)
-//   holds no window: step 7 is not run on it.
+//   follow's). Each one's NEAR id is read by asset on step 7's own pass, and its money inside intents.near moved back to
+//   U_X or named as step 5 does (card restore-carries-pool-refund). A pass with no block time (a test's readers) holds
+//   no window: step 7 is not run on it.
 // - No request names a note: each restore reads its pool's whole public set and finds the seed's own notes on the
 //   device (solana-restore.ts, evm-restore.ts headers). The seed is opened only for one use at a time (a SeedUse,
 //   ../../wallet/src/notes/restore.ts): under the store's seed lock, shared, after a check that it is still stored and
@@ -190,7 +194,7 @@ import { VAULT_CONSTANTS } from "../../kit/src/vault/shapes.ts";
 import { relayRpc } from "../../wallet/src/withdraw/relay.ts";
 import { base58, hex } from "@scure/base";
 import type { Deferred, KindContext } from "./api.ts";
-import { askOf, evmPoolFollowDeps, solanaPoolFollowDeps, type PoolUx, type PoolUxReads } from "./pool-deposit-follow.ts";
+import { askOf, evmPoolFollowDeps, solanaPoolFollowDeps, type PoolUx, type PoolUxReads, type RestoredRefund } from "./pool-deposit-follow.ts";
 import { pageRpc, type ReadKind } from "./page-rpc.ts";
 import { solanaPacedRpc } from "../../kit/src/trade/solana/send.ts";
 import { PAGE_SOL_CACHE, PAGE_SOL_MARK_BATCHES, PAGE_SOL_PIN, pageEvmHistory, pageEvmHold, pageEvmPoolRpcs, pageSolanaLister, pageSolanaSettleRpcs } from "./pool-testnet.ts";
@@ -484,15 +488,16 @@ async function readDepositIds(
     // each id's U_X on the pool's own chain read beside it, on both of its RPCs; any balance there is history of the id
     const chain = w.chain;
     const held = new Map<number, PoolUx>();
-    // each id NEAR reads as holding money (a refund 1Click left under U_{s,i} inside intents.near, or the token), by index
-    const nearMoney = new Map<number, string>();
+    // each id NEAR reads as holding money (a refund 1Click left under U_{s,i} inside intents.near, or the token), by index,
+    // with its U_X
+    const nearMoney = new Map<number, { id: string; u: string }>();
     // the id's NEAR read and its U_X read side by side, each paced by its own providers, so the U_X reads spread over
     // the minutes the NEAR reads take and add no wall time (card wallet-restore-reads-ux)
     const both: IdReader = async (id, i) => {
       if (i === undefined) throw new Error("no deposit index for its U_X");
       const u = await uxOf(seed, chain, w.scope, i, id);
       const [near, [a, b]] = await Promise.all([holds(id, i), ux.balances({ u })]);
-      if (near === "money") nearMoney.set(i, id);
+      if (near === "money") nearMoney.set(i, { id, u });
       if (a !== b) throw new Error(`its U_X reads ${String(a)} and ${String(b)} on the pool chain's two RPCs`);
       if (a === 0n) return near;
       held.set(i, { chain, s: w.scope.toString(), i, u, refund_id: id });
@@ -512,13 +517,19 @@ async function readDepositIds(
       const c = await carryUx(ux, f, has.has(f.i) || ((amounts) => own.found(w.scope, f.i, amounts)), signal);
       if (c !== null) (c.retry ? out.held : out.named).push(`${w.label}: deposit index ${f.i}'s one-time wallet ${f.u} ${c.why}`);
     }
-    // each id NEAR reads as holding money, in index order: what it holds above the base unit a move out keeps
-    // (ID_KEEP, the way out's own) is named and the scope never done, since no restore carries it yet (card
-    // restore-carries-pool-refund); only the kept unit, read alike on both providers, is a moved-out id
-    for (const [i, id] of [...nearMoney].sort((x, y) => x[0] - y[0])) {
+    // each id NEAR reads as holding money, in index order: a fungible token inside intents.near above the base unit a
+    // move out keeps (ID_KEEP, the way out's own) is moved back to U_X (card restore-carries-pool-refund), and anything
+    // else above it is named; the scope is never done while either is. Only the kept unit, read alike on both providers,
+    // is a moved-out id
+    const told = new Set<number>(held.keys());
+    for (const [i, { id, u }] of [...nearMoney].sort((x, y) => x[0] - y[0])) {
       signal.throwIfAborted();
-      for (const y of await nearHeldNamed(heldOf, id)) (y.retry ? out.held : out.named).push(`${w.label}: deposit index ${i}'s id ${id} ${y.why}`);
+      for (const y of await nearHeldNamed(heldOf, id, refundOf(ux, async () => ({ chain, s: w.scope.toString(), i, u, refund_id: id }), signal))) {
+        (y.retry ? out.held : out.named).push(`${w.label}: deposit index ${i}'s id ${id} ${y.why}`);
+        told.add(i);
+      }
     }
+    await onTheirWay(ux, w, told, out);
     // step 7 on a complete read (a lane stopped past its walk's end is named above, and afterRestore refuses it); a throw
     // of its own is a read to try again by the pool's label, step 5's reasons kept
     if (ms7 !== null && r.complete)
@@ -548,8 +559,9 @@ async function readDepositIds(
  *   named); an index whose U_X step 5 found this try (`skip.ux`) is step 5's, and one whose note this device planned on
  *   its own (no restore's read wrote it) is its deposit follow's: neither is read here;
  * - each one's NEAR id read by asset on both providers on a pass of step 7's own (rereadOnOpen) and named as step 5 names
- *   an id read as money (nearHeldNamed: above the kept unit, an asset that is not a fungible token, two providers apart):
- *   nothing is carried from NEAR here (card restore-carries-pool-refund), and an id step 5 named this try (`skip.near`)
+ *   an id read as money (nearHeldNamed: above the kept unit, an asset that is not a fungible token, two providers apart),
+ *   its money inside intents.near moved back to U_X as step 5 moves it (card restore-carries-pool-refund), and an id step
+ *   5 named this try (`skip.near`)
  *   is not named again.
  */
 async function readPoolLate(
@@ -606,9 +618,28 @@ async function readPoolLate(
   if (!rr.due) return;
   for (const x of rr.ids) {
     if (skip.near.has(x.i)) continue;
-    const ys = "error" in x ? [{ why: `was not read on NEAR (${x.error}): read again`, retry: true }] : await nearHeldNamed(async () => x.held, x.id);
+    const ys = "error" in x ? [{ why: `was not read on NEAR (${x.error}): read again`, retry: true }] : await nearHeldNamed(async () => x.held, x.id, refundOf(w.ux, async () => ({ chain: w.chain, s: w.scope.toString(), i: x.i, u: await uxOf(seed, w.chain, w.scope, x.i, x.id), refund_id: x.id }), signal));
     for (const y of ys) ("error" in x ? out.retry : y.retry ? out.held : out.named).push(`${w.label}: deposit index ${x.i}'s id ${x.id} ${y.why}`);
   }
+}
+
+/**
+ * Each deposit index of `w`'s scope whose U_X has a refund move this page sent (the pool follow's restoredMoving: its
+ * restored op's move, still in its window) and nothing told of it this try (`told`: U_X read holding money, carried or
+ * named; its id's money moved or named): that money left intents.near and may not have reached U_X, a read to try again
+ * (card restore-carries-pool-refund: a scope ends done only once the carry lands or nothing is left). Its list unread
+ * is a read to try again too.
+ */
+async function onTheirWay(ux: PoolUxReads, w: { label: string; chain: PoolChain; scope: bigint }, told: ReadonlySet<number>, out: { held: string[] }): Promise<void> {
+  if (ux.restoredMoving === undefined) return;
+  let moving: number[];
+  try {
+    moving = await ux.restoredMoving(w.chain, w.scope.toString());
+  } catch (e) {
+    out.held.push(`${w.label}: the refunds this device moved back were not read (${e instanceof Error ? e.message : "it threw"}): read again`);
+    return;
+  }
+  for (const i of moving) if (!told.has(i)) out.held.push(`${w.label}: deposit index ${i}'s refund, moved back from intents.near, has not reached its one-time wallet yet: restore again to carry it into the pool`);
 }
 
 /** The NEAR vault walked: its label, scope, network and notes (step 5 and step 7 read its deposit ids: readVaultLate). */
@@ -769,13 +800,20 @@ export function vaultCarry(h: { network: NearNetwork; store: () => Promise<Walle
 /** The token a deposit id holds on its own on NEAR (ft_balance_of): the pool deposit network's release USDC. */
 const POOL_TOKEN = NEAR_NETWORKS[POOL_DEPOSIT_NETWORK].usdc;
 
+/** The pool follow's refund carry for one U_X's id (PoolUxReads' restoredRefund), by asset, U_X derived only once there is money
+ *  to move; none when the reads give none. */
+const refundOf = (ux: PoolUxReads, f: () => Promise<PoolUx>, signal: AbortSignal): ((asset: string) => Promise<RestoredRefund>) | undefined =>
+  ux.restoredRefund === undefined ? undefined : async (asset) => ux.restoredRefund!(await f(), asset, signal);
+
 /**
  * Why a deposit id NEAR read as holding money keeps its scope from done (review P1 of card wallet-restore-reads-ux): each
  * asset it holds above ID_KEEP on NEAR at the pass's block, both providers agreeing, any amount of one that is not a
  * fungible token (review P3-4), or an asset the two read apart, or its holdings unread (those two a read to try again);
- * empty when it holds at most the kept unit of each asset on both.
+ * empty when it holds at most the kept unit of each asset on both. With `carry` (card restore-carries-pool-refund), a
+ * fungible token inside intents.near (a nep141 asset) read alike above the kept unit is moved back to U_X first: a move
+ * sent or on its way, or one that did not go this try, is a read to try again, and nothing left there names nothing.
  */
-async function nearHeldNamed(heldOf: (u: string) => Promise<IdHeld[]>, id: string): Promise<{ why: string; retry: boolean }[]> {
+async function nearHeldNamed(heldOf: (u: string) => Promise<IdHeld[]>, id: string, carry?: (asset: string) => Promise<RestoredRefund>): Promise<{ why: string; retry: boolean }[]> {
   let assets: IdHeld[];
   try {
     assets = await heldOf(id);
@@ -788,7 +826,20 @@ async function nearHeldNamed(heldOf: (u: string) => Promise<IdHeld[]>, id: strin
     // the kept unit is a fungible token's (the token on its own, or a nep141 one inside intents.near): one of an NFT
     // (nep171) or a multi-token (nep245) is never moved-out dust
     else if (asset !== POOL_TOKEN && !asset.startsWith("nep141:")) out.push({ why: `holds ${String(a)} of ${asset} on NEAR, not a fungible token a move out keeps a unit of; a restore does not carry it yet, and it stays under the 12 words`, retry: false });
-    else if (a > ID_KEEP) out.push({ why: `holds ${String(a)} of ${asset} on NEAR, above the ${String(ID_KEEP)} a move out keeps; a restore does not carry it yet, and it stays under the 12 words`, retry: false });
+    else if (a > ID_KEEP && carry !== undefined && asset.startsWith("nep141:")) {
+      let r: RestoredRefund;
+      try {
+        r = await carry(asset);
+      } catch (e) {
+        // a sign out stops the run; any other throw moved nothing this try
+        if (e instanceof SeedGone) throw e;
+        r = "held";
+      }
+      if (r === "moved" || r === "moving") out.push({ why: `held ${String(a)} of ${asset} inside intents.near, moved back to its one-time wallet on the pool's chain: restore again to carry it into the pool`, retry: true });
+      else if (r === "held") out.push({ why: `holds ${String(a)} of ${asset} inside intents.near, not moved back this try: restore again to move it`, retry: true });
+      // the pass read it there and the carry's own read finds none: it left since, a read to try again
+      else out.push({ why: `held ${String(a)} of ${asset} inside intents.near at this pass, none now: read again`, retry: true });
+    } else if (a > ID_KEEP) out.push({ why: `holds ${String(a)} of ${asset} on NEAR, above the ${String(ID_KEEP)} a move out keeps; a restore does not carry it yet, and it stays under the 12 words`, retry: false });
   }
   return out;
 }

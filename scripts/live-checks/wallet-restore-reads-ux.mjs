@@ -31,7 +31,15 @@
 //   - id_held: each id NEAR read as money is read again by asset on both providers at once (the wallet's
 //     nearIdHeldReader: the token and what intents.near holds, on each, an asset dropped only at 0 on both), and named
 //     into step 5's own list while one asset is above the kept unit a move out leaves (ID_KEEP, 1n) or the two read it
-//     apart (review P1; card restore-carries-pool-refund carries it);
+//     apart (review P1), a nep141 token inside intents.near going to the carry handed first (id_refund);
+//   - id_refund (card restore-carries-pool-refund): that rule is handed the scope's own U_X reads' refund carry, built
+//     from that very read (U_X, U_{s,i}, its scope and index) under the run's signal; a move sent or on its way, one
+//     that did not go, or money gone since the pass, is a read to try again (a sign out stops the run), never a finding;
+//     each index told this try is noted beside those whose U_X held money, and every other index whose U_X has a move on
+//     its way (the reads' restoredMoving) keeps the scope from done, an unread list too; the host's reads are wired to
+//     the follows' restoredRefund and restoredMoving, and that restoredRefund, inside the very function that made those
+//     follows, leaves a U_{s,i} this device holds a live op of to that op, hands the follows' own deps the record
+//     built from U_X and the asset, with its move read from and written to U_X's restored op before the send;
 //   - ux_pair: the restore's pair is PublicNode and Pocket's Solana gateway, each on its URL's own queue at the kit's
 //     keyless limit (10 s: 100 calls, 40 of one method), read through the follow's own reader, the deposit the follow's own;
 //   - ux_wired: the restore host's U_X reads are built from the follows' own deps (the very function their `deps` calls),
@@ -90,7 +98,7 @@ const once = (re, js) => [...js.matchAll(new RegExp(re.source, "g"))].length ===
 // since card restore-shows-a-note-on-a-planned-index `R` may reach the call through its used-id take on the same scope
 const UX_READ = new RegExp(
   `,(${N})=async\\((${N}),(${N})\\)=>\\{if\\(\\3===void 0\\)throw Error\\(${Q}no deposit index for its U_X${Q}\\);let (${N})=await ${N}\\(${N},${N},(${N})\\.scope,\\3,\\2\\),` +
-    `\\[(${N}),\\[(${N}),(${N})\\]\\]=await Promise\\.all\\(\\[${N}\\(\\2,\\3\\),(${N})\\.balances\\(\\{u:\\4\\}\\)\\]\\);if\\(\\6===${Q}money${Q}&&(${N})\\.set\\(\\3,\\2\\),\\7!==\\8\\)throw Error\\(${Q}its U_X reads [^${Q}]*${Q}\\);` +
+    `\\[(${N}),\\[(${N}),(${N})\\]\\]=await Promise\\.all\\(\\[${N}\\(\\2,\\3\\),(${N})\\.balances\\(\\{u:\\4\\}\\)\\]\\);if\\(\\6===${Q}money${Q}&&(${N})\\.set\\(\\3,\\{id:\\2,u:\\4\\}\\),\\7!==\\8\\)throw Error\\(${Q}its U_X reads [^${Q}]*${Q}\\);` +
     `return \\7===0n\\?\\6:\\((${N})\\.set\\(\\3,\\{[^}]*u:\\4,refund_id:\\2\\}\\),${Q}money${Q}\\)\\},${N}=await ${N}\\(${N},\\5\\.scope,\\{notes:\\[\\.\\.\\.\\5\\.notes\\],\\.\\.\\.${N}\\(\\5\\.notes,\\5\\.scope\\)\\},(?:\\1|${N}\\(${N},\\5\\.scope,\\1\\)),await ${N}\\(\\5\\.scope,\\5\\.notes\\)\\);`,
 );
 // (card deposit-takes-each-pools-own-coin, delta review r3 P2-1: what each read leaves at U_X is written as its op's
@@ -117,19 +125,60 @@ const UX_NOTED = (held, ux, carry) =>
 // step 5's own lists (delta review 2 P3-1: a push into any other list names nothing; card
 // restore-first-sign-in-under-two-minutes: a read again on `held`, which the last try tells as a finding, the rest on
 // `named`)
+// (card restore-carries-pool-refund: each id's index and U_X (`D` keeps both), the rule handed the scope's own U_X
+// reads' refund carry (`refundOf` on `ux`, U_X and U_{s,i} from that very read), each index told noted beside those whose
+// U_X was read holding money (`told`, from the held map), and the moves on their way read after the loop (onTheirWay))
 const ID_HELD_LOOP = (d, why) =>
-  new RegExp(`for\\(let\\[(${N}),(${N})\\]of\\[\\.\\.\\.${esc(d)}\\]\\.sort\\(\\((${N}),(${N})\\)=>\\3\\[0\\]-\\4\\[0\\]\\)\\)\\{${N}\\.throwIfAborted\\(\\);for\\(let (${N}) of await (${N})\\((${N}),\\2\\)\\)\\(\\5\\.retry\\?${esc(why)}\\.held:${esc(why)}\\.named\\)\\.push\\(${Q}\\$\\{${N}\\.label\\}: deposit index \\$\\{\\1\\}'s id \\$\\{\\2\\} \\$\\{\\5\\.why\\}${Q}\\)\\}`);
+  new RegExp(
+    `let (${N})=new Set\\((${N})\\.keys\\(\\)\\);for\\(let\\[(${N}),\\{id:(${N}),u:(${N})\\}\\]of\\[\\.\\.\\.${esc(d)}\\]\\.sort\\(\\((${N}),(${N})\\)=>\\6\\[0\\]-\\7\\[0\\]\\)\\)\\{${N}\\.throwIfAborted\\(\\);` +
+      `for\\(let (${N}) of await (${N})\\((${N}),\\4,(${N})\\((${N}),async\\(\\)=>\\(\\{chain:${N},s:${N}\\.scope\\.toString\\(\\),i:\\3,u:\\5,refund_id:\\4\\}\\),${N}\\)\\)\\)` +
+      `\\(\\8\\.retry\\?${esc(why)}\\.held:${esc(why)}\\.named\\)\\.push\\(${Q}\\$\\{${N}\\.label\\}: deposit index \\$\\{\\3\\}'s id \\$\\{\\4\\} \\$\\{\\8\\.why\\}${Q}\\),\\1\\.add\\(\\3\\)\\}await (${N})\\(\\12,${N},\\1,${esc(why)}\\)`,
+  );
 // the held rule: an asset the two providers read apart, any amount of one that is not a fungible token (the token on its
 // own `T`, or a nep141 one), or one above the kept unit (the way out's ID_KEEP, 1n), is named; the read apart and the
 // holdings unread a read again (`retry` true), the rest findings (card restore-first-sign-in-under-two-minutes)
+// (card restore-carries-pool-refund: a nep141 asset inside intents.near read alike above the kept unit goes to the
+// carry handed, `C`, first: moved or moving, held (a throw but a sign out's too), or gone since the pass, each a read to
+// try again (`retry` true), never a finding; with no carry handed it is named as before)
 const ID_HELD_RULE = (h) =>
-  new RegExp(`async function ${esc(h)}\\((${N}),(${N})\\)\\{let (${N});try\\{\\3=await \\1\\(\\2\\)\\}catch\\((${N})\\)\\{return\\[\\{why:${Q}holds money on NEAR whose amount is unread [^${Q}]*${Q},retry:!0\\}\\]\\}let (${N})=\\[\\];` +
-    `for\\(let\\{asset:(${N}),amounts:\\[(${N}),(${N})\\]\\}of \\3\\)\\7===\\8\\?\\6!==(${N})&&!\\6\\.startsWith\\(${Q}nep141:${Q}\\)\\?\\5\\.push\\(\\{why:${Q}holds \\$\\{String\\(\\7\\)\\} of \\$\\{\\6\\} on NEAR, not a fungible token [^${Q}]*${Q},retry:!1\\}\\):` +
-    `\\7>1n&&\\5\\.push\\(\\{why:${Q}holds \\$\\{String\\(\\7\\)\\} of \\$\\{\\6\\} on NEAR, above the [^${Q}]*${Q},retry:!1\\}\\):\\5\\.push\\(\\{why:${Q}holds \\$\\{String\\(\\7\\)\\} and \\$\\{String\\(\\8\\)\\} of \\$\\{\\6\\} on NEAR's two RPCs: read again${Q},retry:!0\\}\\);return \\5\\}`);
+  new RegExp(
+    `async function ${esc(h)}\\((${N}),(${N}),(${N})\\)\\{let (${N});try\\{\\4=await \\1\\(\\2\\)\\}catch\\((${N})\\)\\{return\\[\\{why:${Q}holds money on NEAR whose amount is unread [^${Q}]*${Q},retry:!0\\}\\]\\}let (${N})=\\[\\];` +
+      `for\\(let\\{asset:(${N}),amounts:\\[(${N}),(${N})\\]\\}of \\4\\)if\\(\\8!==\\9\\)\\6\\.push\\(\\{why:${Q}holds \\$\\{String\\(\\8\\)\\} and \\$\\{String\\(\\9\\)\\} of \\$\\{\\7\\} on NEAR's two RPCs: read again${Q},retry:!0\\}\\);` +
+      `else if\\(\\7!==(${N})&&!\\7\\.startsWith\\(${Q}nep141:${Q}\\)\\)\\6\\.push\\(\\{why:${Q}holds \\$\\{String\\(\\8\\)\\} of \\$\\{\\7\\} on NEAR, not a fungible token [^${Q}]*${Q},retry:!1\\}\\);` +
+      `else if\\(\\8>1n&&\\3!==void 0&&\\7\\.startsWith\\(${Q}nep141:${Q}\\)\\)\\{let (${N});try\\{\\11=await \\3\\(\\7\\)\\}catch\\((${N})\\)\\{if\\(\\12 instanceof ${N}\\)throw \\12;\\11=${Q}held${Q}\\}` +
+      `\\11===${Q}moved${Q}\\|\\|\\11===${Q}moving${Q}\\?\\6\\.push\\(\\{why:${Q}held \\$\\{String\\(\\8\\)\\} of \\$\\{\\7\\} inside intents\\.near, moved back to its one-time wallet [^${Q}]*${Q},retry:!0\\}\\):` +
+      `\\11===${Q}held${Q}\\?\\6\\.push\\(\\{why:${Q}holds \\$\\{String\\(\\8\\)\\} of \\$\\{\\7\\} inside intents\\.near, not moved back this try[^${Q}]*${Q},retry:!0\\}\\):\\6\\.push\\(\\{why:${Q}held \\$\\{String\\(\\8\\)\\} of \\$\\{\\7\\} inside intents\\.near at this pass, none now: read again${Q},retry:!0\\}\\)\\}` +
+      `else \\8>1n&&\\6\\.push\\(\\{why:${Q}holds \\$\\{String\\(\\8\\)\\} of \\$\\{\\7\\} on NEAR, above the [^${Q}]*${Q},retry:!1\\}\\);return \\6\\}`,
+  );
+// the carry the rule is handed (card restore-carries-pool-refund): the scope's U_X reads' restoredRefund on U_X's
+// record, under the run's signal, none when those reads have none
+const REFUND_OF = (f) => new RegExp(`[,; ]${esc(f)}=\\((${N}),(${N}),(${N})\\)=>\\1\\.restoredRefund===void 0\\?void 0:async (${N})=>\\1\\.restoredRefund\\(await \\2\\(\\),\\4,\\3\\)`);
+// the moves on their way (card restore-carries-pool-refund): each index the reads' restoredMoving lists that nothing
+// told this try is a read again on step 5's held list; the list unread is one too
+const ON_THEIR_WAY = (f) =>
+  new RegExp(
+    `async function ${esc(f)}\\((${N}),(${N}),(${N}),(${N})\\)\\{if\\(\\1\\.restoredMoving===void 0\\)return;let (${N});try\\{\\5=await \\1\\.restoredMoving\\(\\2\\.chain,\\2\\.scope\\.toString\\(\\)\\)\\}catch\\((${N})\\)\\{\\4\\.held\\.push\\(${Q}\\$\\{\\2\\.label\\}: the refunds this device moved back were not read \\(\\$\\{\\6 instanceof Error\\?\\6\\.message:${Q}it threw${Q}\\}\\): read again${Q}\\);return\\}` +
+      `for\\(let (${N}) of \\5\\)\\3\\.has\\(\\7\\)\\|\\|\\4\\.held\\.push\\(${Q}\\$\\{\\2\\.label\\}: deposit index \\$\\{\\7\\}'s refund, moved back from intents\\.near, has not reached its one-time wallet yet[^${Q}]*${Q}\\)\\}`,
+  );
+// the follow's restoredRefund (src/pool-deposit-follow.ts poolFollows): a U_{s,i} this device holds a live op of is that
+// op's ("held", nothing sent); else the follow's own deps (`deps`) handed the record built from U_X and the asset alone,
+// with the move read from and written to U_X's restored op (its key, made by withMove on the op or a new restored one)
+// before the send, and their refund carry (poolRefundMover) asked under the restore's signal
+// the follows the host's reads are wired to (`P`), made by `F` (poolFollows): `P=…?null:F({store:`, and F's head
+const FOLLOWS_MADE = (p) => new RegExp(`[,; ]${esc(p)}=${N}\\?null:(${N})\\(\\{store:`);
+const FOLLOWS_HEAD = (f) => new RegExp(`function ${esc(f)}\\(${N}\\)\\{`);
+const FOLLOW_REFUND = new RegExp(
+  `async restoredRefund\\((${N}),(${N}),(${N})\\)\\{let (${N})=${N}\\(\\1\\),(${N})=\\{\\.\\.\\.${N}\\(\\1,0\\)\\.follow,origin:\\2\\},(${N})=await (${N})\\.store\\(\\);` +
+    `for\\(let (${N}) of await \\6\\.keys\\(${Q}ops${Q}\\)\\)\\{if\\(\\8===\\4\\)continue;let (${N})=await \\6\\.get\\(${Q}ops${Q},\\8\\)\\.catch\\(\\(\\)=>void 0\\);if\\(${N}\\(\\9\\)&&\\9\\.restored!==!0&&\\9\\.follow\\.chain===\\1\\.chain&&\\9\\.follow\\.s===\\1\\.s&&\\9\\.follow\\.i===\\1\\.i\\)return${Q}held${Q}\\}` +
+    `let (${N})=async\\(\\)=>\\{let (${N})=await \\6\\.get\\(${Q}ops${Q},\\4\\);return ${N}\\(\\11\\)\\?\\11\\.follow\\.move:void 0\\},` +
+    `(${N})=\\7\\.deps\\(\\5,\\{move:\\10,record:async (${N})=>void await \\6\\.update\\(${Q}ops${Q},\\4,(${N})=>${N}\\(${N}\\(\\14\\)\\?\\14:${N}\\(\\1,\\(\\7\\.now\\?\\?Date\\.now\\)\\(\\)\\),\\13\\)\\)\\}\\);` +
+    `if\\(\\12===null\\|\\|\\12\\.refund===void 0\\)return${Q}held${Q};let (${N})=await \\12\\.refund\\(\\5,\\3\\)\\.catch\\(\\(\\)=>${Q}held${Q}\\);if\\(\\15===${Q}moved${Q}\\)return${Q}moved${Q};`,
+);
 // `T`: the pool deposit network's release USDC, NEAR_NETWORKS[POOL_DEPOSIT_NETWORK].usdc, the table bound to the bundle's
 // NEAR_NETWORKS (its mainnet USDC its first entry; delta review 2 P3-2) and the network `mainnet`
 const NEAR_NETS = new RegExp(`[,; ](${N})=\\{mainnet:\\{usdc:${Q}17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1${Q},vault:${Q}vault\\.confidential\\.unrlzd\\.near${Q},`);
-const ID_HELD_TOKEN = (t, nets) => new RegExp(`[,; ]${esc(t)}=${esc(nets)}\\[(${N})\\]\\.usdc;`);
+// (its declaration may go on to the next one, `,`: refundOf follows it since card restore-carries-pool-refund)
+const ID_HELD_TOKEN = (t, nets) => new RegExp(`[,; ]${esc(t)}=${esc(nets)}\\[(${N})\\]\\.usdc[,;]`);
 // `T` given a value once in the whole bundle, so a dead `T=NEAR_NETWORKS[mainnet].usdc` beside a real one reading
 // another network is not the one the rule compares with
 // (a `/` or a `+` before it is a base64 string's, a pinned hash's: no write follows either)
@@ -203,7 +252,10 @@ const FOLLOW_READER = (f) => new RegExp(`function ${esc(f)}\\((${N})\\)\\{let ($
 const UX_WIRED = (c) =>
   new RegExp(
     `written:\\(\\)=>void ${N}\\?\\.proofs\\(\\)\\.catch\\(\\(\\)=>\\{\\}\\),(?:firstPass:${N}=>${N}\\?\\.firstPass\\(${N}\\)\\?\\?Promise\\.resolve\\(\\),)?ux:(${N})=>\\{let (${N})=${esc(c)}\\(\\1,(${N})\\(\\{chain:\\1,[^}]*\\},${N}\\),${N}\\?\\.program,void 0,(${N})=>${N}\\?\\.evmPoolOf\\(\\4\\)\\?\\?null\\);` +
-      `return \\2===null\\?null:\\{\\.\\.\\.\\2,leftAt:async\\((${N}),(${N}),(${N})\\)=>void await ${N}\\?\\.left\\(\\5,\\6,\\7\\)\\}\\},ended:`,
+      `return \\2===null\\?null:\\{\\.\\.\\.\\2,leftAt:async\\((${N}),(${N}),(${N})\\)=>void await (${N})\\?\\.left\\(\\5,\\6,\\7\\),` +
+      // card restore-carries-pool-refund: the same follows' refund carry for a restored U_X (held when there are none) and
+      // their list of its moves on their way (none when there are none), each handed its arguments as they come
+      `restoredRefund:async\\((${N}),(${N}),(${N})\\)=>await \\8\\?\\.restoredRefund\\(\\9,\\10,\\11\\)\\?\\?${Q}held${Q},restoredMoving:async\\((${N}),(${N})\\)=>await \\8\\?\\.restoredMoving\\(\\12,\\13\\)\\?\\?\\[\\]\\}\\},ended:`,
   );
 const UX_ANY = (c) => new RegExp(`ux:(${N})=>\\{let ${N}=${esc(c)}\\(`);
 // each marker's own words, once in the whole bundle, so no second copy of it rides beside the real one
@@ -211,6 +263,7 @@ const WORDS = Object.freeze({
   ux_read: /throw Error\(`no deposit index for its U_X`\)/,
   ux_carry: /, with no deposit note on this device for its index to carry it into the pool`/,
   id_held: /a move out keeps; a restore does not carry it yet/,
+  id_refund: /inside intents\.near, moved back to its one-time wallet on the pool's chain: restore again to carry it into the pool`/,
   // the pair as one literal: the page's public Solana seat names Pocket too (trade.ts SOLANA_PUBLIC_SEAT, after provider
   // A's constant), so Pocket's URL alone is no longer the restore's (card signpage-throttled-provider-has-a-spare)
   ux_pair: /\[`https:\/\/solana-rpc\.publicnode\.com`,`https:\/\/solana\.api\.pocket\.network`\]/,
@@ -227,23 +280,31 @@ export function bundleFacts(index, js) {
   const head = once(STEP5_HEAD, js) ? STEP5_HEAD.exec(js) : null;
   const loop = read && head ? ID_HELD_LOOP(read[10], head.groups.why) : null;
   const held = loop && once(loop, js) ? loop.exec(js) : null;
-  const rule = held ? ID_HELD_RULE(held[6]) : null;
+  const rule = held ? ID_HELD_RULE(held[9]) : null;
   const ruled = rule && once(rule, js) ? rule.exec(js) : null;
   const nets = once(NEAR_NETS, js) ? NEAR_NETS.exec(js) : null;
-  const token = ruled && nets && assignedOnce(ruled[9], js) && once(ID_HELD_TOKEN(ruled[9], nets[1]), js) ? ID_HELD_TOKEN(ruled[9], nets[1]).exec(js) : null;
+  const token = ruled && nets && assignedOnce(ruled[10], js) && once(ID_HELD_TOKEN(ruled[10], nets[1]), js) ? ID_HELD_TOKEN(ruled[10], nets[1]).exec(js) : null;
   const both = head && once(ID_HELD_BOTH(head.groups.R), js) ? ID_HELD_BOTH(head.groups.R).exec(js) : null;
   const intents = both && once(INTENTS_HELD(both[16]), js) ? INTENTS_HELD(both[16]).exec(js) : null;
   const pair = once(UX_PAIR, js) ? UX_PAIR.exec(js) : null;
   const paced = pair ? PACED(pair[3]).exec(js) : null;
   const wired = pair && once(UX_ANY(pair[6]), js) && once(UX_WIRED(pair[6]), js) ? UX_WIRED(pair[6]).exec(js) : null;
+  const made = wired && once(FOLLOWS_MADE(wired[8]), js) ? FOLLOWS_MADE(wired[8]).exec(js) : null;
+  const follows = made && once(FOLLOWS_HEAD(made[1]), js) ? FOLLOWS_HEAD(made[1]).exec(js) : null;
+  const refunds = once(FOLLOW_REFUND, js) ? FOLLOW_REFUND.exec(js) : null;
   return {
     pin: /src="\/app\.js" integrity="([^"]+)"/.exec(index)?.[1] ?? null,
     sha384: `sha384-${createHash("sha384").update(js).digest("base64")}`,
     ux_read: !!read && once(WORDS.ux_read, js),
     ux_carry: !!read && !!carry && once(UX_NOTED(read[11], read[9], carry[1]), js) && once(WORDS.ux_carry, js),
-    id_held: !!held && !!head && held[7] === head.groups.H && once(LET_GO(head.groups.lg), js) && inside(js, head, held) && !!ruled && !!token && once(MAINNET(token[1]), js) && !!both && !!intents && once(INTENTS(intents[7]), js) && once(WORDS.id_held, js),
+    id_held: !!held && !!head && held[10] === head.groups.H && once(LET_GO(head.groups.lg), js) && inside(js, head, held) && !!ruled && !!token && once(MAINNET(token[1]), js) && !!both && !!intents && once(INTENTS(intents[7]), js) && once(WORDS.id_held, js),
     ux_pair: !!pair && !!paced && once(KEYLESS(paced[3]), js) && once(FOLLOW_READER(pair[17]), js) && once(EVM_FOLLOW_READER(pair[14]), js) && once(WORDS.ux_pair, js),
     ux_wired: !!wired && once(FOLLOW_DEPS(wired[3]), js),
+    // card restore-carries-pool-refund: the held rule handed the scope's own U_X reads' refund carry (U_X and U_{s,i}
+    // from that read), the indices told this try kept beside those whose U_X held money, the moves on their way read,
+    // and the host's reads wired to the follows' restoredRefund (their own deps and refund carry, the move kept on U_X's
+    // restored op) and restoredMoving
+    id_refund: !!read && !!held && !!ruled && held[12] === read[9] && held[2] === read[11] && once(REFUND_OF(held[11]), js) && once(ON_THEIR_WAY(held[13]), js) && !!follows && !!refunds && inside(js, follows, refunds) && once(WORDS.id_refund, js),
   };
 }
 /** This tree's SIGN_HOST build, made from its sources (signBuilt: never committed): its index.html and public/app.js. */
@@ -267,6 +328,7 @@ export const BUNDLE_WHY = {
   id_held: "an id NEAR reads as money is not read on both providers by asset and named while it holds more than the kept unit a move out leaves, or the two read it apart",
   ux_pair: "the restore's U_X pair is not PublicNode and Pocket's Solana gateway, each on its own queue at the kit's keyless limit, through the follow's own reader (on Base and Robinhood the EVM follow's reader on both of the pair handed, each on its queue by the same pacer)",
   ux_wired: "the restore's U_X reads are not built from the follows' own deps, keyed by the pool's chain, with the page's own Base and Robinhood pool pair",
+  id_refund: "a refund left under U_{s,i} inside intents.near is not moved back to U_X by the follows' own refund carry (the move kept on U_X's restored op), or a move on its way does not keep the scope from done",
 };
 
 /** One provider's getBalance at finalized of `u`, asked from `origin` through provider-answer.mjs: its status, its CORS

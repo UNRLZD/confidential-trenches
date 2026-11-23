@@ -5,13 +5,14 @@
   "origin": "https://confidential.unrealized.trade",
   "bundle": {
    "from": "local build",
-   "pin": "sha384-ZWAqfJBW37CfmTqFuk33jUThQzRLW4i3YGwsdA+z5k4iUylByJ03xtrQLY5LW2L2",
-   "sha384": "sha384-ZWAqfJBW37CfmTqFuk33jUThQzRLW4i3YGwsdA+z5k4iUylByJ03xtrQLY5LW2L2",
+   "pin": "sha384-hiiMVnlWvtRl2L4VvfC2dcJXkJA+Kz/G0oGDUXA4wrerOoh39hO0Hdr9KUAjveFe",
+   "sha384": "sha384-hiiMVnlWvtRl2L4VvfC2dcJXkJA+Kz/G0oGDUXA4wrerOoh39hO0Hdr9KUAjveFe",
    "ux_read": true,
    "ux_carry": true,
    "id_held": true,
    "ux_pair": true,
-   "ux_wired": true
+   "ux_wired": true,
+   "id_refund": true
   },
   "clusters": {
    "mainnet": {
@@ -62,13 +63,14 @@
   "origin": "https://confidential.unrealized.trade",
   "bundle": {
    "from": "local build",
-   "pin": "sha384-MEBTv4iMq2SOO1WTqVJ6BL2yqvyr8+hDQuo1PdDQJCzCyHRBDaFuFRCkZWSZgq06",
-   "sha384": "sha384-MEBTv4iMq2SOO1WTqVJ6BL2yqvyr8+hDQuo1PdDQJCzCyHRBDaFuFRCkZWSZgq06",
+   "pin": "sha384-hiiMVnlWvtRl2L4VvfC2dcJXkJA+Kz/G0oGDUXA4wrerOoh39hO0Hdr9KUAjveFe",
+   "sha384": "sha384-hiiMVnlWvtRl2L4VvfC2dcJXkJA+Kz/G0oGDUXA4wrerOoh39hO0Hdr9KUAjveFe",
    "ux_read": true,
    "ux_carry": true,
    "id_held": true,
    "ux_pair": true,
-   "ux_wired": true
+   "ux_wired": true,
+   "id_refund": true
   },
   "clusters": {
    "mainnet": {

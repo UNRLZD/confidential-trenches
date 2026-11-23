@@ -13,7 +13,9 @@
 //     one with no note gets its deposit note from planFound before the carry (carryUx), and a read that fails is a
 //     reason named, never nothing;
 //   - near: each re-read NEAR id's holdings are named as step 5 names an id holding money (nearHeldNamed), a failed
-//     read a reason; nothing is carried from NEAR.
+//     read a reason; as step 5 does, the rule is handed the pool's U_X reads' refund carry on that id's U_X (card
+//     restore-carries-pool-refund: a refund inside intents.near moved back to U_X; wallet-restore-reads-ux's id_refund
+//     holds the carry itself).
 // What each does is held by the card's tests (packages/signpage/test/pool-restore.test.ts "pool-late-send-carried") and
 // its mutants (packages/wallet/scripts/restore-wallets-mutants.mjs).
 // The recorded answers are facts() over SIGN_HOST's index.html and /app.js: good, this card's build (--site
@@ -52,9 +54,10 @@ const PLAN = (fn) =>
 const CARRY = new RegExp(
   `let (${N})=(${N})\\.get\\(${N}\\.i\\);if\\(\\1!==void 0&&!\\1\\.found\\)continue;[^]{0,200}?try\\{(${N})=await ${N}\\(${N}\\.ux,\\{chain:${N}\\.chain,s:${N}\\.scope\\.toString\\(\\),i:(${N})\\.i,u:${N},refund_id:\\4\\.id\\},\\1!==void 0\\|\\|\\((${N})=>${N}\\.found\\(${N}\\.scope,\\4\\.i,\\5\\)\\),${N}\\)\\}catch\\((${N})\\)\\{if\\(${N}\\.aborted\\|\\|\\6 instanceof ${N}\\)throw \\6;${N}\\.retry\\.push\\(${Q}\\$\\{${N}\\} was not read \\(`,
 );
-// readPoolLate's NEAR re-reads: each one's holdings named as step 5 names them, a failed read a reason
+// readPoolLate's NEAR re-reads: each one's holdings named as step 5 names them, a failed read a reason (and the rule
+// handed the pool's refund carry on the id's own U_X, card restore-carries-pool-refund)
 const NEAR = new RegExp(
-  `if\\((${N})\\.due\\)for\\(let (${N}) of \\1\\.ids\\)\\{if\\(${N}\\.near\\.has\\(\\2\\.i\\)\\)continue;let (${N})=${Q}error${Q}in \\2\\?\\[\\{why:${Q}was not read on NEAR \\(\\$\\{\\2\\.error\\}\\): read again${Q},retry:!0\\}\\]:await ${N}\\(async\\(\\)=>\\2\\.held,\\2\\.id\\);for\\(let (${N}) of \\3\\)\\(${Q}error${Q}in \\2\\?(${N})\\.retry:\\4\\.retry\\?\\5\\.held:\\5\\.named\\)\\.push\\(`,
+  `if\\((${N})\\.due\\)for\\(let (${N}) of \\1\\.ids\\)\\{if\\(${N}\\.near\\.has\\(\\2\\.i\\)\\)continue;let (${N})=${Q}error${Q}in \\2\\?\\[\\{why:${Q}was not read on NEAR \\(\\$\\{\\2\\.error\\}\\): read again${Q},retry:!0\\}\\]:await ${N}\\(async\\(\\)=>\\2\\.held,\\2\\.id,${N}\\(${N}\\.ux,async\\(\\)=>\\(\\{chain:${N}\\.chain,s:${N}\\.scope\\.toString\\(\\),i:\\2\\.i,u:await ${N}\\(${N},${N}\\.chain,${N}\\.scope,\\2\\.i,\\2\\.id\\),refund_id:\\2\\.id\\}\\),${N}\\)\\);for\\(let (${N}) of \\3\\)\\(${Q}error${Q}in \\2\\?(${N})\\.retry:\\4\\.retry\\?\\5\\.held:\\5\\.named\\)\\.push\\(`,
 );
 const once = (re, js) => [...js.matchAll(new RegExp(re.source, "g"))].length === 1;
 

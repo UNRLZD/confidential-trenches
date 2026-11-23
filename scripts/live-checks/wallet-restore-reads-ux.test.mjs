@@ -22,6 +22,9 @@
 // Card restore-first-sign-in-under-two-minutes (first in release 115) re-anchored step 5's head: the readers opened and
 // each held read waited on through letGo on the run's own signal, letGo held by its body; it re-recorded good alone from
 // its build (11 Nov, --local).
+// Card restore-carries-pool-refund (a refund under U_{s,i} inside intents.near moved back to U_X by the follows' own
+// carry) added the bundle fact id_refund and re-recorded good (--local) and bad_helper (--local --with our helper relay)
+// from its build (23 Nov); every other bad run predates it and fails on id_refund too.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
@@ -82,7 +85,8 @@ test("the recorded bad runs fail: our helper relay among the restore's providers
 test("card evm-deposit-on-mainnet: the live SIGN_HOST before it (release 124), whose restore reads no Base or Robinhood U_X, fails on the U_X pair and its wiring alone", () => {
   const l = judge(A.bad_before_evm_ux);
   assert.equal(l.ok, false);
-  assert.deepEqual(l.lines, [`BAD ${BUNDLE_WHY.ux_pair}`, `BAD ${BUNDLE_WHY.ux_wired}`]);
+  // that build predates card restore-carries-pool-refund too: no refund carry
+  assert.deepEqual(l.lines, [`BAD ${BUNDLE_WHY.ux_pair}`, `BAD ${BUNDLE_WHY.ux_wired}`, `BAD ${BUNDLE_WHY.id_refund}`]);
 });
 
 test("planted: no preflight read is a FAIL", () => {
@@ -105,8 +109,8 @@ test("planted: two providers giving two balances, one provider's word, a non-zer
 test("the bundle facts hold this build's lines, never a carry, a read or a held rule with one change", () => {
   const { js } = localBuild();
   const f = (text) => bundleFacts("", text);
-  const all = (x) => ({ r: x.ux_read, c: x.ux_carry, h: x.id_held, p: x.ux_pair, w: x.ux_wired });
-  assert.deepEqual(all(f(js)), { r: true, c: true, h: true, p: true, w: true });
+  const all = (x) => ({ r: x.ux_read, c: x.ux_carry, h: x.id_held, p: x.ux_pair, w: x.ux_wired, d: x.id_refund });
+  assert.deepEqual(all(f(js)), { r: true, c: true, h: true, p: true, w: true, d: true });
   // the review's likely mutants, each one change to the build's own line (found by shape, so a rebuild's names hold)
   const mut = (from, to) => {
     assert.equal([...js.matchAll(new RegExp(from.source, "g"))].length, 1, String(from));
@@ -121,7 +125,7 @@ test("the bundle facts hold this build's lines, never a carry, a read or a held 
   // follows U_X whole, so a U_X with no op is given one
   assert.equal(mut(floor, "$1if($2=$3.keep,$4<$3.floor)return $5($4);").ux_carry, false, "another cost");
   assert.equal(mut(/\.leftAt\?\.\(([\w$]+),([\w$]+),([\w$]+)\)/, ".leftAt?.($1,$2)").ux_carry, false, "the carry's cost not handed");
-  assert.equal(mut(/\?\.left\(([\w$]+),([\w$]+),([\w$]+)\)\}\},ended:/, "?.left($1.chain,$1.u,$2)}},ended:").ux_wired, false, "the follows handed U_X's chain and address, never U_X");
+  assert.equal(mut(/\?\.left\(([\w$]+),([\w$]+),([\w$]+)\),restoredRefund:/, "?.left($1.chain,$1.u,$2),restoredRefund:").ux_wired, false, "the follows handed U_X's chain and address, never U_X");
   assert.equal(mut(/if\(([\w$]+)!==null&&([\w$]+)>=\1\)return\{why:`holds/, "if(!1)return{why:`holds").ux_carry, false, "a filled deposit that moved nothing carried on");
   assert.equal(mut(/if\(([\w$]+)!==`filled`&&\1!==`part_filled`\)return\{why:`holds/, "if($1===`failed`)return{why:`holds").ux_carry, false, "a carry that did not fill passed");
   // card pool-deposit-op-txs: the follow's deposit answers its run ({ end, txs }); the run read as its end never fills
@@ -148,9 +152,9 @@ test("the bundle facts hold this build's lines, never a carry, a read or a held 
   assert.equal(mut(/\)\}catch\(([\w$]+)\)\{if\(([\w$]+)\.throwIfAborted\(\),\1 instanceof ([\w$]+)\)throw \1;return\{why:`holds/, ")}catch($1){if($2.throwIfAborted(),!1)throw $1;return{why:`holds").ux_carry, false, "a sign out during the note's write named as a refusal");
   // review P1: the held rule
   assert.equal(mut(/if\(([\w$]+)===`money`&&([\w$]+)\.set\(/, "if($1===`used`&&$2.set(").ux_read, false, "an id NEAR reads as money not noted");
-  assert.equal(mut(/:([\w$]+)>1n&&([\w$]+)\.push\(\{why:`holds/, ":$1>2n&&$2.push({why:`holds").id_held, false, "the kept unit read as 2");
-  assert.equal(mut(/:([\w$]+)>1n&&([\w$]+)\.push\(\{why:`holds/, ":!1&&$2.push({why:`holds").id_held, false, "money above the kept unit not named");
-  assert.equal(mut(/&&!([\w$]+)\.startsWith\(`nep141:`\)\?/, "&&!1?").id_held, false, "an NFT or multi-token read as moved-out dust (review P3-4)");
+  assert.equal(mut(/else ([\w$]+)>1n&&([\w$]+)\.push\(\{why:`holds/, "else $1>2n&&$2.push({why:`holds").id_held, false, "the kept unit read as 2");
+  assert.equal(mut(/else ([\w$]+)>1n&&([\w$]+)\.push\(\{why:`holds/, "else !1&&$2.push({why:`holds").id_held, false, "money above the kept unit not named");
+  assert.equal(mut(/&&!([\w$]+)\.startsWith\(`nep141:`\)\)/, "&&!1)").id_held, false, "an NFT or multi-token read as moved-out dust (review P3-4)");
   assert.equal(mut(/amounts:\[([\w$]+)\.get\(([\w$]+)\)\?\?0n,([\w$]+)\.get\(\2\)\?\?0n\]/, "amounts:[$1.get($2)??0n,$1.get($2)??0n]").id_held, false, "one provider's map gives both amounts (review P2-2)");
   assert.equal(mut(/,([\w$]+)=([\w$]+)=>([\w$]+)\(([\w$]+)\(\2\),([\w$]+)\),([\w$]+)=async\(/, ",$1=async $2=>[],$6=async(").id_held, false, "step 5's held reader returns nothing (review P2-2)");
   // card restore-first-sign-in-under-two-minutes: each held read waited on through letGo on the run's signal, and letGo
@@ -167,7 +171,7 @@ test("the bundle facts hold this build's lines, never a carry, a read or a held 
   assert.equal(mut(head, `${opened}$11($6,$7.rpcs(),$2,{...$7.opts,signal:$9}),$9),`).id_held, false, "the held reader on a new pair");
   assert.equal(mut(head, `${opened}$11($6,$1,$2,$7.opts??{}),$9),`).id_held, false, "the held reader without the run's signal");
   assert.equal(mut(head, "let{rpcs:$1,pass:$2,reader:$3}=await $4($5($6,$7.rpcs,$8,{...$7.opts,signal:$9}),$9),$10=await $11($6,$1,$2,{...$7.opts,signal:$9}),").id_held, false, "the held reader opened not let go");
-  assert.equal(mut(/(for\(let\{asset:([\w$]+),amounts:\[([\w$]+),([\w$]+)\]\}of [\w$]+\))\3===\4\?/, "$1!0?").id_held, false, "two providers read apart taken");
+  assert.equal(mut(/(for\(let\{asset:([\w$]+),amounts:\[([\w$]+),([\w$]+)\]\}of [\w$]+\))if\(\3!==\4\)/, "$1if(!1)").id_held, false, "two providers read apart taken");
   assert.equal(mut(/let\[([\w$]+),([\w$]+)\]=await Promise\.all\(\[([\w$]+)\(([\w$]+)\[0\],([\w$]+)\),\3\(\4\[1\],\5\)\]\);return\[\.\.\.new Set/, "let[$1,$2]=await Promise.all([$3($4[0],$5),$3($4[0],$5)]);return[...new Set").id_held, false, "one provider read twice");
   // delta review 2: the held reader's filter (P2-A plants A5, A6), readOn's intents.near and token reads and step 5's
   // `why` (P3-1 plants A9, B9), and the token's table and its one binding (P3-2)
@@ -178,16 +182,35 @@ test("the bundle facts hold this build's lines, never a carry, a read or a held 
   assert.equal(mut(/;for\(let\[([\w$]+),([\w$]+)\]of await ([\w$]+)\(([\w$]+),([\w$]+),([\w$]+),([\w$]+)\)\)([\w$]+)\.set\(\1,\(\8\.get\(\1\)\?\?0n\)\+\2\);return \8\}/, ";return $8}").id_held, false, "A9: intents.near not read");
   assert.equal(mut(/if\(([\w$]+)\.length===0\)return\[\];let ([\w$]+)=\1\.map/, "if(!0)return[];let $2=$1.map").id_held, false, "intents.near's list read as empty");
   assert.equal(mut(/([\w$]+)!==null&&([\w$]+)\.set\(([\w$]+),([\w$]+)\(\(await ([\w$]+)\(([\w$]+),([\w$]+)\(\3,`ft_balance_of`/, "!1&&$2.set($3,$4((await $5($6,$7($3,`ft_balance_of`").id_held, false, "the token's own balance not read");
-  const loop = /for\(let ([\w$]+) of await ([\w$]+)\(([\w$]+),([\w$]+)\)\)\(\1\.retry\?([\w$]+)\.held:\5\.named\)\.push\(`\$\{([\w$]+)\.label\}: deposit index \$\{([\w$]+)\}'s id/;
-  assert.equal(mut(loop, "for(let $1 of await $2($3,$4))($1.retry?__junk.held:__junk.named).push(`${$6.label}: deposit index ${$7}'s id").id_held, false, "B9: the held names pushed to another list");
+  // (card restore-carries-pool-refund: the rule handed the refund carry, `$5`)
+  const loop = /for\(let ([\w$]+) of await ([\w$]+)\(([\w$]+),([\w$]+),([\w$]+\([\w$]+,async\(\)=>\(\{[^}]*\}\),[\w$]+\))\)\)\(\1\.retry\?([\w$]+)\.held:\6\.named\)\.push\(`\$\{([\w$]+)\.label\}: deposit index \$\{([\w$]+)\}'s id/;
+  assert.equal(mut(loop, "for(let $1 of await $2($3,$4,$5))($1.retry?__junk.held:__junk.named).push(`${$7.label}: deposit index ${$8}'s id").id_held, false, "B9: the held names pushed to another list");
   // card restore-first-sign-in-under-two-minutes: each held name on step 5's own list by its kind, a read again on
   // `held` (which the last try tells), a finding on `named`
-  assert.equal(mut(loop, "for(let $1 of await $2($3,$4))($1.retry?$5.retry:$5.named).push(`${$6.label}: deposit index ${$7}'s id").id_held, false, "money read apart put on the silent retry list");
-  assert.equal(mut(loop, "for(let $1 of await $2($3,$4))$5.held.push(`${$6.label}: deposit index ${$7}'s id").id_held, false, "a finding retried");
+  assert.equal(mut(loop, "for(let $1 of await $2($3,$4,$5))($1.retry?$6.retry:$6.named).push(`${$7.label}: deposit index ${$8}'s id").id_held, false, "money read apart put on the silent retry list");
+  assert.equal(mut(loop, "for(let $1 of await $2($3,$4,$5))$6.held.push(`${$7.label}: deposit index ${$8}'s id").id_held, false, "a finding retried");
+  // card restore-carries-pool-refund: the refund carry, each one change to the build's own line
+  assert.equal(mut(loop, "for(let $1 of await $2($3,$4,void 0))($1.retry?$6.held:$6.named).push(`${$7.label}: deposit index ${$8}'s id").id_refund, false, "the rule handed no refund carry");
+  assert.equal(mut(/(for\(let [\w$]+ of await [\w$]+\([\w$]+,[\w$]+,[\w$]+\()([\w$]+)(,async\(\)=>\(\{chain:)/, "$1zz$3").id_refund, false, "the carry built on other reads than the scope's");
+  assert.equal(mut(/,async\(\)=>\(\{chain:([\w$]+),s:([\w$]+)\.scope\.toString\(\),i:([\w$]+),u:([\w$]+),refund_id:([\w$]+)\}\)/, ",async()=>({chain:$1,s:$2.scope.toString(),i:$3,u:$5,refund_id:$5})").id_refund, false, "U_X taken from the id, never from the read");
+  assert.equal(mut(/inside intents\.near, moved back to its one-time wallet on the pool's chain: restore again to carry it into the pool`,retry:!0/, "inside intents.near, moved back to its one-time wallet on the pool's chain: restore again to carry it into the pool`,retry:!1").id_refund, false, "a move sent told as a finding at the first try");
+  assert.equal(mut(/\{if\(([\w$]+) instanceof ([\w$]+)\)throw \1;([\w$]+)=`held`\}/, "{$3=`held`}").id_refund, false, "a sign out swallowed by the carry");
+  assert.equal(mut(/else if\(([\w$]+)>1n&&([\w$]+)!==void 0&&([\w$]+)\.startsWith\(`nep141:`\)\)\{/, "else if($1>1n&&$2!==void 0&&!0){").id_refund, false, "the carry asked for an asset that is not a token inside intents.near");
+  assert.equal(mut(/else if\(([\w$]+)>1n&&([\w$]+)!==void 0&&/, "else if($1>0n&&$2!==void 0&&").id_refund, false, "the carry asked for the kept unit");
+  assert.equal(mut(/\}await ([\w$]+)\(([\w$]+),([\w$]+),([\w$]+),([\w$]+)\),/, "}").id_refund, false, "the moves on their way never read");
+  assert.equal(mut(/let ([\w$]+)=new Set\(([\w$]+)\.keys\(\)\);for\(let\[/, "let $1=new Set(zz.keys());for(let[").id_refund, false, "a U_X read holding money this try not told");
+  assert.equal(mut(/for\(let ([\w$]+) of ([\w$]+)\)([\w$]+)\.has\(\1\)\|\|([\w$]+)\.held\.push\(/, "for(let $1 of $2)!0||$4.held.push(").id_refund, false, "a move on its way never keeps the scope from done");
+  assert.equal(mut(/\}catch\(([\w$]+)\)\{([\w$]+)\.held\.push\(`\$\{([\w$]+)\.label\}: the refunds this device moved back were not read/, "}catch($1){return;$2.held.push(`${$3.label}: the refunds this device moved back were not read").id_refund, false, "the list of moves on their way unread, told as nothing");
+  assert.equal(mut(/\?\.restoredRefund\(([\w$]+),([\w$]+),([\w$]+)\)\?\?`held`/, "?.restoredRefund($1,$2,$3)??`moved`").id_refund, false, "no follows read as a refund moved");
+  assert.equal(mut(/restoredMoving:async\(([\w$]+),([\w$]+)\)=>await ([\w$]+)\?\.restoredMoving\(\1,\2\)\?\?\[\]/, "restoredMoving:async($1,$2)=>[]").id_refund, false, "the moves on their way not read from the follows");
+  assert.equal(mut(/&&([\w$]+)\.restored!==!0&&\1\.follow\.chain===/, "&&!1&&$1.follow.chain===").id_refund, false, "a refund moved beside this device's own op of it");
+  assert.equal(mut(/record:async ([\w$]+)=>void await ([\w$]+)\.update\(`ops`,([\w$]+),(([\w$]+)=>[\w$]+\([\w$]+\(\5\)\?\5:[\w$]+\([\w$]+,\([\w$]+\.now\?\?Date\.now\)\(\)\))/, "record:async $1=>void await $2.update(`ops`,$3+`x`,$4").id_refund, false, "the move written to another record than the one read");
+  assert.equal(mut(/=([\w$]+)\.deps\(([\w$]+),\{move:([\w$]+),record:async /, "=$1.deps({...$2,u:`x`},{move:$3,record:async ").id_refund, false, "the follows' deps handed another record than the carry's");
+  assert.equal(mut(/let ([\w$]+)=await ([\w$]+)\.refund\(([\w$]+),([\w$]+)\)\.catch\(\(\)=>`held`\);/, "let $1=await $2.refund($3,void 0).catch(()=>`held`);").id_refund, false, "the refund carry asked off the restore's signal");
   assert.equal(mut(/`,retry:([\w$]+)===null\};/, "`,retry:!0};").ux_carry, false, "a U_X read apart after a deposit filled retried, never told");
-  assert.equal(mut(/two RPCs: read again`,retry:!0\}\);return/, "two RPCs: read again`,retry:!1});return").id_held, false, "an asset read apart a finding at the first try");
-  const tok = / ([\w$]+)=([\w$]+)\[([\w$]+)\]\.usdc;async function/;
-  assert.equal(f(`${js.replace(tok, " $1=__nets[$3].usdc;async function")};var __nets=0;`).id_held, false, "the token read from another table");
+  assert.equal(mut(/two RPCs: read again`,retry:!0\}\);else/, "two RPCs: read again`,retry:!1});else").id_held, false, "an asset read apart a finding at the first try");
+  const tok = / ([\w$]+)=([\w$]+)\[([\w$]+)\]\.usdc,([\w$]+)=\(/;
+  assert.equal(f(`${js.replace(tok, " $1=__nets[$3].usdc,$4=(")};var __nets=0;`).id_held, false, "the token read from another table");
   assert.equal(f(`${js};var __dead=0,${tok.exec(js)[1]}=0;`).id_held, false, "the token given a second value");
   // a base64 string that holds `/T=` or `+T=` (a pinned hash, as the build of card max-ready-seconds-after-a-load names
   // the token V4 beside "…/V4=.Ac34…") is no write: no write can follow a `/` or a `+`
@@ -199,7 +222,8 @@ test("the bundle facts hold this build's lines, never a carry, a read or a held 
   // review P2: a dead same-shaped copy beside a broken real one, and the U_X reader not handed to the id read
   const read = /,([\w$]+)=async\(([\w$]+),([\w$]+)\)=>\{if\(\3===void 0\)throw Error\(`no deposit index for its U_X`\);[^]*?`money`\)\}/.exec(js)[0];
   const carry = /async function ([\w$]+)\(([\w$]+),([\w$]+),([\w$]+),([\w$]+)\)\{let ([\w$]+)=null,[^]*?for\(;;\)\{[^]*?\6=[\w$]+\}\}/.exec(js)[0];
-  const held = /async function ([\w$]+)\(([\w$]+),([\w$]+)\)\{let ([\w$]+);try\{\4=await \2\(\3\)\}[^]*?return [\w$]+\}/.exec(js)[0];
+  const held = /async function ([\w$]+)\(([\w$]+),([\w$]+),([\w$]+)\)\{let ([\w$]+);try\{\5=await \2\(\3\)\}[^]*?return [\w$]+\}/.exec(js)[0];
+  const followed = /async restoredRefund\(([\w$]+),([\w$]+),([\w$]+)\)\{[^]*?return`moved`;/.exec(js)[0];
   const wired = /written:\(\)=>void [\w$]+\?\.proofs\(\)\.catch\(\(\)=>\{\}\),(?:firstPass:[\w$]+=>[\w$]+\?\.firstPass\([\w$]+\)\?\?Promise\.resolve\(\),)?ux:[^]*?\}\},ended:/.exec(js)[0];
   const broken = (from, to) => {
     const t = js.replace(from, to);
@@ -209,7 +233,9 @@ test("the bundle facts hold this build's lines, never a carry, a read or a held 
   const dead = (text, copy) => f(`${text};var __dead=0${copy};`);
   assert.equal(dead(broken(/,([\w$]+)!==([\w$]+)\)throw Error\(`its U_X reads/, ",!1)throw Error(`its U_X reads"), read).ux_read, false, "dead copy: read (real guard dropped)");
   assert.equal(dead(broken(floor, "$1"), `;${carry.replace(/^async function ([\w$]+)/, "async function __dead_c")}`).ux_carry, false, "dead copy: carry (real floor dropped)");
-  assert.equal(dead(broken(/:([\w$]+)>1n&&/, ":!1&&"), `;${held.replace(/^async function ([\w$]+)/, "async function __dead_h")}`).id_held, false, "dead copy: held rule (real one names nothing)");
+  assert.equal(dead(broken(/else ([\w$]+)>1n&&/, "else !1&&"), `;${held.replace(/^async function ([\w$]+)/, "async function __dead_h")}`).id_held, false, "dead copy: held rule (real one names nothing)");
+  // card restore-carries-pool-refund: a whole restoredRefund outside the follows the host wires, the real one broken
+  assert.equal(dead(broken(/&&([\w$]+)\.restored!==!0&&\1\.follow\.chain===/, "&&!1&&$1.follow.chain==="), `;var __dead_f={${followed}}}`).id_refund, false, "dead copy: the follows' restoredRefund (real one moves beside a live op)");
   assert.equal(dead(broken(/(ux:[\w$]+=>\{let [\w$]+=[\w$]+\([\w$]+,)([\w$]+)\(\{chain:/, "$1(()=>null)({chain:"), `;var __dead_w={signedIn:0,${wired}0}`).ux_wired, false, "dead copy: wired (real deps swapped)");
   assert.equal(dead(js, read).ux_read, false, "a second copy of the reader beside the real one");
   assert.equal(dead(js, ";var __dead_p=Object.freeze([`https://solana-rpc.publicnode.com`,`https://solana.api.pocket.network`])").ux_pair, false, "a second copy of the pair beside the real one");

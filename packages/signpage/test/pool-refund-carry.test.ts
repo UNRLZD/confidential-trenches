@@ -12,7 +12,7 @@ const { DEPOSIT_QUOTE_URL } = await import("../../wallet/src/deposit/quote.ts");
 const { RELEASE_INTENTS_URL } = await import("../../wallet/src/deposit/refund.ts");
 const { depositId } = await import("../../wallet/src/derive/keys.ts");
 const { base58 } = await import("@scure/base");
-const { poolRefundMover } = await import("../src/pool-deposit-follow.ts");
+const { poolRefundMover, poolFollows, POOL_RESTORED_OP, POOL_TX_READ_MARGIN_MS } = await import("../src/pool-deposit-follow.ts");
 type Host = Parameters<typeof poolRefundMover>[0];
 type MoveRead = NonNullable<Awaited<ReturnType<Host["read"]>>>;
 
@@ -504,4 +504,89 @@ test("refunded-needs-the-refund: the real refund (at the quote's lowest refund) 
   assert.deepEqual(stages.slice(0, 2), ["refunded", "refund_move"], stages.join());
   const through = world({ read: readOf(25_000_000n - REFUND_MIN + 5_000_000n, true), move: { nonce: "n", deadline_ms: NOW + 60_000, asset: BASE_USDC, amount: REFUND_MIN.toString(), height: 99 } });
   assert.equal(await poolRefundMover(through.host)(FR, signal), "moved");
+});
+
+// card restore-carries-pool-refund: a restore's carry of a refund whose pool deposit op was lost with the old store
+// (poolFollows' restoredRefund), through this same mover, its move kept on U_X's restored op
+const UX0 = { chain: "solana" as const, s: "777", i: 0, u: SOL_U, refund_id: ID };
+function restoredWorld(o: { read: MoveRead | null; unrecorded?: true; noRefund?: true }, ops: Map<string, any> = new Map()) {
+  const w = world(o);
+  let t = NOW;
+  const fails = { write: false };
+  const store = {
+    get: async (_s: "ops", k: string) => ops.get(k),
+    keys: async () => [...ops.keys()],
+    update: async (_s: "ops", k: string, change: (v: unknown) => unknown) => {
+      if (fails.write) throw new Error("the store write failed");
+      const v = change(ops.get(k));
+      if (v !== undefined) ops.set(k, v);
+      w.log.push("write");
+      return ops.get(k);
+    },
+  };
+  const deps: string[] = [];
+  const host = poolFollows({
+    store: async () => store,
+    deps: (f: { origin: string; u: string; refund_id: string }, op: { move: Host["move"]; record: Host["record"] }) => {
+      deps.push(`${f.origin} ${f.u} ${f.refund_id}`);
+      return o.noRefund ? {} : { refund: poolRefundMover({ ...w.host, move: op.move, record: op.record }) };
+    },
+    again: () => null,
+    decimals: () => 9,
+    locks: () => null,
+    now: () => t,
+  } as unknown as Parameters<typeof poolFollows>[0]);
+  return { ...w, host, ops, deps, fails, at: (x: number) => void (t = x) };
+}
+
+test("restore-carries-pool-refund: a restore's refund carry is recorded on U_X's restored op before its send; a second in its window sends nothing; its index is listed until the window ends", async () => {
+  const o: { read: MoveRead | null } = { read: readOf(25_000_000n) };
+  const w = restoredWorld(o);
+  assert.equal(await w.host.restoredRefund(UX0, BASE_USDC, signal), "moved");
+  // written to the store before the send
+  assert.deepEqual(w.log.slice(0, 4), ["quote", "seed", "write", "send"]);
+  // the record built from the restore's reads alone: U_X, U_{s,i} and its scope and index from the seed, the asset read
+  assert.deepEqual(w.deps, [`${BASE_USDC} ${SOL_U} ${ID}`]);
+  assert.equal(w.asked[0]!.recipient, SOL_U);
+  assert.equal(w.asked[0]!.originAsset, BASE_USDC);
+  const key = `${POOL_RESTORED_OP}solana/777/0`;
+  assert.deepEqual([...w.ops.keys()], [key]);
+  const op = w.ops.get(key);
+  assert.deepEqual([op.kind, op.stage, op.final, op.restored, op.follow.u, op.follow.refund_id, op.follow.s, op.follow.i], ["pool_deposit", "in_pool", true, true, SOL_U, ID, "777", 0]);
+  const m = op.follow.move;
+  assert.equal(m.asset, BASE_USDC);
+  assert.equal(m.amount, "25000000");
+  assert.deepEqual(await w.host.restoredMoving("solana", "777"), [0]);
+  assert.deepEqual(await w.host.restoredMoving("solana", "778"), []);
+  // its nonce not yet used and the money still there: in its window, no second intent
+  o.read = readOf(25_000_000n, false);
+  assert.equal(await w.host.restoredRefund(UX0, BASE_USDC, signal), "moving");
+  assert.equal(w.log.filter((x) => x === "send").length, 1);
+  // through on its nonce, nothing left under U_{s,i}: on its way to U_X while its window lasts
+  o.read = readOf(0n, true);
+  assert.equal(await w.host.restoredRefund(UX0, BASE_USDC, signal), "moving");
+  w.at(m.deadline_ms + POOL_TX_READ_MARGIN_MS);
+  assert.deepEqual(await w.host.restoredMoving("solana", "777"), [0]);
+  w.at(m.deadline_ms + POOL_TX_READ_MARGIN_MS + 1);
+  assert.deepEqual(await w.host.restoredMoving("solana", "777"), []);
+  assert.equal(await w.host.restoredRefund(UX0, BASE_USDC, signal), "none");
+  assert.equal(w.log.filter((x) => x === "send").length, 1);
+});
+
+test("restore-carries-pool-refund: a record write that throws never sends; no refund carry, or a live op of the same U_{s,i}, sends nothing", async () => {
+  const w = restoredWorld({ read: readOf(25_000_000n) });
+  w.fails.write = true;
+  assert.equal(await w.host.restoredRefund(UX0, BASE_USDC, signal), "held");
+  assert.ok(!w.log.includes("send"), JSON.stringify(w.log));
+  assert.deepEqual(w.sentIntents, []);
+  assert.equal(w.ops.size, 0);
+  const none = restoredWorld({ read: readOf(25_000_000n), noRefund: true });
+  assert.equal(await none.host.restoredRefund(UX0, BASE_USDC, signal), "held");
+  assert.deepEqual(none.log, []);
+  // this device holds U_{s,i}'s own deposit op (its store was not lost): its follow carries the refund on its own record
+  const live = restoredWorld({ read: readOf(25_000_000n) }, new Map([["pool-op-1", { kind: "pool_deposit", stage: "refunded", txs: [], created_ms: NOW, follow: { ...F } }]]));
+  assert.equal(await live.host.restoredRefund(UX0, BASE_USDC, signal), "held");
+  assert.deepEqual(live.log, []);
+  assert.deepEqual(live.deps, []);
+  assert.equal(live.ops.size, 1);
 });
