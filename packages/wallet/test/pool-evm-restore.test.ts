@@ -902,6 +902,12 @@ test("T6 the Transfer pair's own reads before any W (its chain id, the anchor's 
 // ---- the review of card wallet-restore-transfer-rpcs, LOW: the abort guard ----
 
 test("T3 RPC 0 fails at once and RPC 1's call rejects after the abort with cap words: RPC 1's page stays 10,000, the next W's first page on it 10,000 blocks", async () => {
+  // words naming a span (the same page is asked again before any halving) and words naming none (Pocket's "query
+  // exceeds block range limit": halved at once): neither reaches RPC 1 again or touches its page once the read is stopped
+  for (const words of ["RPC error -32602: query exceeds max block range 2000", "RPC error -32602: query exceeds block range limit"]) await t3(words);
+});
+
+async function t3(words: string): Promise<void> {
   const B = (n: bigint) => ({ number: n, hash: `0x${n.toString(16).padStart(64, "0")}`, timestamp: n, baseFeePerGas: null });
   const anchors = { fin: B(40_000n), anchor: B(50_000n) };
   const firsts: number[] = [];
@@ -920,23 +926,27 @@ test("T3 RPC 0 fails at once and RPC 1's call rejects after the abort with cap w
   const rpc1: EvmRpc = Object.assign(async (m: string, p: readonly unknown[]) => {
     if (m !== "eth_getLogs") throw new Error(m);
     const f = p[0] as { fromBlock: string; toBlock: string };
-    if (seen++ === 0) {
-      // answered only after RPC 0 failed and the read was stopped: words a cap would give
+    seen++;
+    if (fail0) {
+      // answered only after RPC 0 failed and the read was stopped: words a cap would give, to every call while it is
       await zeroFailed;
       await new Promise((r) => setTimeout(r, 5));
-      throw new Error("RPC error -32602: query exceeds max block range 2000");
+      throw new Error(words);
     }
     firsts.push(Number(BigInt(f.toBlock) - BigInt(f.fromBlock) + 1n));
     return [];
   }, { url: "https://d.example" });
   const page = [EVM_LOG_PAGE_BLOCKS, EVM_LOG_PAGE_BLOCKS];
   await assert.rejects(evmTokensSentTo([rpc0, rpc1], `0x${"11".repeat(20)}`, 1n, anchors, page), /node is down/);
-  await new Promise((r) => setTimeout(r, 20));
-  assert.equal(page[1], 10_000n, "the stopped read never shrank RPC 1's page");
+  await new Promise((r) => setTimeout(r, 50));
+  // a stopped read asks nothing more: a refusal's same page again (the first one naming a span may be one backend's)
+  // would otherwise reach RPC 1 again, and a later one halve its page
+  assert.equal(seen, 1, `${words}: the stopped read asked RPC 1 again`);
+  assert.equal(page[1], 10_000n, `${words}: the stopped read never shrank RPC 1's page`);
   fail0 = false;
   assert.deepEqual(await evmTokensSentTo([rpc0, rpc1], `0x${"22".repeat(20)}`, 1n, anchors, page), []);
-  assert.equal(firsts[0], 10_000, "the next W's first page on RPC 1");
-});
+  assert.equal(firsts[0], 10_000, `${words}: the next W's first page on RPC 1`);
+}
 
 test("T4 no answer in time halves a page over one block (Pocket's 10,000-block pages under the device's 3.5 s client, 5 Nov), and tries one block again as a throttle, bounded", async () => {
   for (const [client, via] of [["plain", viaKitClient], ["retry", viaRetryClient]] as const) {

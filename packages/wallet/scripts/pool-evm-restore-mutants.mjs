@@ -127,22 +127,25 @@ const M = [
   [S, "if (fin.number >= from && (x.ok || behindOf(x))) keep(x.op, finTo, x.fresh);", "if (fin.number >= from && (x.ok || behindOf(x))) keep(x.op, anchor.number, x.fresh);", TE, "kept only up to the finalized"],
   // review of 7eb8cfb9: the hold proven by the pool's root times (P2-1), its events their bytes (P3-1), written on new
   // leaves or a day of blocks (P3-4)
-  [S, "if (!(await heldProven(anchor.hash, size, signal))) {", "if (false) {", TE, "7eb8cfb9, P2-1"],
+  [S, "else if (!(await heldProven(anchor.hash, size, signal))) await dropHeld();", "else if (false) await dropHeld();", TE, "7eb8cfb9, P2-1"],
   // the delta review of 39a4c67a: a leaf's time is the pool's root time (P2), an empty hold proven by size 0 (P3-5), the
   // record's own write time (P3-3)
-  [S, "if (held.length === 0) return size === 0n;", "if (held.length === 0) return true;", TE, "39a4c67a, P3-5"],
+  // heldProven's own "if (held.length === 0) return size === 0n" is reached only at size 0 now: its caller takes an empty hold
+  // of a pool with leaves to the seats' trees first (card evm-deposit-on-mainnet), so the rule is that line's, and the
+  // test that holds it reads only past such a hold, never from the deploy block
+  [S, "if (held.length === 0 && size !== 0n) emptyHeld = true;", "if (false) emptyHeld = true;", TE, "card evm-deposit-on-mainnet: a pass's fresh sync"],
   [S, "    if (t === 0n) throw", "    if (false) throw", TE, "another root on one RPC"],
   [S, "lt !== (labelAt === n ? st :", "lt !== lt + 0n * (labelAt === n ? st :", TE, "another root on one RPC"],
   [S, "writtenAt = h.at ?? null;", "writtenAt = null;", TE, "39a4c67a, P3-3"],
   [S, "const lt = await agreed(VIEWS.labelRootTimes + hex(word(new VaultTree(", "const lt = st || await agreed(VIEWS.labelRootTimes + hex(word(new VaultTree(", TE, "7eb8cfb9, P2-1: a stored hold whose label"],
-  [S, "        await a.held!.drop(bad).catch(() => {});\n", "", TE, "7eb8cfb9, P2-1: a stored hold that lacks"],
+  [S, "      for (const t of bad) await a.held!.drop(t).catch(() => {});\n", "", TE, "7eb8cfb9, P2-1: a stored hold that lacks"],
   [H, "to === to ? null : undefined", "to === to ? null : null", "test/pool-evm-hold-store.test.ts", "7eb8cfb9, P2-1"],
   [S, " || !rebuilt(e, from, to, pool)) return false;", ") return false;", TE, "7eb8cfb9, P3-1"],
-  [S, "top > writtenTo && (held.length > writtenCount ||", "top > writtenTo && (true ||", TE, "7eb8cfb9, P3-4"],
+  [S, "(held.length > writtenCount || writtenAt === null", "(true || writtenAt === null", TE, "7eb8cfb9, P3-4"],
   [S, "fin.timestamp - writtenAt >= EVM_HOLD_WRITE_SECONDS", "false", TE, "7eb8cfb9, P3-4"],
   [S, "if (lagged || moved || reads.some(behindOf)) lag(", "if (lagged || reads.some(behindOf)) lag(", TE, "RV-D|RV-E|fold, P3-3: a source stopped"],
-  [S, "if (a.held !== undefined && kept.size > 0 && signal?.aborted !== true) {", "if (false) {", TE, "RV-E"],
-  [S, "if (h !== null && h.to === heldTo) for (const k of h.kept ?? [])", "if (false) for (const k of h.kept ?? [])", TE, "RV-E"],
+  [S, "if (kept.size > 0 || (liveAt.size > 0 && (partial !== null || heldTo >= a.pin.fromBlock))) await persist(holdNow(from));", "if (liveAt.size > 0 && (partial !== null || heldTo >= a.pin.fromBlock)) await persist(holdNow(from));", TE, "RV-E"],
+  [S, "if (h !== null && h.to >= heldTo) {", "if (false) {", TE, "RV-E"],
   [S, "v.to >= (h as EvmSyncHeld).to;", "v.to > (h as EvmSyncHeld).to;", "test/pool-evm-hold-store.test.ts", "the same block again"],
 ];
 let ok = 0;

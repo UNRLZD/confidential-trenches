@@ -121,6 +121,20 @@ const M = [
   [R, "if (bytes[size - 1] !== SOL_MARK_TAG) throw", "if (false) throw", T, "card pool-sol-mark-tag: a record"],
   [Q, "if (newest instanceof Error) out.failed.push({ noteId: n.id, error: msg(newest), reason: \"network\" });", "if (newest instanceof Error) {}", "test/pool-queue.test.ts", "a failed newest read"],
   [Q, ".catch((e: unknown) => (e instanceof Error ? e : new Error(String(e)))); // every leaf up to now", "; // every leaf up to now", "test/pool-queue.test.ts", "a failed newest read"],
+  // the review's mutants of bd8dea0 (card notes-per-pool-sol) that no entry above plants, moved here with the sweep that
+  // held them (pool-solana-review-mutants.mjs, run by no command); its other 28 are planted above (S9, R2, R3 and R6
+  // to R8 on today's anchors), and its B12 is equivalent
+  [S, "if (!Array.isArray(a.data) || a.data[1] !== \"base64\" || typeof a.data[0] !== \"string\")", "if (!Array.isArray(a.data) || typeof a.data[0] !== \"string\")", T, "RV12|another owner"],
+  [S, "if (d.length < PAGE_HEADER || (d.length - PAGE_HEADER) % PAGE_ENTRY !== 0)", "if (d.length < PAGE_HEADER)", T, "RV12|another owner"],
+  [S, "if (d.length < PAGE_HEADER || (d.length - PAGE_HEADER) % PAGE_ENTRY !== 0)", "if (false)", T, "RV12|another owner"],
+  [S, "if (n === 0 || n > SOL_PAGE_ENTRIES)", "if (false)", T, "RV12|another owner"],
+  [S, "if (!same(d.subarray(0, 8), PAGE_DISC) || d[8]", "if (d[8]", T, "RV12|another owner"],
+  [S, "const { ms } = await blockTime(rpc, r.slot, lagWait, signal);", "const { ms } = await finalTime(rpc, signal);", T, "RV2, RV3, RV4"],
+  [S, "while (n < agreed.length && agreed[n]!.t < beforeMs) n++;", "while (n < agreed.length && agreed[n]!.t <= beforeMs) n++;", T, "S9:|lands in now's second"],
+  [S, "t: t * 1000n, bytes: e.slice() });", "t: t * 1000n + 999n, bytes: e.slice() });", T, "S9:|lands in now's second"],
+  [K, "if (rents[0]!.lamportsPerByte !== rents[1]!.lamportsPerByte || rents[0]!.factor !== rents[1]!.factor) throw", "if (false) throw", T, "the epoch fee is the device's own"],
+  [R, "if (have !== undefined && (have.withdrawn !== w.withdrawn || have.number !== w.number)) throw", "if (false) throw", T, "two RPCs whose marks differ|N1"],
+  [R, "getBigUint64(at, true)", "getBigUint64(at, false)", T, "restore from the words alone"],
 ];
 // The unmutated run, timed once per test file: it must pass, and its time sets the cap (three times it, plus the longest
 // per-test timeout, 60 s), so a run past the cap hangs and a run that fails at a test's own timeout does not.
