@@ -271,8 +271,9 @@ export type BindBusyCode = (typeof BIND_BUSY_CODES)[number];
  * SEND_TIMEOUT_MS, or until `signal` (the bind's stop) aborts. One ask, never a wait: a busy helper (429 rate_limited,
  * 503 upstream at its status) comes back as its code with the wait its Retry-After names (busyWaitMs), and the bind waits
  * it out of its phase, the seed shut, before the same bytes go again (bind.ts RETRY; card withdraw-fee-busy-waits).
+ * `codes` are the answers taken for this kind of call: a deposit's by default, a hop's onward move's (hop/onward.ts).
  */
-export async function sendDepositDelegate(signed: Pick<SignedDepositDelegate, "signed_delegate">, fetchFn: typeof fetch = fetch, signal?: AbortSignal): Promise<BindAnswer> {
+export async function sendDepositDelegate(signed: Pick<SignedDepositDelegate, "signed_delegate">, fetchFn: typeof fetch = fetch, signal?: AbortSignal, codes: readonly string[] = HELPER_BIND_DEPOSIT_CODES): Promise<BindAnswer> {
   const res = await fetchFn(RELEASE_BIND_URL, {
     ...HELPER_FETCH_INIT,
     redirect: "error",
@@ -301,7 +302,7 @@ export async function sendDepositDelegate(signed: Pick<SignedDepositDelegate, "s
   }
   const code = own(own(body, "error"), "code");
   // A code counts only with its own status (HELPER_CODE_STATUS, 400 for a code not listed there).
-  if (txHash === undefined && typeof code === "string" && (HELPER_BIND_DEPOSIT_CODES as readonly string[]).includes(code)) {
+  if (txHash === undefined && typeof code === "string" && codes.includes(code)) {
     const status = Object.hasOwn(HELPER_CODE_STATUS, code) ? HELPER_CODE_STATUS[code as keyof typeof HELPER_CODE_STATUS] : 400;
     if (res.status === status) return { ok: false, code: code as HelperBindCode };
   }
