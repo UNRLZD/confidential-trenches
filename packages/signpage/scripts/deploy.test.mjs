@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, test } from "node:test";
@@ -52,9 +52,33 @@ const HEAD = execFileSync("git", ["-C", PKG, "rev-parse", "HEAD"], { encoding: "
 const OTHER = "b".repeat(40);
 const QUEUE = "gh-readonly-queue/main/pr-628-7e673a4613cdb8f1be4aa2c1068c4edeee4fa9d2";
 const passed = (sha = HEAD, id = 1, o = {}) => ({ headSha: sha, headBranch: QUEUE, event: "merge_group", status: "completed", conclusion: "success", databaseId: id, ...o });
-// The clean checkout a deploy builds in (review P2-1) is made for real: git worktree add and remove, and its install
-// (--prefer-offline, about 1 s from the store), run as asked; the install in the repository (--build's) is answered.
-// `add` is git worktree add's exit (0: run for real); `checkedOut` the commits each clean checkout holds once added.
+// The clean checkout a deploy builds in (review P2-1) is a real clean checkout of the sha it asks for, and its install
+// (--prefer-offline) runs as asked; the install in the repository (--build's) is answered. Each sha is checked out once
+// for the file (CLEAN): a deploy's git worktree add links its folder to that checkout and its git worktree remove unlinks
+// it, so the deploy installs and builds in a clean checkout of exactly that sha, as with a checkout of its own. One of
+// its own each, 52 checkouts of the 205 MB tree and their removals, were most of this file's time and CPU (card
+// readme-run-fits-an-agent-timeout: 242 CPU-s alone, the packages' largest file).
+// `add` is git worktree add's exit (0: run as above); `checkedOut` the commits each clean checkout holds once added.
+const CLEAN = new Map();
+/** The file's one clean checkout of `rev`, made on first use (in the run's own temp folder, never a deploy's name). */
+function cleanOf(repo, rev) {
+  if (!CLEAN.has(rev)) {
+    const dir = mkdtempSync(join(OWN_TMP, "ct-signpage-test-clean-"));
+    const r = spawnSync("git", ["-C", repo, "worktree", "add", "--detach", dir, rev], { encoding: "utf8" });
+    if (r.status !== 0) {
+      rmSync(dir, { recursive: true, force: true });
+      return { r };
+    }
+    CLEAN.set(rev, { repo, dir });
+  }
+  return { dir: CLEAN.get(rev).dir };
+}
+after(() => {
+  for (const { repo, dir } of CLEAN.values()) {
+    if (spawnSync("git", ["-C", repo, "worktree", "remove", "--force", dir]).status !== 0) rmSync(dir, { recursive: true, force: true });
+    spawnSync("git", ["-C", repo, "worktree", "prune"]);
+  }
+});
 function recorder({ head = HEAD, status = "", install = 0, add = 0, lsRemote = 0, main = head, runs = [passed(head)] } = {}) {
   const calls = [];
   const checkedOut = [];
@@ -64,11 +88,20 @@ function recorder({ head = HEAD, status = "", install = 0, add = 0, lsRemote = 0
     if (cmd === "pnpm" && args[0] === "install" && install) return { status: install, stdout: "", stderr: "ERR_PNPM_OUTDATED_LOCKFILE  Cannot install with \"frozen-lockfile\"\n" };
     if (cmd === "pnpm" && args[0] === "install") return args.includes("--prefer-offline") ? spawnSync(cmd, args, { ...opts, env: { ...process.env, ...opts?.env }, encoding: "utf8" }) : { status: 0, stdout: "", stderr: "" };
     if (cmd === "git" && args[0] === "-C" && args[2] === "worktree" && args[3] === "add" && add) return { status: add, stdout: "", stderr: `fatal: '${args.at(-1)}' is not a commit\n` };
-    if (cmd === "git" && args[0] === "-C" && args[2] === "worktree") {
-      const r = spawnSync(cmd, args, { ...opts, encoding: "utf8" });
-      if (args[3] === "add" && r.status === 0) checkedOut.push(spawnSync("git", ["-C", args.at(-2), "rev-parse", "HEAD"], { encoding: "utf8" }).stdout.trim());
-      return r;
+    if (cmd === "git" && args[0] === "-C" && args[2] === "worktree" && args[3] === "add") {
+      const [root, rev] = args.slice(-2);
+      const c = cleanOf(args[1], rev);
+      if (c.r) return c.r;
+      rmSync(root, { recursive: true, force: true });
+      symlinkSync(c.dir, root);
+      checkedOut.push(spawnSync("git", ["-C", root, "rev-parse", "HEAD"], { encoding: "utf8" }).stdout.trim());
+      return { status: 0, stdout: "", stderr: "" };
     }
+    if (cmd === "git" && args[0] === "-C" && args[2] === "worktree" && args[3] === "remove" && lstatSync(args.at(-1), { throwIfNoEntry: false })?.isSymbolicLink()) {
+      unlinkSync(args.at(-1));
+      return { status: 0, stdout: "", stderr: "" };
+    }
+    if (cmd === "git" && args[0] === "-C" && args[2] === "worktree") return spawnSync(cmd, args, { ...opts, encoding: "utf8" });
     if (cmd === "gh") return { status: 0, stdout: JSON.stringify(runs) };
     if (cmd !== "git") return { status: 0, stdout: "" };
     if (args[0] === "ls-remote") {
