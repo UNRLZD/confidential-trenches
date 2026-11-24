@@ -1706,7 +1706,8 @@ const open = async (): Promise<WalletStore> => {
       show("signed-out");
     },
   }));
-  if (had === null && followsClosed) (followsClosed = false), void follows?.settle(), void poolFollow?.settle().catch(() => {});
+  // each settle caught, as every one the page starts: a sign out closes the store under it (card deposit-settle-sign-out-caught)
+  if (had === null && followsClosed) (followsClosed = false), void follows?.settle().catch(() => {}), void poolFollow?.settle().catch(() => {});
   return s;
 };
 
