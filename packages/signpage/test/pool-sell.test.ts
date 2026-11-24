@@ -542,6 +542,10 @@ function fakeLocks(modes: string[] = []): Pick<LockManager, "request" | "query">
 async function until(f: () => Promise<boolean>): Promise<void> {
   for (let i = 0; i < 200 && !(await f()); i++) await new Promise((res) => setTimeout(res, 10));
 }
+/** Waits until no run holds the sell lock: a run the test let end (a page killed at the send, a wait that threw) is over,
+ *  its writes done. A fixed 20 ms was not always enough: on the README run's loaded runner the reload's settle found the
+ *  lock still held, skipped, and left the note INCOMING (run 45325214954). */
+const runsOver = (locks: Pick<LockManager, "request">): Promise<void> => locks.request(POOL_SELL_LOCK, { mode: "exclusive" }, async () => {});
 type KindAnswer = { running: true; after: Promise<void>; answer: () => { result?: { stage: string; txs: { hash: string }[] }; error?: string } };
 const kindHost = (w: World, ended = { n: 0 }): (() => PoolSellKindHost) => () => ({ ...w.host, ops: async () => w.store, end: () => void ended.n++ });
 const ctxOf = (id: string, sha = "00", stages: string[] = []) => ({ id, sha, progress: (s: string) => void stages.push(s) }) as never;
@@ -623,7 +627,8 @@ test("the same id in a second tab while the first runs is id_reused at once; the
   const first = poolSellKind(host, locks)(ASK, ctxOf("t2")) as KindAnswer;
   await first.after;
   const sig = first.answer().result!.txs[0]!.hash;
-  await new Promise((res) => setTimeout(res, 20));
+  // the first run waits on the gate holding the sell lock; its "sent" record is written before that wait
+  await until(async () => ((await w.store.get("ops", "t2")) as { stage?: string } | undefined)?.stage === "sent");
   assert.deepEqual(opOf("t2", await w.store.get("ops", "t2")), { id: "t2", kind: "sell", stage: "sent", txs: [{ chain: "solana", hash: sig }], created_ms: 1000, chain: "solana", token: MINT, units: UNITS });
   const second = poolSellKind(host, locks)(ASK, ctxOf("t2")) as KindAnswer;
   await second.after;
@@ -712,7 +717,7 @@ test("a page killed right after the send keeps the note: the reload's settle sto
   const r = poolSellKind(() => ({ ...w.host, reads: 0, ops: async () => w.store }), locks)(ASK, ctxOf("k1")) as KindAnswer;
   await r.after;
   const sig = r.answer().result!.txs[0]!.hash;
-  await new Promise((res) => setTimeout(res, 20));
+  await runsOver(locks);
   assert.deepEqual((await w.ns.list()).filter((n) => n.scope === SCOPE).map((n) => ({ ref: n.ref, state: n.state })), [{ ref: RETURN, state: "INCOMING" }]);
   // the reload: a new note store on the same wallet store, the settle the page runs at its state reads
   const ns2 = await openNoteStore(w.store);
@@ -734,7 +739,7 @@ test("a page killed after a send that never lands: the reload's settle waits whi
   const locks = fakeLocks();
   const r = poolSellKind(() => ({ ...w.host, reads: 0, ops: async () => w.store }), locks)(ASK, ctxOf("k2")) as KindAnswer;
   await r.after;
-  await new Promise((res) => setTimeout(res, 20));
+  await runsOver(locks);
   const { settlePoolSells, settleSellOps } = await import("../src/pool-sell.ts");
   const pass = async () => {
     const ends: Promise<void>[] = [];
@@ -825,7 +830,7 @@ test("an error after the send answers and records 'sent' with W's signature, nev
   const r = poolSellKind(host, locks)(ASK, ctxOf("e1")) as KindAnswer;
   await r.after;
   await until(async () => ((await w.store.get("ops", "e1")) as { stage?: string } | undefined)?.stage !== "signed");
-  await new Promise((res) => setTimeout(res, 20));
+  await runsOver(locks);
   const rec = opOf("e1", await w.store.get("ops", "e1"));
   assert.equal(rec?.stage, "sent");
   assert.equal(rec?.txs.length, 1);
