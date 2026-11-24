@@ -32,14 +32,21 @@
 // (apps/helper/src/token-status/status.ts viewOutcome, haltOf and pausedFrom), never a copy.
 // After: helper
 //   node scripts/live-checks/helper-usdc-event-watch.mjs [--base <url>] [--record <file>]
-//   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
+//   PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3. --record writes what the run read, so the check's test
+//   can replay it. A source that does not answer (an RPC read through provider-answer.mjs, or the indexer's non-2xx, its
+//   body not JSON, or a fetch that failed) is a no-answer: INCONCLUSIVE, never a PASS, read again by the live run (card
+//   usdc-watch-no-answer-inconclusive: NearBlocks' 522 ended the helper live run 45401968651's run ERROR).
 import "../net-window.mjs";
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { haltOf, pausedFrom, viewOutcome } from "../../apps/helper/src/token-status/status.ts";
+import { EXIT, rpcAnswer } from "./provider-answer.mjs";
 export { haltOf, viewOutcome };
+
+/** A source that did not answer: the run is INCONCLUSIVE. */
+export class NoAnswer extends Error {}
 
 const KEY = "helper-usdc-event-watch";
 export const PIN = "DVJx7F3dHEHJYwpYPwXHu8K9Uo7h4kXFcALucY5oNX8q";
@@ -157,35 +164,44 @@ export function judge(run, { nets = NETS, carried = CARRIED, probe = null } = {}
   return { ok: lines.length > 0 && lines.every((l) => l.startsWith("ok ")), lines };
 }
 
+/** One JSON-RPC read through the shared reader (provider-answer.mjs): `{ result }` or `{ error }` (judged). A 429 is
+ *  waited out at its Retry-After (RATE_CAP_S at most) up to three times; any other no-answer, read again once there, or
+ *  a fourth 429, is thrown as NoAnswer. */
 async function post(fetchFn, url, method, params, sleep) {
   for (let i = 0; ; i++) {
-    const r = await fetchFn(url, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-      signal: AbortSignal.timeout(30000),
-    });
-    if (r.status === 429 && i < 3) {
-      const after = Number(r.headers?.get?.("retry-after") ?? 10);
-      if (!(after <= RATE_CAP_S)) throw new Error(`${url} rate limited, Retry-After ${after} s`);
-      await sleep(Math.max(after, 1) * 1000);
-      continue;
+    const a = await rpcAnswer(url, method, params, { fetchFn, timeoutMs: 30000, keep: ["retry-after"] });
+    if (a.noAnswer !== undefined && / HTTP 429: /.test(a.noAnswer) && i < 3) {
+      const after = Number(a.kept?.["retry-after"] ?? 10);
+      if (after <= RATE_CAP_S) {
+        await sleep(Math.max(after, 1) * 1000);
+        continue;
+      }
     }
-    const j = await r.json();
     await sleep(GAP_MS);
-    return j;
+    if (a.noAnswer !== undefined) throw new NoAnswer(a.noAnswer);
+    return a.error !== undefined ? { error: a.error } : { result: a.result };
   }
 }
 
+/** One read of the indexer: its JSON on a 200; a 429 waited out up to three times; any other status, a body that is not
+ *  JSON or a fetch that failed is its no-answer. */
 async function get(fetchFn, url, sleep) {
+  const host = new URL(url).host;
   for (let i = 0; ; i++) {
-    const r = await fetchFn(url, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(30000) });
+    let r;
+    try {
+      r = await fetchFn(url, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(30000) });
+    } catch (e) {
+      throw new NoAnswer(`${host}: no answer (${e?.cause?.code ?? e?.name ?? e?.message ?? e})`);
+    }
     if (r.status === 429 && i < 3) {
       await sleep(Math.min(Number(r.headers?.get?.("retry-after") ?? 60), RATE_CAP_S) * 1000);
       continue;
     }
-    if (r.status !== 200) throw new Error(`${url} answered ${r.status}`);
-    const j = await r.json();
+    if (r.status !== 200) throw new NoAnswer(`${host} HTTP ${r.status}: ${url} answered ${r.status}`);
+    const j = await r.json().catch(() => {
+      throw new NoAnswer(`${host} HTTP 200: not JSON`);
+    });
     await sleep(10_000); // the indexer's keyless tier: a few calls a minute
     return j;
   }
@@ -271,18 +287,25 @@ export async function read(fetchFn = fetch, sleep = wait, base = BASE, { nets = 
   return run;
 }
 
-if (import.meta.main) {
-  const a = process.argv.slice(2);
-  const opt = (k, d) => (a.includes(k) ? a[a.indexOf(k) + 1] : d);
+/** The run on the command line's `argv`: its lines printed, its exit code answered. */
+export async function main(argv, { fetchFn = fetch, sleep = wait, log = console.log, err = console.error } = {}) {
+  const opt = (k, d) => (argv.includes(k) ? argv[argv.indexOf(k) + 1] : d);
   try {
-    const run = await read(fetch, wait, opt("--base", BASE));
+    const run = await read(fetchFn, sleep, opt("--base", BASE));
     if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify(run, null, 1)}\n`);
     const { ok, lines } = judge(run);
-    for (const l of lines) console.log(l);
-    console.log(`live-check ${KEY}: ${ok ? "PASS" : "FAIL"}`);
-    process.exit(ok ? 0 : 1);
+    for (const l of lines) log(l);
+    log(`live-check ${KEY}: ${ok ? "PASS" : "FAIL"}`);
+    return ok ? EXIT.PASS : EXIT.FAIL;
   } catch (e) {
-    console.error(`live-check ${KEY}: ERROR: ${e.message}`);
-    process.exit(2);
+    if (e instanceof NoAnswer) {
+      log(`--  ${e.message}: INCONCLUSIVE`);
+      log(`live-check ${KEY}: INCONCLUSIVE: ${e.message}`);
+      return EXIT.INCONCLUSIVE;
+    }
+    err(`live-check ${KEY}: ERROR: ${e.message}`);
+    return EXIT.ERROR;
   }
 }
+
+if (import.meta.main) process.exit(await main(process.argv.slice(2)));
