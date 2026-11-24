@@ -397,3 +397,61 @@ test("card robinhood-tapes-read-ahead-bounded: a read back the busy loop stands 
   assert.ok(pulsedAt !== null, "the read back never asked busy() at its wait: the test proves nothing");
   assert.ok(first !== undefined && first.at - pulsedAt! <= AHEAD_WAIT_MS, `the read back went on ${first === undefined ? "never" : `${first.at - pulsedAt!} ms`} after the busy turn (bound AHEAD_WAIT_MS, ${AHEAD_WAIT_MS} ms; the lists' next load was ${LIST_MS - (pulsedAt! - value.t0)} ms after it)`);
 });
+
+// card read-back-rests-on-its-own-held: the helper's Base minute lines after 73619d713 (24 Nov 13:2xZ, the box) named
+// nodies.app at every held wait, 212 and 163 a minute, while Base read ahead 30 of 40 and 37 of 47 listed tapes. nodies
+// serves 50 blocks a read, so no Base read back reads it (BACK_SPAN), yet its holds rested every backed-off read back
+// until the lists' next load (heldAny: any provider of the chain), where the read back's own failed() waits only on the
+// providers it reads. Robinhood's blockmachine is the same here: in SWAP_RPCS, not one of the read back's (BACK_SPAN,
+// BACK_NARROW).
+test("card read-back-rests-on-its-own-held: a read back backed off while a provider it never reads is held (Robinhood's blockmachine, as Base's nodies) waits its backoff out in place and reads on once the reads answer, before the lists' next load (red at 2232c2c2c: rested until the next ahead(), a lists period on)", async () => {
+  const r = rig();
+  const { token, pool } = LISTED[0]!;
+  const kept = new Map([[token!, { pool: { venue: "v3", id: pool!, token: token!, tokenIs0: true, quote: { kind: "usd", decimals: 6 } } as Pool, decimals: 18 }]]);
+  const LIST_MS = 60_000;
+  /** When the log reads answer again, after the first read: past the read back's fails and into its backoff. */
+  const HEAL_MS = 15_000;
+  const OTHER = "https://rpc-robinhood.blockmachine.io";
+  const backs = ["https://robinhood.daybreak-rpc.network", "https://robinhood.api.pocket.network", "https://rpc.mainnet.chain.robinhood.com", "https://robinhood.drpc.org"];
+  assert.ok(SWAP_RPCS.robinhood.includes(OTHER) && !backs.includes(OTHER), "the held provider is the chain's, and not one a read back reads");
+  let failing = false;
+  let healed = false;
+  let failedLogs = 0;
+  /** Each log read after the reads answer again: when. */
+  const after: number[] = [];
+  const fetch = async (url: string, init: RequestInit): Promise<Response> => {
+    const body = String(init.body);
+    if (body.includes('"eth_getLogs"')) {
+      if (healed) after.push(clock.t);
+      if (failing) {
+        failedLogs++;
+        const reqs = [JSON.parse(body)].flat() as { id: number }[];
+        const one = (q: { id: number }) => ({ jsonrpc: "2.0", id: q.id, error: { code: -32000, message: "header not found" } });
+        return new Response(JSON.stringify(Array.isArray(JSON.parse(body)) ? reqs.map(one) : one(reqs[0]!)), { status: 200, headers: { "content-type": "application/json" } });
+      }
+    }
+    return r.fetch(url, init);
+  };
+  const { value } = await onVirtualTime(9_000_000, async () => {
+    const holds = providerHolds(() => Date.now());
+    holds.hold(OTHER, 3_600);
+    const s = open(r.chain, clock, { pools: kept, rpcs: SWAP_RPCS.robinhood, headerTimed: HEADER_TIMED, fetch: fetch as never, holds });
+    const t0 = clock.t;
+    void s.ahead([token!]);
+    while ((r.n.poolReads.get(pool!) ?? 0) < 1) await sleep(10);
+    failing = true;
+    const f0 = clock.t;
+    while (clock.t - f0 < HEAL_MS) await sleep(10);
+    failing = false;
+    healed = true;
+    const h0 = clock.t;
+    // up to the lists' next load, which this test never makes
+    while (clock.t - t0 < LIST_MS - 1_000) await sleep(10);
+    s.stop();
+    return { t0, h0, heldAtEnd: holds.heldFor(OTHER) > 0 };
+  });
+  console.log(`${failedLogs} log reads refused before the reads answered again; log reads after: ${after.slice(0, 3).map((t) => `+${t - value.h0} ms`).join(", ") || "none"}`);
+  assert.ok(failedLogs > 0, "no log read refused: the read back never backed off, the test proves nothing");
+  assert.ok(value.heldAtEnd, `${OTHER} not held to the end: the test proves nothing`);
+  assert.ok(after.length > 0, `no log read in the ${LIST_MS - 1_000 - (value.h0 - value.t0)} ms after the reads answered again, up to the lists' next load: the read back rested on ${OTHER}'s hold, a provider it never reads`);
+});
