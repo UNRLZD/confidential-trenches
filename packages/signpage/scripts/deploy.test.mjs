@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, test } from "node:test";
@@ -73,6 +73,19 @@ function cleanOf(repo, rev) {
   }
   return { dir: CLEAN.get(rev).dir };
 }
+// A deploy's install in one of those checkouts runs for real the first time it passes there, with the same arguments;
+// a later one finds the checkout installed and nothing to do, so it gets that answer. The file ran 57 installs, 31 CPU-s
+// on a Mac; it runs 7, 14 CPU-s, and the whole file 93 CPU-s, not 110 (card readme-run-fits-an-agent-timeout). An install
+// anywhere else, or one that failed, is run again every time.
+const INSTALLED = new Map();
+function installIn(args, opts) {
+  const at = realpathSync(opts.cwd);
+  const key = [...CLEAN.values()].some((c) => realpathSync(c.dir) === at) ? `${at}\0${args.join("\0")}` : null;
+  if (key && INSTALLED.has(key)) return INSTALLED.get(key);
+  const r = spawnSync("pnpm", args, { ...opts, env: { ...process.env, ...opts?.env }, encoding: "utf8" });
+  if (key && r.status === 0) INSTALLED.set(key, r);
+  return r;
+}
 after(() => {
   for (const { repo, dir } of CLEAN.values()) {
     if (spawnSync("git", ["-C", repo, "worktree", "remove", "--force", dir]).status !== 0) rmSync(dir, { recursive: true, force: true });
@@ -86,7 +99,7 @@ function recorder({ head = HEAD, status = "", install = 0, add = 0, lsRemote = 0
   const run = (cmd, args, opts) => {
     calls.push({ cmd, args, opts });
     if (cmd === "pnpm" && args[0] === "install" && install) return { status: install, stdout: "", stderr: "ERR_PNPM_OUTDATED_LOCKFILE  Cannot install with \"frozen-lockfile\"\n" };
-    if (cmd === "pnpm" && args[0] === "install") return args.includes("--prefer-offline") ? spawnSync(cmd, args, { ...opts, env: { ...process.env, ...opts?.env }, encoding: "utf8" }) : { status: 0, stdout: "", stderr: "" };
+    if (cmd === "pnpm" && args[0] === "install") return args.includes("--prefer-offline") ? installIn(args, opts) : { status: 0, stdout: "", stderr: "" };
     if (cmd === "git" && args[0] === "-C" && args[2] === "worktree" && args[3] === "add" && add) return { status: add, stdout: "", stderr: `fatal: '${args.at(-1)}' is not a commit\n` };
     if (cmd === "git" && args[0] === "-C" && args[2] === "worktree" && args[3] === "add") {
       const [root, rev] = args.slice(-2);
