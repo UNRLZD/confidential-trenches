@@ -6,6 +6,8 @@
 //   over WARM_MAX_MS, 429s, and taps that end in a refusal the tap should have followed (below_reference, native_first).
 // - quotes_named_before: a real run of the quotes half against SIGN_HOST at release 147 (the Mac, 2026-11-15 08:05Z,
 //   card evm-taps-meet-no-429): FAIL, each 429 named by its tap, host and reads (Robinhood's own scan posts).
+// - quotes_kept: a real run of the quotes half against SIGN_HOST at release 202 with each chain's index kept at the head
+//   through its taps (the Mac, 2026-11-24 20:04Z, card evm-buy-check-keeps-the-index): FAIL on Robinhood's taps alone.
 // And plants on the good run: a buy with no carry, a sale with no open record, no withdraw, a testnet pool, an unpinned
 // bundle: each FAIL.
 import assert from "node:assert/strict";
@@ -99,4 +101,26 @@ test("plants on the recorded quotes each fail on their own line", () => {
   const none = structuredClone(A.good);
   none.quotes = { chains: {} };
   assert.equal(judge(none).verdict, "FAIL", "no chain read");
+});
+
+test("a chain whose index was synced once and never kept at the head fails on its keep line", () => {
+  // card evm-buy-check-keeps-the-index: sign run 45471922018 tapped both chains on an index synced once, minutes
+  // behind by Robinhood ANT, whose taps then scanned the blocks past it by currency until Pocket answered 429
+  // (ok,ok,ok,rpc_error); the page keeps its index at the head every EVM_INDEX_KEEP_MS, so a tap is judged on that
+  const b = bad(judge(A.quotes_live_before)).join("\n");
+  for (const chain of ["base", "robinhood"]) assert.ok(b.includes(`[${chain}] the index was kept at the head through the taps: not kept`), b);
+  const kept = (keep) => {
+    const a = structuredClone(A.good);
+    a.quotes = structuredClone(A.quotes_live_before.quotes);
+    for (const c of Object.values(a.quotes.chains)) c.index.keep = keep;
+    return judge(a).lines.filter((l) => l.includes("kept at the head"));
+  };
+  assert.deepEqual(kept({ syncs: 12, whole: 11, hosts: {} }), ["ok  [base] the index was kept at the head through the taps: 11 of 12 gap syncs served", "ok  [robinhood] the index was kept at the head through the taps: 11 of 12 gap syncs served"]);
+  assert.deepEqual(kept({ syncs: 12, whole: 0, hosts: {} }).map((l) => l.slice(0, 3)), ["BAD", "BAD"]);
+  assert.deepEqual(kept({ syncs: 0, whole: 0, hosts: {} }).map((l) => l.slice(0, 3)), ["BAD", "BAD"]);
+  // a real run with the keep: each chain kept through its taps, its reds the taps' own
+  const k = judge(A.quotes_kept);
+  for (const chain of ["base", "robinhood"]) assert.ok(k.lines.includes(`ok  [${chain}] the index was kept at the head through the taps: 4 of 4 gap syncs served`), k.lines.join("\n"));
+  assert.equal(k.verdict, "FAIL");
+  assert.ok(bad(k).every((l) => l.startsWith("BAD [robinhood] ")), bad(k).join("\n"));
 });

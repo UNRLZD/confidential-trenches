@@ -1,6 +1,6 @@
 {
  "key": "evm-buy-and-sell-on-mainnet",
- "recorded": "good 2026-11-13T02:56:31.219Z (the Mac, --local: this change's SIGN_HOST build, the sources of the commit that carries this file: the EVM buy, the carry and the sale open on mainnet); bad_live_before 2026-11-12T22:51:11.724Z (the Mac, the live SIGN_HOST as served then: no EVM buy, no carry, no Sell typed data); quotes_live_before 2026-11-13T05:59:47.713Z (the Mac, the live SIGN_HOST and real Base and Robinhood mainnet reads, nothing signed: the tap's own quote on the helper's top five rows of each; FAIL: warm taps over 2 s, 429s, and taps that end below_reference or native_first)",
+ "recorded": "good 2026-11-13T02:56:31.219Z (the Mac, --local: this change's SIGN_HOST build, the sources of the commit that carries this file: the EVM buy, the carry and the sale open on mainnet); bad_live_before 2026-11-12T22:51:11.724Z (the Mac, the live SIGN_HOST as served then: no EVM buy, no carry, no Sell typed data); quotes_live_before 2026-11-13T05:59:47.713Z (the Mac, the live SIGN_HOST and real Base and Robinhood mainnet reads, nothing signed: the tap's own quote on the helper's top five rows of each; FAIL: warm taps over 2 s, 429s, and taps that end below_reference or native_first); quotes_kept 2026-11-24T20:04:02.178Z (the Mac, the live SIGN_HOST at release 202 and real Base and Robinhood mainnet reads, nothing signed, card evm-buy-check-keeps-the-index: each chain kept at the head through its taps, 4 of 4 gap syncs served on each; FAIL: Robinhood ANT one warm tap rpc_error and ANT and CASHCAT warm taps over 2 s, a MOW 429)",
  "good": {
   "readAt": "2026-11-13T02:56:31.219Z",
   "from": "local build",
@@ -3414,6 +3414,4141 @@
            "s429Logs": 0,
            "s429Reads": {}
           }
+         }
+        }
+       ]
+      }
+     ]
+    }
+   }
+  }
+ },
+ "quotes_kept": {
+  "readAt": "2026-11-24T20:04:02.178Z",
+  "from": "https://confidential.unrealized.trade",
+  "page": {
+   "pin": "sha384-mT42Gbo4nGKE6COhX5sCjxopeMIa9/QdkTgboDYYPx+KhRhezBBPb7SgCQCWpRkB",
+   "sha384": "sha384-mT42Gbo4nGKE6COhX5sCjxopeMIa9/QdkTgboDYYPx+KhRhezBBPb7SgCQCWpRkB",
+   "rule": true,
+   "withdraw": 2,
+   "buy": [
+    "buy((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256,(address,bytes,uint256,address),bytes)",
+    "uniswap-v4"
+   ],
+   "carry": [
+    "owed/carry-evm-open",
+    "owed/carry-evm"
+   ],
+   "sell": [
+    "Sell(address token,uint256 amount,address target,bytes data,uint256 minOut,address pool,uint256 precommitment,uint256 feeCap,address feeRecipient,uint256 deadline,uint256 nonce)",
+    "owed/sell-evm"
+   ],
+   "pools": [
+    "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+    "0x9306359433127c4f3be426f6faeb00a3c41f66db"
+   ],
+   "testnet": []
+  },
+  "quotes": {
+   "readAt": "2026-11-24T20:08:02.950Z",
+   "chains": {
+    "base": {
+     "index": {
+      "ms": 78673,
+      "served": true,
+      "covers": 61801334,
+      "pools": 9472,
+      "error": null,
+      "limited": [
+       0,
+       0
+      ],
+      "hosts": {
+       "base.rpc.blxrbdn.com": {
+        "requests": 131,
+        "calls": 261,
+        "s429": 0,
+        "logs": 130,
+        "s429Logs": 0,
+        "s429Reads": {},
+        "thrown": 4
+       },
+       "base-rpc.publicnode.com": {
+        "requests": 9,
+        "calls": 157,
+        "s429": 0,
+        "logs": 8,
+        "s429Logs": 0,
+        "s429Reads": {}
+       }
+      },
+      "keep": {
+       "syncs": 4,
+       "whole": 4,
+       "hosts": {
+        "base.rpc.blxrbdn.com": {
+         "requests": 24,
+         "s429": 0
+        },
+        "base-rpc.publicnode.com": {
+         "requests": 8,
+         "s429": 0
+        }
+       }
+      }
+     },
+     "rows": [
+      {
+       "coin": "0xb20000000000000000000078ee7ce2fe4908108c",
+       "symbol": "NVDAc",
+       "liq_usd": "1784573.5912",
+       "runs": [
+        {
+         "kind": "cold",
+         "ms": 2793,
+         "quotes": 1,
+         "ok": true,
+         "route": {
+          "venue": "uniswap-v3",
+          "tokens": [
+           "0x4200000000000000000000000000000000000006",
+           "0xb20000000000000000000078ee7ce2fe4908108c"
+          ],
+          "fees": [
+           3000
+          ]
+         },
+         "hosts": {
+          "base-rpc.publicnode.com": {
+           "requests": 33,
+           "calls": 71,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "base-mainnet.public.blastapi.io": {
+           "requests": 33,
+           "calls": 71,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "mainnet.base.org": {
+           "requests": 18,
+           "calls": 32,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "base.api.pocket.network": {
+           "requests": 1,
+           "calls": 1,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          }
+         },
+         "seats": [
+          {
+           "url": "base-rpc.publicnode.com",
+           "rank": 0,
+           "ms": null,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "base-mainnet.public.blastapi.io",
+           "rank": 0,
+           "ms": null,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "mainnet.base.org",
+           "rank": 0,
+           "ms": null,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "base.api.pocket.network",
+           "rank": 0,
+           "ms": null,
+           "out": 0,
+           "oldestMs": null
+          }
+         ],
+         "waited": {
+          "methods": "eth_call",
+          "host": "base-mainnet.public.blastapi.io",
+          "ms": 547,
+          "end": "200",
+          "spare": true,
+          "idle": 11,
+          "left": 4,
+          "timeline": [
+           "6+111 base-rpc.publicnode eth_blockNumber 200",
+           "119+346 public.blastapi eth_getBlockByNumber 200",
+           "120+338 public.blastapi eth_getBlockByNumber 200",
+           "120+186 base-rpc.publicnode eth_getBlockByNumber 200",
+           "120+337 mainnet.base eth_getBlockByNumber 200",
+           "121+186 base-rpc.publicnode eth_getBlockByNumber 200",
+           "121+328 mainnet.base eth_getBlockByNumber 200",
+           "453+497 public.blastapi eth_call 200",
+           "453+547 public.blastapi eth_call 200",
+           "453+520 public.blastapi eth_call 200",
+           "453+476 public.blastapi eth_call 200",
+           "454+502 public.blastapi eth_call 200",
+           "454+486 public.blastapi eth_call 200",
+           "454+507 public.blastapi eth_call 200",
+           "454+379 public.blastapi eth_call 200",
+           "455+250 mainnet.base eth_getBlockByNumber 200",
+           "455+187 base-rpc.publicnode eth_call 200",
+           "455+501 mainnet.base eth_call 200",
+           "455+218 base-rpc.publicnode eth_call 200",
+           "455+463 mainnet.base eth_call 200",
+           "455+187 base-rpc.publicnode eth_call 200",
+           "455+377 mainnet.base eth_call 200",
+           "455+288 base-rpc.publicnode eth_call 200",
+           "455+376 base-rpc.publicnode eth_call 200",
+           "456+282 base-rpc.publicnode eth_call 200",
+           "456+377 base-rpc.publicnode eth_call 200",
+           "456+186 base-rpc.publicnode eth_call 200",
+           "537+295 mainnet.base eth_getBlockByNumber 200",
+           "855+311 mainnet.base eth_call 200",
+           "964+297 public.blastapi eth_call 200",
+           "964+294 public.blastapi eth_call 200",
+           "964+301 public.blastapi eth_call 200",
+           "964+294 public.blastapi eth_call 200",
+           "964+301 public.blastapi eth_call 200",
+           "964+273 public.blastapi eth_call 200",
+           "965+201 base-rpc.publicnode eth_call 200",
+           "965+200 base-rpc.publicnode eth_call 200",
+           "965+201 base-rpc.publicnode eth_call 200",
+           "965+200 base-rpc.publicnode eth_call 200",
+           "965+200 base-rpc.publicnode eth_call 200",
+           "965+99 base-rpc.publicnode eth_call 200",
+           "1002+259 mainnet.base eth_call 200",
+           "1268+421 public.blastapi eth_call 200",
+           "1268+318 public.blastapi eth_call 200",
+           "1268+300 public.blastapi eth_call 200",
+           "1268+324 public.blastapi eth_call 200",
+           "1268+297 public.blastapi eth_call 200",
+           "1268+301 public.blastapi eth_call 200",
+           "1268+279 public.blastapi eth_call 200",
+           "1268+138 base-rpc.publicnode eth_call 200",
+           "1269+332 mainnet.base eth_call 200",
+           "1269+139 base-rpc.publicnode eth_call 200",
+           "1269+161 base-rpc.publicnode eth_call 200",
+           "1269+141 base-rpc.publicnode eth_call 200",
+           "1269+139 base-rpc.publicnode eth_call 200",
+           "1269+130 base-rpc.publicnode eth_call 200",
+           "1269+116 base-rpc.publicnode eth_call 200",
+           "1605+386 public.blastapi eth_call 200",
+           "1606+275 base-rpc.publicnode eth_call 200",
+           "1606+354 mainnet.base eth_call 200",
+           "1961+286 public.blastapi eth_call 200",
+           "1962+287 public.blastapi eth_call 200",
+           "1962+293 public.blastapi eth_call 200",
+           "1962+289 public.blastapi eth_call 200",
+           "1962+101 base-rpc.publicnode eth_call 200",
+           "1962+269 mainnet.base eth_call 200",
+           "1962+131 base-rpc.publicnode eth_call 200",
+           "1962+304 mainnet.base eth_call 200",
+           "1962+115 base-rpc.publicnode eth_call 200",
+           "1963+314 mainnet.base eth_call 200",
+           "1963+100 base-rpc.publicnode eth_call 200",
+           "2256+275 public.blastapi eth_call 200",
+           "2257+148 base-rpc.publicnode eth_call 200",
+           "2257+260 mainnet.base eth_call 200",
+           "2335+404 public.blastapi eth_getBlockByNumber 200",
+           "2335+159 base-rpc.publicnode eth_getBlockByNumber 200",
+           "2335+403 mainnet.base eth_getBlockByNumber 200",
+           "2519+275 public.blastapi eth_call out",
+           "2519+275 public.blastapi eth_call out",
+           "2519+100 base-rpc.publicnode eth_call 200",
+           "2519+269 mainnet.base eth_call 200",
+           "2519+96 base-rpc.publicnode eth_call 200",
+           "2519+271 mainnet.base eth_call 200",
+           "2735+58 api.pocket eth_getBlockByNumber out",
+           "2739+54 public.blastapi eth_getBlockByNumber out"
+          ]
+         }
+        },
+        {
+         "kind": "warm",
+         "ms": 811,
+         "quotes": 1,
+         "ok": true,
+         "route": {
+          "venue": "uniswap-v3",
+          "tokens": [
+           "0x4200000000000000000000000000000000000006",
+           "0xb20000000000000000000078ee7ce2fe4908108c"
+          ],
+          "fees": [
+           3000
+          ]
+         },
+         "hosts": {
+          "base-rpc.publicnode.com": {
+           "requests": 20,
+           "calls": 32,
+           "s429": 0,
+           "logs": 2,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "base-mainnet.public.blastapi.io": {
+           "requests": 17,
+           "calls": 24,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "mainnet.base.org": {
+           "requests": 10,
+           "calls": 13,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          }
+         },
+         "seats": [
+          {
+           "url": "base-rpc.publicnode.com",
+           "rank": 0,
+           "ms": 125,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "mainnet.base.org",
+           "rank": 0,
+           "ms": 304,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "base-mainnet.public.blastapi.io",
+           "rank": 0,
+           "ms": 327,
+           "out": 3,
+           "oldestMs": 275
+          },
+          {
+           "url": "base.api.pocket.network",
+           "rank": 0,
+           "ms": null,
+           "out": 1,
+           "oldestMs": 59
+          }
+         ],
+         "waited": {
+          "methods": "eth_call",
+          "host": "base-mainnet.public.blastapi.io",
+          "ms": 516,
+          "end": "200",
+          "spare": true,
+          "idle": 3,
+          "left": 2
+         }
+        },
+        {
+         "kind": "warm",
+         "ms": 1235,
+         "quotes": 1,
+         "ok": true,
+         "route": {
+          "venue": "uniswap-v3",
+          "tokens": [
+           "0x4200000000000000000000000000000000000006",
+           "0xb20000000000000000000078ee7ce2fe4908108c"
+          ],
+          "fees": [
+           3000
+          ]
+         },
+         "hosts": {
+          "base-rpc.publicnode.com": {
+           "requests": 22,
+           "calls": 37,
+           "s429": 0,
+           "logs": 3,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "base-mainnet.public.blastapi.io": {
+           "requests": 19,
+           "calls": 29,
+           "s429": 0,
+           "logs": 1,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "mainnet.base.org": {
+           "requests": 8,
+           "calls": 9,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          }
+         },
+         "seats": [
+          {
+           "url": "base-rpc.publicnode.com",
+           "rank": 0,
+           "ms": 276,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "mainnet.base.org",
+           "rank": 0,
+           "ms": 282,
+           "out": 1,
+           "oldestMs": 279
+          },
+          {
+           "url": "base-mainnet.public.blastapi.io",
+           "rank": 0,
+           "ms": 433,
+           "out": 1,
+           "oldestMs": 279
+          },
+          {
+           "url": "base.api.pocket.network",
+           "rank": 0,
+           "ms": 764,
+           "out": 0,
+           "oldestMs": null
+          }
+         ],
+         "waited": {
+          "methods": "eth_call",
+          "host": "base-mainnet.public.blastapi.io",
+          "ms": 889,
+          "end": "200",
+          "spare": true,
+          "idle": 2,
+          "left": 1
+         }
+        },
+        {
+         "kind": "warm",
+         "ms": 713,
+         "quotes": 1,
+         "ok": true,
+         "route": {
+          "venue": "uniswap-v3",
+          "tokens": [
+           "0x4200000000000000000000000000000000000006",
+           "0xb20000000000000000000078ee7ce2fe4908108c"
+          ],
+          "fees": [
+           3000
+          ]
+         },
+         "hosts": {
+          "base-rpc.publicnode.com": {
+           "requests": 20,
+           "calls": 32,
+           "s429": 0,
+           "logs": 2,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "base-mainnet.public.blastapi.io": {
+           "requests": 17,
+           "calls": 24,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "mainnet.base.org": {
+           "requests": 6,
+           "calls": 11,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          }
+         },
+         "seats": [
+          {
+           "url": "base-rpc.publicnode.com",
+           "rank": 0,
+           "ms": 183,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "base-mainnet.public.blastapi.io",
+           "rank": 0,
+           "ms": 473,
+           "out": 1,
+           "oldestMs": 330
+          },
+          {
+           "url": "mainnet.base.org",
+           "rank": 0,
+           "ms": 295,
+           "out": 2,
+           "oldestMs": 422
+          },
+          {
+           "url": "base.api.pocket.network",
+           "rank": 0,
+           "ms": 764,
+           "out": 0,
+           "oldestMs": null
+          }
+         ],
+         "waited": {
+          "methods": "eth_call",
+          "host": "base-mainnet.public.blastapi.io",
+          "ms": 371,
+          "end": "200",
+          "spare": true,
+          "idle": 9,
+          "left": 1
+         }
+        }
+       ]
+      },
+      {
+       "coin": "0xb2000000000000000000002d0ba3164cc74f58b7",
+       "symbol": "GOOGLc",
+       "liq_usd": "1685682.4164",
+       "runs": [
+        {
+         "kind": "cold",
+         "ms": 1420,
+         "quotes": 2,
+         "ok": true,
+         "route": {
+          "venue": "uniswap-v3",
+          "tokens": [
+           "0x4200000000000000000000000000000000000006",
+           "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+           "0xb2000000000000000000002d0ba3164cc74f58b7"
+          ],
+          "fees": [
+           100,
+           3000
+          ]
+         },
+         "hosts": {
+          "base-rpc.publicnode.com": {
+           "requests": 15,
+           "calls": 32,
+           "s429": 0,
+           "logs": 2,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "base-mainnet.public.blastapi.io": {
+           "requests": 11,
+           "calls": 23,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "mainnet.base.org": {
+           "requests": 9,
+           "calls": 15,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          }
+         },
+         "seats": [
+          {
+           "url": "base-rpc.publicnode.com",
+           "rank": 0,
+           "ms": 174,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "mainnet.base.org",
+           "rank": 0,
+           "ms": 286,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "base-mainnet.public.blastapi.io",
+           "rank": 0,
+           "ms": 328,
+           "out": 1,
+           "oldestMs": 326
+          },
+          {
+           "url": "base.api.pocket.network",
+           "rank": 0,
+           "ms": 764,
+           "out": 0,
+           "oldestMs": null
+          }
+         ],
+         "waited": {
+          "methods": "eth_getBlockByNumber",
+          "host": "base-mainnet.public.blastapi.io",
+          "ms": 404,
+          "end": "200",
+          "spare": true,
+          "idle": 5,
+          "left": 1
+         }
+        },
+        {
+         "kind": "warm",
+         "ms": 291,
+         "quotes": 1,
+         "ok": true,
+         "route": {
+          "venue": "uniswap-v3",
+          "tokens": [
+           "0x4200000000000000000000000000000000000006",
+           "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+           "0xb2000000000000000000002d0ba3164cc74f58b7"
+          ],
+          "fees": [
+           100,
+           3000
+          ]
+         },
+         "hosts": {
+          "base-rpc.publicnode.com": {
+           "requests": 7,
+           "calls": 8,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "base-mainnet.public.blastapi.io": {
+           "requests": 6,
+           "calls": 7,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "mainnet.base.org": {
+           "requests": 6,
+           "calls": 7,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          }
+         },
+         "seats": [
+          {
+           "url": "base-rpc.publicnode.com",
+           "rank": 0,
+           "ms": 123,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "mainnet.base.org",
+           "rank": 0,
+           "ms": 266,
+           "out": 1,
+           "oldestMs": 138
+          },
+          {
+           "url": "base-mainnet.public.blastapi.io",
+           "rank": 0,
+           "ms": 316,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "base.api.pocket.network",
+           "rank": 0,
+           "ms": 764,
+           "out": 0,
+           "oldestMs": null
+          }
+         ],
+         "waited": {
+          "methods": "eth_call",
+          "host": "mainnet.base.org",
+          "ms": 285,
+          "end": "200",
+          "spare": false,
+          "idle": 1,
+          "left": 6
+         }
+        },
+        {
+         "kind": "warm",
+         "ms": 386,
+         "quotes": 1,
+         "ok": true,
+         "route": {
+          "venue": "uniswap-v3",
+          "tokens": [
+           "0x4200000000000000000000000000000000000006",
+           "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+           "0xb2000000000000000000002d0ba3164cc74f58b7"
+          ],
+          "fees": [
+           100,
+           3000
+          ]
+         },
+         "hosts": {
+          "base-rpc.publicnode.com": {
+           "requests": 8,
+           "calls": 12,
+           "s429": 0,
+           "logs": 1,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "base-mainnet.public.blastapi.io": {
+           "requests": 7,
+           "calls": 11,
+           "s429": 0,
+           "logs": 1,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "mainnet.base.org": {
+           "requests": 1,
+           "calls": 4,
+           "s429": 0,
+           "logs": 1,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "base.api.pocket.network": {
+           "requests": 1,
+           "calls": 4,
+           "s429": 0,
+           "logs": 1,
+           "s429Logs": 0,
+           "s429Reads": {}
+          }
+         },
+         "seats": [
+          {
+           "url": "base-rpc.publicnode.com",
+           "rank": 0,
+           "ms": 143,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "base-mainnet.public.blastapi.io",
+           "rank": 0,
+           "ms": 308,
+           "out": 5,
+           "oldestMs": 287
+          },
+          {
+           "url": "mainnet.base.org",
+           "rank": 0,
+           "ms": 265,
+           "out": 1,
+           "oldestMs": 287
+          },
+          {
+           "url": "base.api.pocket.network",
+           "rank": 0,
+           "ms": 764,
+           "out": 0,
+           "oldestMs": null
+          }
+         ],
+         "waited": {
+          "methods": "eth_call",
+          "host": "base-mainnet.public.blastapi.io",
+          "ms": 380,
+          "end": "200",
+          "spare": true,
+          "idle": 1,
+          "left": 1
+         }
+        },
+        {
+         "kind": "warm",
+         "ms": 334,
+         "quotes": 1,
+         "ok": true,
+         "route": {
+          "venue": "uniswap-v3",
+          "tokens": [
+           "0x4200000000000000000000000000000000000006",
+           "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+           "0xb2000000000000000000002d0ba3164cc74f58b7"
+          ],
+          "fees": [
+           100,
+           3000
+          ]
+         },
+         "hosts": {
+          "base-rpc.publicnode.com": {
+           "requests": 9,
+           "calls": 15,
+           "s429": 0,
+           "logs": 2,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "base-mainnet.public.blastapi.io": {
+           "requests": 6,
+           "calls": 7,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          }
+         },
+         "seats": [
+          {
+           "url": "base-rpc.publicnode.com",
+           "rank": 0,
+           "ms": 157,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "base-mainnet.public.blastapi.io",
+           "rank": 0,
+           "ms": 346,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "base.api.pocket.network",
+           "rank": 0,
+           "ms": 764,
+           "out": 1,
+           "oldestMs": 148
+          },
+          {
+           "url": "mainnet.base.org",
+           "rank": 20,
+           "ms": 296,
+           "out": 0,
+           "oldestMs": null
+          }
+         ],
+         "waited": {
+          "methods": "eth_call",
+          "host": "base-mainnet.public.blastapi.io",
+          "ms": 328,
+          "end": "200",
+          "spare": true,
+          "idle": 3,
+          "left": 0
+         }
+        }
+       ]
+      },
+      {
+       "coin": "0xb200000000000000000000397293cb8cda9a10c5",
+       "symbol": "SNDKc",
+       "liq_usd": "1455751.378",
+       "runs": [
+        {
+         "kind": "cold",
+         "ms": 1140,
+         "quotes": 2,
+         "ok": true,
+         "route": {
+          "venue": "uniswap-v3",
+          "tokens": [
+           "0x4200000000000000000000000000000000000006",
+           "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+           "0xb200000000000000000000397293cb8cda9a10c5"
+          ],
+          "fees": [
+           100,
+           10000
+          ]
+         },
+         "hosts": {
+          "base-rpc.publicnode.com": {
+           "requests": 12,
+           "calls": 26,
+           "s429": 0,
+           "logs": 1,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "base-mainnet.public.blastapi.io": {
+           "requests": 11,
+           "calls": 23,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "base.api.pocket.network": {
+           "requests": 1,
+           "calls": 1,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          }
+         },
+         "seats": [
+          {
+           "url": "base-rpc.publicnode.com",
+           "rank": 0,
+           "ms": 125,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "base-mainnet.public.blastapi.io",
+           "rank": 0,
+           "ms": 331,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "base.api.pocket.network",
+           "rank": 0,
+           "ms": 764,
+           "out": 1,
+           "oldestMs": 482
+          },
+          {
+           "url": "mainnet.base.org",
+           "rank": 20,
+           "ms": 296,
+           "out": 0,
+           "oldestMs": null
+          }
+         ],
+         "waited": {
+          "methods": "eth_getBlockByNumber",
+          "host": "base-mainnet.public.blastapi.io",
+          "ms": 404,
+          "end": "200",
+          "spare": true,
+          "idle": 4,
+          "left": 2
+         }
+        },
+        {
+         "kind": "warm",
+         "ms": 324,
+         "quotes": 1,
+         "ok": true,
+         "route": {
+          "venue": "uniswap-v3",
+          "tokens": [
+           "0x4200000000000000000000000000000000000006",
+           "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+           "0xb200000000000000000000397293cb8cda9a10c5"
+          ],
+          "fees": [
+           100,
+           10000
+          ]
+         },
+         "hosts": {
+          "base-rpc.publicnode.com": {
+           "requests": 7,
+           "calls": 8,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "base-mainnet.public.blastapi.io": {
+           "requests": 6,
+           "calls": 7,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          }
+         },
+         "seats": [
+          {
+           "url": "base-rpc.publicnode.com",
+           "rank": 0,
+           "ms": 136,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "base-mainnet.public.blastapi.io",
+           "rank": 0,
+           "ms": 311,
+           "out": 1,
+           "oldestMs": 91
+          },
+          {
+           "url": "base.api.pocket.network",
+           "rank": 0,
+           "ms": 758,
+           "out": 1,
+           "oldestMs": 92
+          },
+          {
+           "url": "mainnet.base.org",
+           "rank": 20,
+           "ms": 296,
+           "out": 0,
+           "oldestMs": null
+          }
+         ],
+         "waited": {
+          "methods": "eth_call",
+          "host": "base-mainnet.public.blastapi.io",
+          "ms": 318,
+          "end": "200",
+          "spare": true,
+          "idle": 3,
+          "left": 0
+         }
+        },
+        {
+         "kind": "warm",
+         "ms": 311,
+         "quotes": 1,
+         "ok": true,
+         "route": {
+          "venue": "uniswap-v3",
+          "tokens": [
+           "0x4200000000000000000000000000000000000006",
+           "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+           "0xb200000000000000000000397293cb8cda9a10c5"
+          ],
+          "fees": [
+           100,
+           10000
+          ]
+         },
+         "hosts": {
+          "base-rpc.publicnode.com": {
+           "requests": 7,
+           "calls": 8,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "base-mainnet.public.blastapi.io": {
+           "requests": 6,
+           "calls": 7,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "base.api.pocket.network": {
+           "requests": 1,
+           "calls": 1,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          }
+         },
+         "seats": [
+          {
+           "url": "base-rpc.publicnode.com",
+           "rank": 0,
+           "ms": 116,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "base-mainnet.public.blastapi.io",
+           "rank": 0,
+           "ms": 300,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "base.api.pocket.network",
+           "rank": 0,
+           "ms": 616,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "mainnet.base.org",
+           "rank": 20,
+           "ms": 296,
+           "out": 0,
+           "oldestMs": null
+          }
+         ],
+         "waited": {
+          "methods": "eth_call",
+          "host": "base-mainnet.public.blastapi.io",
+          "ms": 306,
+          "end": "200",
+          "spare": true,
+          "idle": 2,
+          "left": 1
+         }
+        },
+        {
+         "kind": "warm",
+         "ms": 321,
+         "quotes": 1,
+         "ok": true,
+         "route": {
+          "venue": "uniswap-v3",
+          "tokens": [
+           "0x4200000000000000000000000000000000000006",
+           "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+           "0xb200000000000000000000397293cb8cda9a10c5"
+          ],
+          "fees": [
+           100,
+           10000
+          ]
+         },
+         "hosts": {
+          "base-rpc.publicnode.com": {
+           "requests": 8,
+           "calls": 11,
+           "s429": 0,
+           "logs": 1,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "base-mainnet.public.blastapi.io": {
+           "requests": 6,
+           "calls": 7,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "base.api.pocket.network": {
+           "requests": 1,
+           "calls": 1,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          }
+         },
+         "seats": [
+          {
+           "url": "base-rpc.publicnode.com",
+           "rank": 0,
+           "ms": 120,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "base-mainnet.public.blastapi.io",
+           "rank": 0,
+           "ms": 300,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "base.api.pocket.network",
+           "rank": 0,
+           "ms": 616,
+           "out": 1,
+           "oldestMs": 307
+          },
+          {
+           "url": "mainnet.base.org",
+           "rank": 20,
+           "ms": 296,
+           "out": 0,
+           "oldestMs": null
+          }
+         ],
+         "waited": {
+          "methods": "eth_call",
+          "host": "base-mainnet.public.blastapi.io",
+          "ms": 316,
+          "end": "200",
+          "spare": true,
+          "idle": 1,
+          "left": 1
+         }
+        }
+       ]
+      },
+      {
+       "coin": "0xb200000000000000000000d9192b6b456483c2e8",
+       "symbol": "AMZNc",
+       "liq_usd": "1454229.595",
+       "runs": [
+        {
+         "kind": "cold",
+         "ms": 1614,
+         "quotes": 2,
+         "ok": true,
+         "route": {
+          "venue": "uniswap-v3",
+          "tokens": [
+           "0x4200000000000000000000000000000000000006",
+           "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+           "0xb200000000000000000000d9192b6b456483c2e8"
+          ],
+          "fees": [
+           100,
+           10000
+          ]
+         },
+         "hosts": {
+          "base-rpc.publicnode.com": {
+           "requests": 15,
+           "calls": 32,
+           "s429": 0,
+           "logs": 2,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "base-mainnet.public.blastapi.io": {
+           "requests": 12,
+           "calls": 24,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "base.api.pocket.network": {
+           "requests": 3,
+           "calls": 3,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          }
+         },
+         "seats": [
+          {
+           "url": "base-rpc.publicnode.com",
+           "rank": 0,
+           "ms": 116,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "base-mainnet.public.blastapi.io",
+           "rank": 0,
+           "ms": 314,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "base.api.pocket.network",
+           "rank": 0,
+           "ms": 619,
+           "out": 1,
+           "oldestMs": 318
+          },
+          {
+           "url": "mainnet.base.org",
+           "rank": 20,
+           "ms": 296,
+           "out": 0,
+           "oldestMs": null
+          }
+         ],
+         "waited": {
+          "methods": "eth_call",
+          "host": "base-mainnet.public.blastapi.io",
+          "ms": 332,
+          "end": "200",
+          "spare": true,
+          "idle": 5,
+          "left": 0
+         }
+        },
+        {
+         "kind": "warm",
+         "ms": 312,
+         "quotes": 1,
+         "ok": true,
+         "route": {
+          "venue": "uniswap-v3",
+          "tokens": [
+           "0x4200000000000000000000000000000000000006",
+           "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+           "0xb200000000000000000000d9192b6b456483c2e8"
+          ],
+          "fees": [
+           100,
+           10000
+          ]
+         },
+         "hosts": {
+          "base-rpc.publicnode.com": {
+           "requests": 7,
+           "calls": 8,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "base-mainnet.public.blastapi.io": {
+           "requests": 6,
+           "calls": 7,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          }
+         },
+         "seats": [
+          {
+           "url": "base-rpc.publicnode.com",
+           "rank": 0,
+           "ms": 114,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "base-mainnet.public.blastapi.io",
+           "rank": 0,
+           "ms": 291,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "base.api.pocket.network",
+           "rank": 0,
+           "ms": 391,
+           "out": 1,
+           "oldestMs": 1932
+          },
+          {
+           "url": "mainnet.base.org",
+           "rank": 20,
+           "ms": 296,
+           "out": 0,
+           "oldestMs": null
+          }
+         ],
+         "waited": {
+          "methods": "eth_call",
+          "host": "base-mainnet.public.blastapi.io",
+          "ms": 306,
+          "end": "200",
+          "spare": true,
+          "idle": 3,
+          "left": 0
+         }
+        },
+        {
+         "kind": "warm",
+         "ms": 362,
+         "quotes": 1,
+         "ok": true,
+         "route": {
+          "venue": "uniswap-v3",
+          "tokens": [
+           "0x4200000000000000000000000000000000000006",
+           "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+           "0xb200000000000000000000d9192b6b456483c2e8"
+          ],
+          "fees": [
+           100,
+           10000
+          ]
+         },
+         "hosts": {
+          "base-rpc.publicnode.com": {
+           "requests": 9,
+           "calls": 15,
+           "s429": 0,
+           "logs": 2,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "base-mainnet.public.blastapi.io": {
+           "requests": 6,
+           "calls": 7,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "base.api.pocket.network": {
+           "requests": 1,
+           "calls": 1,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          }
+         },
+         "seats": [
+          {
+           "url": "base-rpc.publicnode.com",
+           "rank": 0,
+           "ms": 139,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "base-mainnet.public.blastapi.io",
+           "rank": 0,
+           "ms": 297,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "base.api.pocket.network",
+           "rank": 0,
+           "ms": 813,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "mainnet.base.org",
+           "rank": 20,
+           "ms": 296,
+           "out": 0,
+           "oldestMs": null
+          }
+         ],
+         "waited": {
+          "methods": "eth_call",
+          "host": "base-mainnet.public.blastapi.io",
+          "ms": 356,
+          "end": "200",
+          "spare": true,
+          "idle": 3,
+          "left": 0
+         }
+        },
+        {
+         "kind": "warm",
+         "ms": 333,
+         "quotes": 1,
+         "ok": true,
+         "route": {
+          "venue": "uniswap-v3",
+          "tokens": [
+           "0x4200000000000000000000000000000000000006",
+           "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+           "0xb200000000000000000000d9192b6b456483c2e8"
+          ],
+          "fees": [
+           100,
+           10000
+          ]
+         },
+         "hosts": {
+          "base-rpc.publicnode.com": {
+           "requests": 7,
+           "calls": 8,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "base-mainnet.public.blastapi.io": {
+           "requests": 6,
+           "calls": 7,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "base.api.pocket.network": {
+           "requests": 1,
+           "calls": 1,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          }
+         },
+         "seats": [
+          {
+           "url": "base-rpc.publicnode.com",
+           "rank": 0,
+           "ms": 176,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "base-mainnet.public.blastapi.io",
+           "rank": 0,
+           "ms": 346,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "base.api.pocket.network",
+           "rank": 0,
+           "ms": 813,
+           "out": 1,
+           "oldestMs": 358
+          },
+          {
+           "url": "mainnet.base.org",
+           "rank": 20,
+           "ms": 296,
+           "out": 0,
+           "oldestMs": null
+          }
+         ],
+         "waited": {
+          "methods": "eth_call",
+          "host": "base-mainnet.public.blastapi.io",
+          "ms": 328,
+          "end": "200",
+          "spare": true,
+          "idle": 1,
+          "left": 1
+         }
+        }
+       ]
+      },
+      {
+       "coin": "0xbf927b841994731c573bdf09ceb0c6b0aa887cdd",
+       "symbol": "VELVET",
+       "liq_usd": "1179115.7487",
+       "runs": [
+        {
+         "kind": "cold",
+         "ms": 1131,
+         "quotes": 2,
+         "ok": false,
+         "code": "not_allowed",
+         "message": "not_allowed: no_quote: the route reverts or quotes nothing",
+         "hosts": {
+          "base-rpc.publicnode.com": {
+           "requests": 18,
+           "calls": 42,
+           "s429": 0,
+           "logs": 1,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "base-mainnet.public.blastapi.io": {
+           "requests": 17,
+           "calls": 39,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "base.api.pocket.network": {
+           "requests": 2,
+           "calls": 2,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          }
+         },
+         "seats": [
+          {
+           "url": "base-rpc.publicnode.com",
+           "rank": 0,
+           "ms": 125,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "base-mainnet.public.blastapi.io",
+           "rank": 0,
+           "ms": 331,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "base.api.pocket.network",
+           "rank": 0,
+           "ms": 709,
+           "out": 1,
+           "oldestMs": 329
+          },
+          {
+           "url": "mainnet.base.org",
+           "rank": 20,
+           "ms": 296,
+           "out": 0,
+           "oldestMs": null
+          }
+         ],
+         "waited": {
+          "methods": "eth_call",
+          "host": "base-mainnet.public.blastapi.io",
+          "ms": 421,
+          "end": "200",
+          "spare": true,
+          "idle": 3,
+          "left": 0
+         }
+        },
+        {
+         "kind": "warm",
+         "ms": 715,
+         "quotes": 2,
+         "ok": false,
+         "code": "not_allowed",
+         "message": "not_allowed: no_quote: the route reverts or quotes nothing",
+         "hosts": {
+          "base-rpc.publicnode.com": {
+           "requests": 13,
+           "calls": 24,
+           "s429": 0,
+           "logs": 1,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "base-mainnet.public.blastapi.io": {
+           "requests": 11,
+           "calls": 20,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "base.api.pocket.network": {
+           "requests": 2,
+           "calls": 2,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          }
+         },
+         "seats": [
+          {
+           "url": "base-rpc.publicnode.com",
+           "rank": 0,
+           "ms": 173,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "base-mainnet.public.blastapi.io",
+           "rank": 0,
+           "ms": 302,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "base.api.pocket.network",
+           "rank": 0,
+           "ms": 494,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "mainnet.base.org",
+           "rank": 20,
+           "ms": 296,
+           "out": 0,
+           "oldestMs": null
+          }
+         ],
+         "waited": {
+          "methods": "eth_call",
+          "host": "base-mainnet.public.blastapi.io",
+          "ms": 436,
+          "end": "200",
+          "spare": true,
+          "idle": 1,
+          "left": 1
+         }
+        },
+        {
+         "kind": "warm",
+         "ms": 0,
+         "quotes": 0,
+         "ok": false,
+         "code": "not_allowed",
+         "message": "not_allowed: no_quote: the route reverts or quotes nothing",
+         "hosts": {},
+         "seats": [
+          {
+           "url": "base-rpc.publicnode.com",
+           "rank": 0,
+           "ms": 161,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "base-mainnet.public.blastapi.io",
+           "rank": 0,
+           "ms": 326,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "base.api.pocket.network",
+           "rank": 0,
+           "ms": 431,
+           "out": 1,
+           "oldestMs": 311
+          },
+          {
+           "url": "mainnet.base.org",
+           "rank": 20,
+           "ms": 296,
+           "out": 0,
+           "oldestMs": null
+          }
+         ],
+         "waited": null
+        },
+        {
+         "kind": "warm",
+         "ms": 0,
+         "quotes": 0,
+         "ok": false,
+         "code": "not_allowed",
+         "message": "not_allowed: no_quote: the route reverts or quotes nothing",
+         "hosts": {},
+         "seats": [
+          {
+           "url": "base-rpc.publicnode.com",
+           "rank": 0,
+           "ms": 161,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "base-mainnet.public.blastapi.io",
+           "rank": 0,
+           "ms": 326,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "base.api.pocket.network",
+           "rank": 0,
+           "ms": 431,
+           "out": 1,
+           "oldestMs": 311
+          },
+          {
+           "url": "mainnet.base.org",
+           "rank": 20,
+           "ms": 296,
+           "out": 0,
+           "oldestMs": null
+          }
+         ],
+         "waited": null
+        }
+       ]
+      }
+     ]
+    },
+    "robinhood": {
+     "index": {
+      "ms": 83593,
+      "served": true,
+      "covers": 122491509,
+      "pools": 27861,
+      "error": null,
+      "limited": [
+       0,
+       0
+      ],
+      "hosts": {
+       "ct-api.unrealized.trade": {
+        "requests": 27,
+        "calls": 53,
+        "s429": 0,
+        "logs": 26,
+        "s429Logs": 0,
+        "s429Reads": {}
+       },
+       "rpc.mainnet.chain.robinhood.com": {
+        "requests": 27,
+        "calls": 53,
+        "s429": 0,
+        "logs": 26,
+        "s429Logs": 0,
+        "s429Reads": {}
+       },
+       "base-mainnet.public.blastapi.io": {
+        "requests": 35,
+        "calls": 35,
+        "s429": 0,
+        "logs": 0,
+        "s429Logs": 0,
+        "s429Reads": {}
+       },
+       "base-rpc.publicnode.com": {
+        "requests": 27,
+        "calls": 27,
+        "s429": 0,
+        "logs": 0,
+        "s429Logs": 0,
+        "s429Reads": {}
+       },
+       "base.api.pocket.network": {
+        "requests": 15,
+        "calls": 15,
+        "s429": 0,
+        "logs": 0,
+        "s429Logs": 0,
+        "s429Reads": {}
+       },
+       "mainnet.base.org": {
+        "requests": 31,
+        "calls": 31,
+        "s429": 0,
+        "logs": 0,
+        "s429Logs": 0,
+        "s429Reads": {}
+       }
+      },
+      "keep": {
+       "syncs": 4,
+       "whole": 4,
+       "hosts": {
+        "ct-api.unrealized.trade": {
+         "requests": 8,
+         "s429": 0
+        },
+        "rpc.mainnet.chain.robinhood.com": {
+         "requests": 8,
+         "s429": 0
+        }
+       }
+      }
+     },
+     "rows": [
+      {
+       "coin": "0x0b7c6c138dc75622f4200d157b13fb93e6bd94fa",
+       "symbol": "MOW",
+       "liq_usd": "21969058.0559",
+       "runs": [
+        {
+         "kind": "cold",
+         "ms": 2291,
+         "quotes": 1,
+         "ok": true,
+         "route": {
+          "venue": "uniswap-v4",
+          "currencyIn": "0x0000000000000000000000000000000000000000",
+          "hops": [
+           {
+            "currency": "0x0b7c6c138dc75622f4200d157b13fb93e6bd94fa",
+            "fee": 800000,
+            "tickSpacing": 8000,
+            "hooks": "0x0000000000000000000000000000000000000000",
+            "hookData": "0x"
+           }
+          ]
+         },
+         "hosts": {
+          "rpc.mainnet.chain.robinhood.com": {
+           "requests": 2,
+           "calls": 2,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood-rpc.publicnode.com": {
+           "requests": 10,
+           "calls": 13,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood.drpc.org": {
+           "requests": 5,
+           "calls": 7,
+           "s429": 1,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {
+            "eth_call": 1
+           },
+           "s429At": [
+            "7 calls in 1 s, 1 posts (1 calls) in flight"
+           ]
+          },
+          "robinhood.rpc.blxrbdn.com": {
+           "requests": 9,
+           "calls": 12,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          }
+         },
+         "seats": [
+          {
+           "url": "robinhood-rpc.publicnode.com",
+           "rank": 0,
+           "ms": null,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "robinhood.drpc.org",
+           "rank": 0,
+           "ms": null,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "robinhood.rpc.blxrbdn.com",
+           "rank": 0,
+           "ms": null,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "rpc.mainnet.chain.robinhood.com",
+           "rank": 3,
+           "ms": null,
+           "out": 0,
+           "oldestMs": null
+          }
+         ],
+         "waited": {
+          "methods": "eth_call",
+          "host": "robinhood.rpc.blxrbdn.com",
+          "ms": 1254,
+          "end": "200",
+          "spare": false,
+          "idle": 2,
+          "left": 1,
+          "timeline": [
+           "2+297 chain.robinhood eth_blockNumber 200",
+           "299+191 robinhood-rpc.publicnode eth_getBlockByNumber 200",
+           "299+191 robinhood.drpc eth_getBlockByNumber 200",
+           "299+190 robinhood-rpc.publicnode eth_getBlockByNumber 200",
+           "299+191 robinhood.drpc eth_getBlockByNumber 200",
+           "300+753 rpc.blxrbdn eth_getBlockByNumber 200",
+           "300+760 rpc.blxrbdn eth_getBlockByNumber 200",
+           "491+92 robinhood-rpc.publicnode eth_getBlockByNumber 200",
+           "491+370 robinhood-rpc.publicnode eth_call 200",
+           "492+329 robinhood.drpc eth_call 200",
+           "492+159 robinhood-rpc.publicnode eth_call 200",
+           "492+91 robinhood.drpc eth_call 200",
+           "492+1254 rpc.blxrbdn eth_call 200",
+           "492+753 rpc.blxrbdn eth_call 200",
+           "493+1798 robinhood-rpc.publicnode eth_getBlockByNumber out",
+           "909+102 robinhood.drpc eth_call 429",
+           "909+108 robinhood-rpc.publicnode eth_call 200",
+           "1155+229 rpc.blxrbdn eth_getBlockByNumber 200",
+           "1255+316 rpc.blxrbdn eth_call 200",
+           "1574+174 robinhood-rpc.publicnode eth_call 200",
+           "1574+485 rpc.blxrbdn eth_call 200",
+           "1804+318 chain.robinhood eth_getBlockByNumber 200",
+           "2060+87 robinhood-rpc.publicnode eth_call 200",
+           "2060+98 robinhood-rpc.publicnode eth_call 200",
+           "2060+227 rpc.blxrbdn eth_call 200",
+           "2060+230 rpc.blxrbdn eth_call 200"
+          ]
+         }
+        },
+        {
+         "kind": "warm",
+         "ms": 1186,
+         "quotes": 1,
+         "ok": true,
+         "route": {
+          "venue": "uniswap-v4",
+          "currencyIn": "0x0000000000000000000000000000000000000000",
+          "hops": [
+           {
+            "currency": "0x0b7c6c138dc75622f4200d157b13fb93e6bd94fa",
+            "fee": 800000,
+            "tickSpacing": 8000,
+            "hooks": "0x0000000000000000000000000000000000000000",
+            "hookData": "0x"
+           }
+          ]
+         },
+         "hosts": {
+          "rpc.mainnet.chain.robinhood.com": {
+           "requests": 7,
+           "calls": 14,
+           "s429": 0,
+           "logs": 1,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood-rpc.publicnode.com": {
+           "requests": 6,
+           "calls": 12,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood.rpc.blxrbdn.com": {
+           "requests": 5,
+           "calls": 10,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood.daybreak-rpc.network": {
+           "requests": 1,
+           "calls": 4,
+           "s429": 0,
+           "logs": 1,
+           "s429Logs": 0,
+           "s429Reads": {}
+          }
+         },
+         "seats": [
+          {
+           "url": "robinhood-rpc.publicnode.com",
+           "rank": 0,
+           "ms": 149,
+           "out": 1,
+           "oldestMs": 1798
+          },
+          {
+           "url": "robinhood.rpc.blxrbdn.com",
+           "rank": 0,
+           "ms": 475,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "rpc.mainnet.chain.robinhood.com",
+           "rank": 3,
+           "ms": 318,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "robinhood.drpc.org",
+           "rank": 20,
+           "ms": 211,
+           "out": 0,
+           "oldestMs": null
+          }
+         ],
+         "waited": {
+          "methods": "eth_call",
+          "host": "robinhood.rpc.blxrbdn.com",
+          "ms": 812,
+          "end": "200",
+          "spare": true,
+          "idle": 2,
+          "left": 1
+         }
+        },
+        {
+         "kind": "warm",
+         "ms": 1426,
+         "quotes": 1,
+         "ok": true,
+         "route": {
+          "venue": "uniswap-v4",
+          "currencyIn": "0x0000000000000000000000000000000000000000",
+          "hops": [
+           {
+            "currency": "0x0b7c6c138dc75622f4200d157b13fb93e6bd94fa",
+            "fee": 800000,
+            "tickSpacing": 8000,
+            "hooks": "0x0000000000000000000000000000000000000000",
+            "hookData": "0x"
+           }
+          ]
+         },
+         "hosts": {
+          "rpc.mainnet.chain.robinhood.com": {
+           "requests": 5,
+           "calls": 8,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood-rpc.publicnode.com": {
+           "requests": 6,
+           "calls": 11,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood.daybreak-rpc.network": {
+           "requests": 2,
+           "calls": 7,
+           "s429": 0,
+           "logs": 2,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood.rpc.blxrbdn.com": {
+           "requests": 4,
+           "calls": 9,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          }
+         },
+         "seats": [
+          {
+           "url": "robinhood-rpc.publicnode.com",
+           "rank": 0,
+           "ms": 311,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "robinhood.rpc.blxrbdn.com",
+           "rank": 0,
+           "ms": 390,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "rpc.mainnet.chain.robinhood.com",
+           "rank": 3,
+           "ms": 372,
+           "out": 1,
+           "oldestMs": 229
+          },
+          {
+           "url": "robinhood.drpc.org",
+           "rank": 20,
+           "ms": 211,
+           "out": 0,
+           "oldestMs": null
+          }
+         ],
+         "waited": {
+          "methods": "eth_call",
+          "host": "robinhood.rpc.blxrbdn.com",
+          "ms": 972,
+          "end": "200",
+          "spare": true,
+          "idle": 21,
+          "left": 0
+         }
+        },
+        {
+         "kind": "warm",
+         "ms": 914,
+         "quotes": 1,
+         "ok": true,
+         "route": {
+          "venue": "uniswap-v4",
+          "currencyIn": "0x0000000000000000000000000000000000000000",
+          "hops": [
+           {
+            "currency": "0x0b7c6c138dc75622f4200d157b13fb93e6bd94fa",
+            "fee": 800000,
+            "tickSpacing": 8000,
+            "hooks": "0x0000000000000000000000000000000000000000",
+            "hookData": "0x"
+           }
+          ]
+         },
+         "hosts": {
+          "rpc.mainnet.chain.robinhood.com": {
+           "requests": 5,
+           "calls": 8,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood-rpc.publicnode.com": {
+           "requests": 6,
+           "calls": 11,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood.rpc.blxrbdn.com": {
+           "requests": 5,
+           "calls": 10,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          }
+         },
+         "seats": [
+          {
+           "url": "robinhood-rpc.publicnode.com",
+           "rank": 0,
+           "ms": 231,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "robinhood.rpc.blxrbdn.com",
+           "rank": 0,
+           "ms": 485,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "rpc.mainnet.chain.robinhood.com",
+           "rank": 3,
+           "ms": 345,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "robinhood.drpc.org",
+           "rank": 20,
+           "ms": 211,
+           "out": 0,
+           "oldestMs": null
+          }
+         ],
+         "waited": {
+          "methods": "eth_call",
+          "host": "robinhood.rpc.blxrbdn.com",
+          "ms": 506,
+          "end": "200",
+          "spare": true,
+          "idle": 68,
+          "left": 3
+         }
+        }
+       ]
+      },
+      {
+       "coin": "0xbbb6c29bcc3a1028a2b54310df73f4f7a3bcb373",
+       "symbol": "ANT",
+       "liq_usd": "748271.3546",
+       "runs": [
+        {
+         "kind": "cold",
+         "ms": 5273,
+         "quotes": 2,
+         "ok": true,
+         "route": {
+          "venue": "uniswap-v3",
+          "tokens": [
+           "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+           "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+           "0xbbb6c29bcc3a1028a2b54310df73f4f7a3bcb373"
+          ],
+          "fees": [
+           100,
+           500
+          ]
+         },
+         "hosts": {
+          "rpc.mainnet.chain.robinhood.com": {
+           "requests": 14,
+           "calls": 31,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood.daybreak-rpc.network": {
+           "requests": 7,
+           "calls": 23,
+           "s429": 0,
+           "logs": 7,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood-rpc.publicnode.com": {
+           "requests": 20,
+           "calls": 42,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood.rpc.blxrbdn.com": {
+           "requests": 17,
+           "calls": 32,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood.api.pocket.network": {
+           "requests": 1,
+           "calls": 4,
+           "s429": 0,
+           "logs": 1,
+           "s429Logs": 0,
+           "s429Reads": {}
+          }
+         },
+         "seats": [
+          {
+           "url": "robinhood-rpc.publicnode.com",
+           "rank": 0,
+           "ms": 203,
+           "out": 1,
+           "oldestMs": 6
+          },
+          {
+           "url": "robinhood.rpc.blxrbdn.com",
+           "rank": 0,
+           "ms": 394,
+           "out": 1,
+           "oldestMs": 256
+          },
+          {
+           "url": "rpc.mainnet.chain.robinhood.com",
+           "rank": 3,
+           "ms": 316,
+           "out": 1,
+           "oldestMs": 108
+          },
+          {
+           "url": "robinhood.drpc.org",
+           "rank": 20,
+           "ms": 211,
+           "out": 0,
+           "oldestMs": null
+          }
+         ],
+         "waited": {
+          "methods": "eth_call",
+          "host": "robinhood.rpc.blxrbdn.com",
+          "ms": 709,
+          "end": "200",
+          "spare": true,
+          "idle": 17,
+          "left": 4,
+          "timeline": [
+           "1+254 chain.robinhood eth_blockNumber 200",
+           "2+246 robinhood.daybreak-rpc eth_getBlockByNumber+eth_getLogs 200",
+           "248+226 robinhood.daybreak-rpc eth_getBlockByNumber+eth_getLogs 200",
+           "263+302 robinhood-rpc.publicnode eth_call 200",
+           "263+174 robinhood-rpc.publicnode eth_call 200",
+           "263+369 rpc.blxrbdn eth_call 200",
+           "452+319 rpc.blxrbdn eth_call 200",
+           "774+188 robinhood-rpc.publicnode eth_call 200",
+           "774+102 robinhood-rpc.publicnode eth_call 200",
+           "774+335 chain.robinhood eth_call 200",
+           "774+258 chain.robinhood eth_call 200",
+           "834+239 rpc.blxrbdn eth_call 200",
+           "1107+187 robinhood-rpc.publicnode eth_call 200",
+           "1108+186 robinhood-rpc.publicnode eth_call 200",
+           "1108+195 robinhood-rpc.publicnode eth_call 200",
+           "1108+186 robinhood-rpc.publicnode eth_call 200",
+           "1108+233 rpc.blxrbdn eth_call 200",
+           "1269+322 chain.robinhood eth_call 200",
+           "1588+85 robinhood-rpc.publicnode eth_getBlockByNumber 200",
+           "1589+237 rpc.blxrbdn eth_getBlockByNumber 200",
+           "1753+590 rpc.blxrbdn eth_call 200",
+           "1769+372 chain.robinhood eth_call 200",
+           "1830+226 rpc.blxrbdn eth_getBlockByNumber 200",
+           "2157+709 rpc.blxrbdn eth_call 200",
+           "2269+387 chain.robinhood eth_call 200",
+           "2661+206 robinhood-rpc.publicnode eth_call 200",
+           "2662+93 robinhood-rpc.publicnode eth_call 200",
+           "2662+297 rpc.blxrbdn eth_call 200",
+           "2662+263 chain.robinhood eth_call 200",
+           "2964+177 robinhood-rpc.publicnode eth_call 200",
+           "2964+94 robinhood-rpc.publicnode eth_call 200",
+           "3103+326 chain.robinhood eth_call 200",
+           "3436+260 chain.robinhood eth_call 200",
+           "3557+108 robinhood-rpc.publicnode eth_getBlockByNumber 200",
+           "3557+249 rpc.blxrbdn eth_getBlockByNumber 200",
+           "3698+88 robinhood-rpc.publicnode eth_call 200",
+           "3698+262 chain.robinhood eth_call 200",
+           "3698+242 rpc.blxrbdn eth_call 200",
+           "3806+300 rpc.blxrbdn eth_getBlockByNumber 200",
+           "3940+166 robinhood-rpc.publicnode eth_call 200",
+           "3941+227 rpc.blxrbdn eth_call 200",
+           "3941+253 chain.robinhood eth_call 200",
+           "4169+273 robinhood-rpc.publicnode eth_call 200",
+           "4169+336 rpc.blxrbdn eth_call 200",
+           "4169+694 chain.robinhood eth_call 200",
+           "4517+235 robinhood-rpc.publicnode eth_call 200",
+           "4517+235 rpc.blxrbdn eth_call 200",
+           "4518+258 chain.robinhood eth_call 200",
+           "4519+524 robinhood.daybreak-rpc eth_getBlockByNumber+eth_getLogs 200",
+           "4519+446 robinhood.daybreak-rpc eth_getBlockByNumber+eth_getLogs 200",
+           "4765+93 robinhood-rpc.publicnode eth_getBlockByNumber 200",
+           "4770+225 rpc.blxrbdn eth_getBlockByNumber 200",
+           "5040+115 robinhood-rpc.publicnode eth_call 200",
+           "5040+232 rpc.blxrbdn eth_call 200",
+           "5040+233 chain.robinhood eth_call out",
+           "5041+232 robinhood.daybreak-rpc eth_getBlockByNumber+eth_getLogs out",
+           "5041+232 robinhood.daybreak-rpc eth_getBlockByNumber+eth_getLogs out",
+           "5046+227 robinhood.daybreak-rpc eth_getBlockByNumber+eth_getLogs 200",
+           "5046+227 api.pocket eth_getBlockByNumber+eth_getLogs out"
+          ]
+         }
+        },
+        {
+         "kind": "warm",
+         "ms": 8035,
+         "quotes": 1,
+         "ok": false,
+         "code": "rpc_error",
+         "message": "rpc_error: the last scan provider did not carry the scan's blocks within 8000 ms",
+         "hosts": {
+          "rpc.mainnet.chain.robinhood.com": {
+           "requests": 11,
+           "calls": 19,
+           "s429": 0,
+           "logs": 1,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood-rpc.publicnode.com": {
+           "requests": 16,
+           "calls": 30,
+           "s429": 0,
+           "logs": 1,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood.rpc.blxrbdn.com": {
+           "requests": 17,
+           "calls": 31,
+           "s429": 0,
+           "logs": 1,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood.daybreak-rpc.network": {
+           "requests": 3,
+           "calls": 12,
+           "s429": 0,
+           "logs": 3,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood.api.pocket.network": {
+           "requests": 3,
+           "calls": 12,
+           "s429": 0,
+           "logs": 3,
+           "s429Logs": 0,
+           "s429Reads": {}
+          }
+         },
+         "seats": [
+          {
+           "url": "robinhood-rpc.publicnode.com",
+           "rank": 0,
+           "ms": 154,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "robinhood.rpc.blxrbdn.com",
+           "rank": 0,
+           "ms": 264,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "rpc.mainnet.chain.robinhood.com",
+           "rank": 3,
+           "ms": 383,
+           "out": 1,
+           "oldestMs": 233
+          },
+          {
+           "url": "robinhood.drpc.org",
+           "rank": 20,
+           "ms": 211,
+           "out": 0,
+           "oldestMs": null
+          }
+         ],
+         "waited": {
+          "methods": "eth_getBlockByNumber",
+          "host": "robinhood.rpc.blxrbdn.com",
+          "ms": 771,
+          "end": "200",
+          "spare": true,
+          "idle": 2525,
+          "left": 0,
+          "timeline": [
+           "4+267 chain.robinhood eth_blockNumber 200",
+           "4+101 robinhood-rpc.publicnode eth_call 200",
+           "11+203 robinhood-rpc.publicnode eth_call 200",
+           "12+98 robinhood-rpc.publicnode eth_call 200",
+           "12+102 robinhood-rpc.publicnode eth_getBlockByNumber+eth_getLogs 200",
+           "18+594 robinhood-rpc.publicnode eth_call 200",
+           "18+562 robinhood-rpc.publicnode eth_call 200",
+           "18+410 robinhood-rpc.publicnode eth_call 200",
+           "19+392 robinhood-rpc.publicnode eth_call 200",
+           "19+229 rpc.blxrbdn eth_call 200",
+           "19+390 chain.robinhood eth_call 200",
+           "101+309 rpc.blxrbdn eth_call 200",
+           "107+155 robinhood-rpc.publicnode eth_call 200",
+           "109+105 robinhood-rpc.publicnode eth_call 200",
+           "221+232 robinhood.daybreak-rpc eth_getBlockByNumber+eth_getLogs 200",
+           "222+317 robinhood.daybreak-rpc eth_getBlockByNumber+eth_getLogs 200",
+           "222+268 robinhood.daybreak-rpc eth_getBlockByNumber+eth_getLogs 200",
+           "301+229 rpc.blxrbdn eth_call 200",
+           "334+155 robinhood-rpc.publicnode eth_getBlockByNumber 200",
+           "334+405 chain.robinhood eth_getBlockByNumber 200",
+           "611+228 rpc.blxrbdn eth_getBlockByNumber+eth_getLogs 200",
+           "663+603 chain.robinhood eth_call 200",
+           "740+85 robinhood-rpc.publicnode eth_getBlockByNumber 200",
+           "812+645 rpc.blxrbdn eth_call 200",
+           "1112+677 rpc.blxrbdn eth_call 200",
+           "1162+332 chain.robinhood eth_call 200",
+           "1658+321 rpc.blxrbdn eth_call 200",
+           "1662+317 chain.robinhood eth_call 200",
+           "2091+293 rpc.blxrbdn eth_call 200",
+           "2327+86 robinhood-rpc.publicnode eth_getBlockByNumber 200",
+           "2391+238 rpc.blxrbdn eth_call 200",
+           "2490+239 rpc.blxrbdn eth_call 200",
+           "2591+771 rpc.blxrbdn eth_getBlockByNumber 200",
+           "2765+363 api.pocket eth_getBlockByNumber+eth_getLogs 200",
+           "2997+365 chain.robinhood eth_getBlockByNumber+eth_getLogs 200",
+           "3163+252 chain.robinhood eth_getBlockByNumber 200",
+           "3362+227 rpc.blxrbdn eth_getBlockByNumber 200",
+           "4629+318 api.pocket eth_getBlockByNumber+eth_getLogs 200",
+           "5090+118 robinhood-rpc.publicnode eth_getBlockByNumber 200",
+           "5091+263 rpc.blxrbdn eth_getBlockByNumber 200",
+           "5091+369 chain.robinhood eth_getBlockByNumber 200",
+           "5354+294 rpc.blxrbdn eth_getBlockByNumber 200",
+           "6451+261 api.pocket eth_getBlockByNumber+eth_getLogs 200",
+           "6743+87 robinhood-rpc.publicnode eth_call 200",
+           "6744+301 chain.robinhood eth_call 200",
+           "6744+301 rpc.blxrbdn eth_call 200",
+           "7149+156 robinhood-rpc.publicnode eth_getBlockByNumber 200",
+           "7149+296 rpc.blxrbdn eth_getBlockByNumber 200",
+           "7149+408 chain.robinhood eth_getBlockByNumber 200",
+           "7445+302 rpc.blxrbdn eth_getBlockByNumber 200"
+          ]
+         }
+        },
+        {
+         "kind": "warm",
+         "ms": 4249,
+         "quotes": 1,
+         "ok": true,
+         "route": {
+          "venue": "uniswap-v3",
+          "tokens": [
+           "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+           "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+           "0xbbb6c29bcc3a1028a2b54310df73f4f7a3bcb373"
+          ],
+          "fees": [
+           100,
+           500
+          ]
+         },
+         "hosts": {
+          "rpc.mainnet.chain.robinhood.com": {
+           "requests": 13,
+           "calls": 27,
+           "s429": 0,
+           "logs": 1,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood-rpc.publicnode.com": {
+           "requests": 12,
+           "calls": 27,
+           "s429": 0,
+           "logs": 1,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood.rpc.blxrbdn.com": {
+           "requests": 12,
+           "calls": 25,
+           "s429": 0,
+           "logs": 1,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood.drpc.org": {
+           "requests": 4,
+           "calls": 10,
+           "s429": 0,
+           "logs": 3,
+           "s429Logs": 0,
+           "s429Reads": {},
+           "bad": {
+            "400": 1
+           }
+          }
+         },
+         "seats": [
+          {
+           "url": "robinhood-rpc.publicnode.com",
+           "rank": 0,
+           "ms": 192,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "robinhood.rpc.blxrbdn.com",
+           "rank": 0,
+           "ms": 317,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "rpc.mainnet.chain.robinhood.com",
+           "rank": 3,
+           "ms": 360,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "robinhood.drpc.org",
+           "rank": 20,
+           "ms": 211,
+           "out": 0,
+           "oldestMs": null
+          }
+         ],
+         "waited": {
+          "methods": "eth_call",
+          "host": "robinhood.rpc.blxrbdn.com",
+          "ms": 1217,
+          "end": "200",
+          "spare": true,
+          "idle": 87,
+          "left": 1,
+          "timeline": [
+           "10+282 chain.robinhood eth_blockNumber 200",
+           "11+118 robinhood-rpc.publicnode eth_call 200",
+           "26+227 robinhood-rpc.publicnode eth_call 200",
+           "26+210 robinhood-rpc.publicnode eth_call 200",
+           "26+209 robinhood-rpc.publicnode eth_getBlockByNumber+eth_getLogs 200",
+           "32+603 robinhood-rpc.publicnode eth_call 200",
+           "32+569 robinhood-rpc.publicnode eth_call 200",
+           "33+359 robinhood-rpc.publicnode eth_call 200",
+           "33+339 robinhood-rpc.publicnode eth_call 200",
+           "34+234 rpc.blxrbdn eth_call 200",
+           "35+337 chain.robinhood eth_call 200",
+           "35+812 rpc.blxrbdn eth_call 200",
+           "35+395 chain.robinhood eth_call 200",
+           "35+775 rpc.blxrbdn eth_call 200",
+           "130+149 robinhood-rpc.publicnode eth_call 200",
+           "236+91 robinhood-rpc.publicnode eth_call 200",
+           "627+257 chain.robinhood eth_getBlockByNumber+eth_getLogs 200",
+           "961+470 chain.robinhood eth_call 200",
+           "1111+228 rpc.blxrbdn eth_getBlockByNumber+eth_getLogs 200",
+           "1312+1217 rpc.blxrbdn eth_call 200",
+           "1339+140 robinhood.drpc eth_getBlockByNumber+eth_getLogs 400",
+           "1461+447 chain.robinhood eth_call 200",
+           "1480+236 robinhood.drpc eth_getBlockByNumber+eth_getLogs 200",
+           "1480+450 robinhood.drpc eth_getBlockByNumber+eth_getLogs 200",
+           "1628+260 chain.robinhood eth_getBlockByNumber 200",
+           "1640+732 rpc.blxrbdn eth_call 200",
+           "2133+303 chain.robinhood eth_call 200",
+           "2301+365 robinhood.drpc eth_call 200",
+           "2575+810 rpc.blxrbdn eth_call 200",
+           "2628+348 chain.robinhood eth_call 200",
+           "2874+841 rpc.blxrbdn eth_call 200",
+           "3129+372 chain.robinhood eth_call 200",
+           "3294+263 chain.robinhood eth_call 200",
+           "3486+419 rpc.blxrbdn eth_call 200",
+           "3590+125 robinhood-rpc.publicnode eth_call 200",
+           "3591+314 rpc.blxrbdn eth_getBlockByNumber 200",
+           "3628+338 chain.robinhood eth_call 200",
+           "3906+227 rpc.blxrbdn eth_getBlockByNumber 200",
+           "3968+90 robinhood-rpc.publicnode eth_call 200",
+           "3968+281 chain.robinhood eth_call out",
+           "3968+270 rpc.blxrbdn eth_call 200"
+          ]
+         }
+        },
+        {
+         "kind": "warm",
+         "ms": 3953,
+         "quotes": 1,
+         "ok": true,
+         "route": {
+          "venue": "uniswap-v3",
+          "tokens": [
+           "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+           "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+           "0xbbb6c29bcc3a1028a2b54310df73f4f7a3bcb373"
+          ],
+          "fees": [
+           100,
+           500
+          ]
+         },
+         "hosts": {
+          "rpc.mainnet.chain.robinhood.com": {
+           "requests": 11,
+           "calls": 23,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood.rpc.blxrbdn.com": {
+           "requests": 14,
+           "calls": 28,
+           "s429": 0,
+           "logs": 1,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood.daybreak-rpc.network": {
+           "requests": 4,
+           "calls": 14,
+           "s429": 0,
+           "logs": 4,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood-rpc.publicnode.com": {
+           "requests": 3,
+           "calls": 5,
+           "s429": 0,
+           "logs": 1,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood.drpc.org": {
+           "requests": 4,
+           "calls": 5,
+           "s429": 0,
+           "logs": 1,
+           "s429Logs": 0,
+           "s429Reads": {}
+          }
+         },
+         "seats": [
+          {
+           "url": "robinhood.rpc.blxrbdn.com",
+           "rank": 0,
+           "ms": 440,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "rpc.mainnet.chain.robinhood.com",
+           "rank": 3,
+           "ms": 335,
+           "out": 1,
+           "oldestMs": 281
+          },
+          {
+           "url": "robinhood.drpc.org",
+           "rank": 20,
+           "ms": 294,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "robinhood-rpc.publicnode.com",
+           "rank": 20,
+           "ms": 307,
+           "out": 0,
+           "oldestMs": null
+          }
+         ],
+         "waited": {
+          "methods": "eth_call",
+          "host": "robinhood.rpc.blxrbdn.com",
+          "ms": 607,
+          "end": "200",
+          "spare": false,
+          "idle": 117,
+          "left": 1,
+          "timeline": [
+           "4+282 chain.robinhood eth_blockNumber 200",
+           "18+231 rpc.blxrbdn eth_call 200",
+           "18+272 chain.robinhood eth_call 200",
+           "18+258 rpc.blxrbdn eth_call 200",
+           "18+508 robinhood.daybreak-rpc eth_getBlockByNumber+eth_getLogs 200",
+           "18+402 robinhood.daybreak-rpc eth_getBlockByNumber+eth_getLogs 200",
+           "168+247 rpc.blxrbdn eth_call 200",
+           "378+332 chain.robinhood eth_call 200",
+           "534+372 robinhood.daybreak-rpc eth_getBlockByNumber+eth_getLogs 200",
+           "534+254 robinhood.daybreak-rpc eth_getBlockByNumber+eth_getLogs 200",
+           "550+227 rpc.blxrbdn eth_getBlockByNumber+eth_getLogs 200",
+           "712+328 chain.robinhood eth_call 200",
+           "750+607 rpc.blxrbdn eth_call 200",
+           "777+85 robinhood-rpc.publicnode eth_getBlockByNumber+eth_getLogs 200",
+           "1049+596 rpc.blxrbdn eth_call 200",
+           "1264+320 robinhood.drpc eth_getBlockByNumber+eth_getLogs 200",
+           "1264+71 robinhood.drpc eth_getBlockByNumber 200",
+           "1558+529 rpc.blxrbdn eth_call 200",
+           "1584+364 chain.robinhood eth_call 200",
+           "1585+258 chain.robinhood eth_getBlockByNumber 200",
+           "1712+567 chain.robinhood eth_call 200",
+           "1947+240 rpc.blxrbdn eth_call 200",
+           "2211+400 chain.robinhood eth_call 200",
+           "2391+236 rpc.blxrbdn eth_call 200",
+           "2490+313 rpc.blxrbdn eth_call 200",
+           "2591+251 rpc.blxrbdn eth_getBlockByNumber 200",
+           "2712+304 chain.robinhood eth_call 200",
+           "2841+292 rpc.blxrbdn eth_getBlockByNumber 200",
+           "3212+309 chain.robinhood eth_call 200",
+           "3379+281 chain.robinhood eth_call 200",
+           "3693+157 robinhood-rpc.publicnode eth_call 200",
+           "3694+157 robinhood.drpc eth_call 200",
+           "3694+232 rpc.blxrbdn eth_call 200",
+           "3853+89 robinhood-rpc.publicnode eth_call 200",
+           "3854+78 robinhood.drpc eth_call 200",
+           "3854+99 rpc.blxrbdn eth_call out"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "coin": "0x18e674231a58c239dc7daedcffe15ec3a24cff5c",
+       "symbol": "HOOKR",
+       "liq_usd": "601244.9644",
+       "runs": [
+        {
+         "kind": "cold",
+         "ms": 4135,
+         "quotes": 2,
+         "ok": true,
+         "route": {
+          "venue": "uniswap-v4",
+          "currencyIn": "0x0000000000000000000000000000000000000000",
+          "hops": [
+           {
+            "currency": "0x18e674231a58c239dc7daedcffe15ec3a24cff5c",
+            "fee": 10073,
+            "tickSpacing": 201,
+            "hooks": "0x0000000000000000000000000000000000000000",
+            "hookData": "0x"
+           }
+          ]
+         },
+         "hosts": {
+          "rpc.mainnet.chain.robinhood.com": {
+           "requests": 12,
+           "calls": 25,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood.daybreak-rpc.network": {
+           "requests": 8,
+           "calls": 28,
+           "s429": 0,
+           "logs": 8,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood.rpc.blxrbdn.com": {
+           "requests": 14,
+           "calls": 27,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood.drpc.org": {
+           "requests": 1,
+           "calls": 1,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          }
+         },
+         "seats": [
+          {
+           "url": "robinhood.rpc.blxrbdn.com",
+           "rank": 0,
+           "ms": 299,
+           "out": 1,
+           "oldestMs": 99
+          },
+          {
+           "url": "rpc.mainnet.chain.robinhood.com",
+           "rank": 3,
+           "ms": 334,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "robinhood-rpc.publicnode.com",
+           "rank": 20,
+           "ms": 194,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "robinhood.drpc.org",
+           "rank": 20,
+           "ms": 218,
+           "out": 0,
+           "oldestMs": null
+          }
+         ],
+         "waited": {
+          "methods": "eth_call",
+          "host": "robinhood.rpc.blxrbdn.com",
+          "ms": 514,
+          "end": "200",
+          "spare": true,
+          "idle": 12,
+          "left": 0,
+          "timeline": [
+           "2+254 chain.robinhood eth_blockNumber 200",
+           "2+305 robinhood.daybreak-rpc eth_getBlockByNumber+eth_getLogs 200",
+           "2+240 robinhood.daybreak-rpc eth_getBlockByNumber+eth_getLogs 200",
+           "257+236 robinhood.daybreak-rpc eth_getBlockByNumber+eth_getLogs 200",
+           "309+311 robinhood.daybreak-rpc eth_getBlockByNumber+eth_getLogs 200",
+           "310+446 robinhood.daybreak-rpc eth_getBlockByNumber+eth_getLogs 200",
+           "494+514 rpc.blxrbdn eth_call 200",
+           "494+341 chain.robinhood eth_call 200",
+           "495+261 rpc.blxrbdn eth_call 200",
+           "495+267 chain.robinhood eth_call 200",
+           "699+285 rpc.blxrbdn eth_getBlockByNumber 200",
+           "699+315 chain.robinhood eth_getBlockByNumber 200",
+           "1010+271 chain.robinhood eth_call 200",
+           "1085+227 rpc.blxrbdn eth_call 200",
+           "1185+285 rpc.blxrbdn eth_getBlockByNumber 200",
+           "1313+232 robinhood.daybreak-rpc eth_getBlockByNumber+eth_getLogs 200",
+           "1547+308 chain.robinhood eth_call 200",
+           "1547+480 rpc.blxrbdn eth_call 200",
+           "1585+231 rpc.blxrbdn eth_call 200",
+           "1592+263 chain.robinhood eth_call 200",
+           "2029+300 rpc.blxrbdn eth_call 200",
+           "2093+299 chain.robinhood eth_call 200",
+           "2231+289 rpc.blxrbdn eth_call 200",
+           "2426+261 chain.robinhood eth_call 200",
+           "2688+227 robinhood.daybreak-rpc eth_getBlockByNumber+eth_getLogs 200",
+           "2916+261 rpc.blxrbdn eth_call 200",
+           "2926+334 chain.robinhood eth_call 200",
+           "2973+297 rpc.blxrbdn eth_getBlockByNumber 200",
+           "3091+286 chain.robinhood eth_getBlockByNumber 200",
+           "3262+308 robinhood.daybreak-rpc eth_getBlockByNumber+eth_getLogs 200",
+           "3277+293 rpc.blxrbdn eth_call 200",
+           "3378+226 rpc.blxrbdn eth_getBlockByNumber 200",
+           "3592+309 chain.robinhood eth_call 200",
+           "3904+80 robinhood.drpc eth_getBlockByNumber 200",
+           "3905+228 rpc.blxrbdn eth_getBlockByNumber 200"
+          ]
+         }
+        },
+        {
+         "kind": "warm",
+         "ms": 819,
+         "quotes": 1,
+         "ok": true,
+         "route": {
+          "venue": "uniswap-v4",
+          "currencyIn": "0x0000000000000000000000000000000000000000",
+          "hops": [
+           {
+            "currency": "0x18e674231a58c239dc7daedcffe15ec3a24cff5c",
+            "fee": 10073,
+            "tickSpacing": 201,
+            "hooks": "0x0000000000000000000000000000000000000000",
+            "hookData": "0x"
+           }
+          ]
+         },
+         "hosts": {
+          "rpc.mainnet.chain.robinhood.com": {
+           "requests": 4,
+           "calls": 6,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood.drpc.org": {
+           "requests": 5,
+           "calls": 6,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood.rpc.blxrbdn.com": {
+           "requests": 4,
+           "calls": 6,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          }
+         },
+         "seats": [
+          {
+           "url": "robinhood.drpc.org",
+           "rank": 0,
+           "ms": 184,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "robinhood.rpc.blxrbdn.com",
+           "rank": 0,
+           "ms": 268,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "rpc.mainnet.chain.robinhood.com",
+           "rank": 3,
+           "ms": 300,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "robinhood-rpc.publicnode.com",
+           "rank": 20,
+           "ms": 194,
+           "out": 0,
+           "oldestMs": null
+          }
+         ],
+         "waited": {
+          "methods": "eth_call",
+          "host": "robinhood.rpc.blxrbdn.com",
+          "ms": 540,
+          "end": "200",
+          "spare": true,
+          "idle": 3,
+          "left": 1
+         }
+        },
+        {
+         "kind": "warm",
+         "ms": 779,
+         "quotes": 1,
+         "ok": true,
+         "route": {
+          "venue": "uniswap-v4",
+          "currencyIn": "0x0000000000000000000000000000000000000000",
+          "hops": [
+           {
+            "currency": "0x18e674231a58c239dc7daedcffe15ec3a24cff5c",
+            "fee": 10073,
+            "tickSpacing": 201,
+            "hooks": "0x0000000000000000000000000000000000000000",
+            "hookData": "0x"
+           }
+          ]
+         },
+         "hosts": {
+          "rpc.mainnet.chain.robinhood.com": {
+           "requests": 4,
+           "calls": 4,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood.drpc.org": {
+           "requests": 7,
+           "calls": 8,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood.rpc.blxrbdn.com": {
+           "requests": 5,
+           "calls": 7,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood.daybreak-rpc.network": {
+           "requests": 2,
+           "calls": 7,
+           "s429": 0,
+           "logs": 2,
+           "s429Logs": 0,
+           "s429Reads": {}
+          }
+         },
+         "seats": [
+          {
+           "url": "robinhood.drpc.org",
+           "rank": 0,
+           "ms": 201,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "robinhood.rpc.blxrbdn.com",
+           "rank": 0,
+           "ms": 324,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "rpc.mainnet.chain.robinhood.com",
+           "rank": 3,
+           "ms": 354,
+           "out": 1,
+           "oldestMs": 414
+          },
+          {
+           "url": "robinhood-rpc.publicnode.com",
+           "rank": 20,
+           "ms": 194,
+           "out": 0,
+           "oldestMs": null
+          }
+         ],
+         "waited": {
+          "methods": "eth_call",
+          "host": "robinhood.rpc.blxrbdn.com",
+          "ms": 540,
+          "end": "200",
+          "spare": false,
+          "idle": 3,
+          "left": 2
+         }
+        },
+        {
+         "kind": "warm",
+         "ms": 842,
+         "quotes": 1,
+         "ok": true,
+         "route": {
+          "venue": "uniswap-v4",
+          "currencyIn": "0x0000000000000000000000000000000000000000",
+          "hops": [
+           {
+            "currency": "0x18e674231a58c239dc7daedcffe15ec3a24cff5c",
+            "fee": 10073,
+            "tickSpacing": 201,
+            "hooks": "0x0000000000000000000000000000000000000000",
+            "hookData": "0x"
+           }
+          ]
+         },
+         "hosts": {
+          "rpc.mainnet.chain.robinhood.com": {
+           "requests": 3,
+           "calls": 3,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood.drpc.org": {
+           "requests": 5,
+           "calls": 6,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood.rpc.blxrbdn.com": {
+           "requests": 4,
+           "calls": 6,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          }
+         },
+         "seats": [
+          {
+           "url": "robinhood.drpc.org",
+           "rank": 0,
+           "ms": 126,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "robinhood.rpc.blxrbdn.com",
+           "rank": 0,
+           "ms": 321,
+           "out": 1,
+           "oldestMs": 628
+          },
+          {
+           "url": "rpc.mainnet.chain.robinhood.com",
+           "rank": 3,
+           "ms": 351,
+           "out": 1,
+           "oldestMs": 232
+          },
+          {
+           "url": "robinhood-rpc.publicnode.com",
+           "rank": 20,
+           "ms": 194,
+           "out": 0,
+           "oldestMs": null
+          }
+         ],
+         "waited": {
+          "methods": "eth_call",
+          "host": "robinhood.rpc.blxrbdn.com",
+          "ms": 543,
+          "end": "200",
+          "spare": false,
+          "idle": 3,
+          "left": 1
+         }
+        }
+       ]
+      },
+      {
+       "coin": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+       "symbol": "CASHCAT",
+       "liq_usd": "586712.2003",
+       "runs": [
+        {
+         "kind": "cold",
+         "ms": 7288,
+         "quotes": 2,
+         "ok": true,
+         "route": {
+          "venue": "uniswap-v3",
+          "tokens": [
+           "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+           "0x020bfc650a365f8bb26819deaabf3e21291018b4"
+          ],
+          "fees": [
+           3000
+          ]
+         },
+         "hosts": {
+          "rpc.mainnet.chain.robinhood.com": {
+           "requests": 21,
+           "calls": 43,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood.daybreak-rpc.network": {
+           "requests": 6,
+           "calls": 21,
+           "s429": 0,
+           "logs": 6,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood.drpc.org": {
+           "requests": 32,
+           "calls": 46,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood.rpc.blxrbdn.com": {
+           "requests": 18,
+           "calls": 35,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood-rpc.publicnode.com": {
+           "requests": 1,
+           "calls": 3,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          }
+         },
+         "seats": [
+          {
+           "url": "robinhood.drpc.org",
+           "rank": 0,
+           "ms": 135,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "robinhood.rpc.blxrbdn.com",
+           "rank": 0,
+           "ms": 366,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "rpc.mainnet.chain.robinhood.com",
+           "rank": 3,
+           "ms": 316,
+           "out": 1,
+           "oldestMs": 229
+          },
+          {
+           "url": "robinhood-rpc.publicnode.com",
+           "rank": 20,
+           "ms": 194,
+           "out": 0,
+           "oldestMs": null
+          }
+         ],
+         "waited": {
+          "methods": "eth_call",
+          "host": "robinhood.rpc.blxrbdn.com",
+          "ms": 1044,
+          "end": "200",
+          "spare": true,
+          "idle": 28,
+          "left": 0,
+          "timeline": [
+           "2+262 chain.robinhood eth_blockNumber 200",
+           "2+234 robinhood.daybreak-rpc eth_getBlockByNumber+eth_getLogs 200",
+           "237+234 robinhood.daybreak-rpc eth_getBlockByNumber+eth_getLogs 200",
+           "267+397 robinhood.daybreak-rpc eth_getBlockByNumber+eth_getLogs 200",
+           "471+83 robinhood.drpc eth_getBlockByNumber 200",
+           "472+226 rpc.blxrbdn eth_getBlockByNumber 200",
+           "472+262 chain.robinhood eth_getBlockByNumber 200",
+           "666+422 robinhood.drpc eth_call 200",
+           "667+103 robinhood.drpc eth_call 200",
+           "667+82 robinhood.drpc eth_call 200",
+           "667+1044 rpc.blxrbdn eth_call 200",
+           "667+627 chain.robinhood eth_call 200",
+           "667+239 rpc.blxrbdn eth_call 200",
+           "667+328 chain.robinhood eth_call 200",
+           "698+297 rpc.blxrbdn eth_getBlockByNumber 200",
+           "1235+627 robinhood-rpc.publicnode eth_call 200",
+           "1295+234 robinhood.drpc eth_call 200",
+           "1296+118 robinhood.drpc eth_call 200",
+           "1296+129 robinhood.drpc eth_call 200",
+           "1296+249 robinhood.drpc eth_call 200",
+           "1296+415 robinhood.drpc eth_call 200",
+           "1296+415 chain.robinhood eth_call 200",
+           "1296+449 rpc.blxrbdn eth_call 200",
+           "1296+436 chain.robinhood eth_call 200",
+           "1711+595 chain.robinhood eth_call 200",
+           "2127+632 rpc.blxrbdn eth_call 200",
+           "2307+263 robinhood.drpc eth_call 200",
+           "2307+98 robinhood.drpc eth_call 200",
+           "2307+96 robinhood.drpc eth_call 200",
+           "2307+101 robinhood.drpc eth_call 200",
+           "2307+263 robinhood.drpc eth_call 200",
+           "2307+263 robinhood.drpc eth_call 200",
+           "2307+279 robinhood.drpc eth_call 200",
+           "2307+283 robinhood.drpc eth_call 200",
+           "2308+267 robinhood.drpc eth_call 200",
+           "2309+450 chain.robinhood eth_call 200",
+           "2309+507 rpc.blxrbdn eth_call 200",
+           "2497+145 robinhood.drpc eth_getBlockByNumber 200",
+           "2497+299 rpc.blxrbdn eth_getBlockByNumber 200",
+           "2516+327 chain.robinhood eth_call 200",
+           "2860+231 rpc.blxrbdn eth_getBlockByNumber 200",
+           "3017+601 chain.robinhood eth_call 200",
+           "3245+642 rpc.blxrbdn eth_call 200",
+           "3461+680 rpc.blxrbdn eth_call 200",
+           "3516+715 chain.robinhood eth_call 200",
+           "3850+488 chain.robinhood eth_call 200",
+           "4251+607 rpc.blxrbdn eth_call 200",
+           "4338+81 robinhood.drpc eth_call 200",
+           "4339+231 rpc.blxrbdn eth_call 200",
+           "4339+327 chain.robinhood eth_call 200",
+           "4571+416 robinhood.daybreak-rpc eth_getBlockByNumber+eth_getLogs 200",
+           "4609+130 robinhood.drpc eth_getBlockByNumber 200",
+           "4609+281 rpc.blxrbdn eth_getBlockByNumber 200",
+           "4609+310 chain.robinhood eth_getBlockByNumber 200",
+           "4890+299 rpc.blxrbdn eth_getBlockByNumber 200",
+           "4988+94 robinhood.drpc eth_call 200",
+           "4989+239 rpc.blxrbdn eth_call 200",
+           "4989+281 chain.robinhood eth_call 200",
+           "5229+152 robinhood.drpc eth_call 200",
+           "5229+152 robinhood.drpc eth_call 200",
+           "5229+151 robinhood.drpc eth_call 200",
+           "5229+485 rpc.blxrbdn eth_call 200",
+           "5229+302 chain.robinhood eth_call 200",
+           "5391+231 rpc.blxrbdn eth_call 200",
+           "5623+431 robinhood.daybreak-rpc eth_getBlockByNumber+eth_getLogs 200",
+           "6054+83 robinhood.drpc eth_call 200",
+           "6055+257 chain.robinhood eth_call 200",
+           "6313+117 robinhood.drpc eth_call 200",
+           "6313+117 robinhood.drpc eth_call 200",
+           "6313+269 chain.robinhood eth_call 200",
+           "6313+256 robinhood.daybreak-rpc eth_getBlockByNumber+eth_getLogs 200",
+           "6588+81 robinhood.drpc eth_getBlockByNumber 200",
+           "6590+261 chain.robinhood eth_getBlockByNumber 200",
+           "6691+142 robinhood.drpc eth_getBlockByNumber 200",
+           "6691+360 chain.robinhood eth_getBlockByNumber 200",
+           "6853+101 robinhood.drpc eth_call 200",
+           "6853+434 chain.robinhood eth_call 200",
+           "7051+76 robinhood.drpc eth_getBlockByNumber 200"
+          ]
+         }
+        },
+        {
+         "kind": "warm",
+         "ms": 3509,
+         "quotes": 1,
+         "ok": true,
+         "route": {
+          "venue": "uniswap-v3",
+          "tokens": [
+           "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+           "0x020bfc650a365f8bb26819deaabf3e21291018b4"
+          ],
+          "fees": [
+           3000
+          ]
+         },
+         "hosts": {
+          "rpc.mainnet.chain.robinhood.com": {
+           "requests": 11,
+           "calls": 25,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood.drpc.org": {
+           "requests": 18,
+           "calls": 25,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood-rpc.publicnode.com": {
+           "requests": 1,
+           "calls": 3,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          }
+         },
+         "seats": [
+          {
+           "url": "robinhood.drpc.org",
+           "rank": 0,
+           "ms": 108,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "rpc.mainnet.chain.robinhood.com",
+           "rank": 3,
+           "ms": 350,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "robinhood-rpc.publicnode.com",
+           "rank": 20,
+           "ms": 315,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "robinhood.rpc.blxrbdn.com",
+           "rank": 20,
+           "ms": 330,
+           "out": 0,
+           "oldestMs": null
+          }
+         ],
+         "waited": {
+          "methods": "eth_call",
+          "host": "robinhood-rpc.publicnode.com",
+          "ms": 550,
+          "end": "200",
+          "spare": false,
+          "idle": 170,
+          "left": 0,
+          "timeline": [
+           "3+263 chain.robinhood eth_blockNumber 200",
+           "3+89 robinhood.drpc eth_call 200",
+           "6+90 robinhood.drpc eth_call 200",
+           "7+293 robinhood.drpc eth_call 200",
+           "7+299 robinhood.drpc eth_call 200",
+           "7+183 robinhood.drpc eth_call 200",
+           "7+183 robinhood.drpc eth_call 200",
+           "7+287 robinhood.drpc eth_call 200",
+           "7+310 robinhood.drpc eth_call 200",
+           "8+257 chain.robinhood eth_call 200",
+           "8+329 chain.robinhood eth_call 200",
+           "92+204 robinhood.drpc eth_call 200",
+           "92+324 robinhood.drpc eth_call 200",
+           "96+228 robinhood.drpc eth_call 200",
+           "96+427 robinhood.drpc eth_call 200",
+           "191+149 robinhood.drpc eth_call 200",
+           "191+91 robinhood.drpc eth_call 200",
+           "265+482 chain.robinhood eth_call 200",
+           "306+95 robinhood.drpc eth_call 200",
+           "306+74 robinhood.drpc eth_call 200",
+           "497+550 robinhood-rpc.publicnode eth_call 200",
+           "561+279 chain.robinhood eth_call 200",
+           "1061+512 chain.robinhood eth_call 200",
+           "1339+74 robinhood.drpc eth_getBlockByNumber 200",
+           "1562+413 chain.robinhood eth_call 200",
+           "1729+368 chain.robinhood eth_getBlockByNumber 200",
+           "2099+78 robinhood.drpc eth_getBlockByNumber 200",
+           "2228+486 chain.robinhood eth_call 200",
+           "2728+417 chain.robinhood eth_call 200",
+           "3227+278 chain.robinhood eth_call 200"
+          ]
+         }
+        },
+        {
+         "kind": "warm",
+         "ms": 4549,
+         "quotes": 1,
+         "ok": true,
+         "route": {
+          "venue": "uniswap-v3",
+          "tokens": [
+           "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+           "0x020bfc650a365f8bb26819deaabf3e21291018b4"
+          ],
+          "fees": [
+           3000
+          ]
+         },
+         "hosts": {
+          "rpc.mainnet.chain.robinhood.com": {
+           "requests": 13,
+           "calls": 27,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood.drpc.org": {
+           "requests": 19,
+           "calls": 26,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood.daybreak-rpc.network": {
+           "requests": 2,
+           "calls": 7,
+           "s429": 0,
+           "logs": 2,
+           "s429Logs": 0,
+           "s429Reads": {}
+          }
+         },
+         "seats": [
+          {
+           "url": "robinhood.drpc.org",
+           "rank": 0,
+           "ms": 181,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "rpc.mainnet.chain.robinhood.com",
+           "rank": 3,
+           "ms": 380,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "robinhood.rpc.blxrbdn.com",
+           "rank": 20,
+           "ms": 330,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "robinhood-rpc.publicnode.com",
+           "rank": 20,
+           "ms": 374,
+           "out": 0,
+           "oldestMs": null
+          }
+         ],
+         "waited": {
+          "methods": "eth_call",
+          "host": "rpc.mainnet.chain.robinhood.com",
+          "ms": 444,
+          "end": "200",
+          "spare": false,
+          "idle": 890,
+          "left": 0,
+          "timeline": [
+           "3+264 chain.robinhood eth_blockNumber 200",
+           "3+157 robinhood.drpc eth_call 200",
+           "5+155 robinhood.drpc eth_call 200",
+           "7+342 robinhood.drpc eth_call 200",
+           "7+215 robinhood.drpc eth_call 200",
+           "7+154 robinhood.drpc eth_call 200",
+           "7+154 robinhood.drpc eth_call 200",
+           "7+239 robinhood.drpc eth_call 200",
+           "7+253 robinhood.drpc eth_call 200",
+           "7+389 robinhood.daybreak-rpc eth_getBlockByNumber+eth_getLogs 200",
+           "52+297 chain.robinhood eth_call 200",
+           "161+242 robinhood.drpc eth_call 200",
+           "161+232 robinhood.drpc eth_call 200",
+           "161+236 robinhood.drpc eth_call 200",
+           "161+227 robinhood.drpc eth_call 200",
+           "161+189 robinhood.drpc eth_call 200",
+           "161+86 robinhood.drpc eth_call 200",
+           "171+179 robinhood.drpc eth_getBlockByNumber 200",
+           "218+259 chain.robinhood eth_call 200",
+           "260+182 robinhood.drpc eth_call 200",
+           "261+89 robinhood.drpc eth_call 200",
+           "386+296 chain.robinhood eth_getBlockByNumber 200",
+           "402+280 robinhood.daybreak-rpc eth_getBlockByNumber+eth_getLogs 200",
+           "886+419 chain.robinhood eth_call 200",
+           "1385+346 chain.robinhood eth_call 200",
+           "1552+261 chain.robinhood eth_getBlockByNumber 200",
+           "2052+396 chain.robinhood eth_call 200",
+           "2552+421 chain.robinhood eth_call 200",
+           "3052+444 chain.robinhood eth_call 200",
+           "3314+77 robinhood.drpc eth_getBlockByNumber 200",
+           "3553+318 chain.robinhood eth_call 200",
+           "3719+301 chain.robinhood eth_getBlockByNumber 200",
+           "4020+80 robinhood.drpc eth_getBlockByNumber 200",
+           "4220+324 chain.robinhood eth_call 200"
+          ]
+         }
+        },
+        {
+         "kind": "warm",
+         "ms": 3477,
+         "quotes": 1,
+         "ok": true,
+         "route": {
+          "venue": "uniswap-v3",
+          "tokens": [
+           "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+           "0x020bfc650a365f8bb26819deaabf3e21291018b4"
+          ],
+          "fees": [
+           3000
+          ]
+         },
+         "hosts": {
+          "rpc.mainnet.chain.robinhood.com": {
+           "requests": 9,
+           "calls": 21,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood.drpc.org": {
+           "requests": 18,
+           "calls": 25,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood.daybreak-rpc.network": {
+           "requests": 2,
+           "calls": 7,
+           "s429": 0,
+           "logs": 2,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood-rpc.publicnode.com": {
+           "requests": 9,
+           "calls": 17,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          }
+         },
+         "seats": [
+          {
+           "url": "robinhood.drpc.org",
+           "rank": 0,
+           "ms": 158,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "rpc.mainnet.chain.robinhood.com",
+           "rank": 3,
+           "ms": 345,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "robinhood.rpc.blxrbdn.com",
+           "rank": 20,
+           "ms": 330,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "robinhood-rpc.publicnode.com",
+           "rank": 20,
+           "ms": 374,
+           "out": 0,
+           "oldestMs": null
+          }
+         ],
+         "waited": {
+          "methods": "eth_call",
+          "host": "rpc.mainnet.chain.robinhood.com",
+          "ms": 515,
+          "end": "200",
+          "spare": false,
+          "idle": 84,
+          "left": 0,
+          "timeline": [
+           "3+328 chain.robinhood eth_blockNumber 200",
+           "3+86 robinhood.drpc eth_call 200",
+           "5+191 robinhood.drpc eth_call 200",
+           "7+392 robinhood.drpc eth_call 200",
+           "7+324 robinhood.drpc eth_call 200",
+           "7+165 robinhood.drpc eth_call 200",
+           "7+163 robinhood.drpc eth_call 200",
+           "8+324 robinhood.drpc eth_call 200",
+           "8+324 robinhood.drpc eth_call 200",
+           "10+321 chain.robinhood eth_call 200",
+           "10+320 robinhood.daybreak-rpc eth_getBlockByNumber+eth_getLogs 200",
+           "90+241 robinhood.drpc eth_call 200",
+           "90+269 robinhood.drpc eth_call 200",
+           "170+430 chain.robinhood eth_call 200",
+           "173+194 robinhood.drpc eth_call 200",
+           "173+198 robinhood.drpc eth_call 200",
+           "197+157 robinhood.drpc eth_call 200",
+           "197+213 robinhood.drpc eth_call 200",
+           "332+93 robinhood.drpc eth_call 200",
+           "332+79 robinhood.drpc eth_call 200",
+           "333+232 robinhood.daybreak-rpc eth_getBlockByNumber+eth_getLogs 200",
+           "601+161 robinhood-rpc.publicnode eth_call 200",
+           "672+419 chain.robinhood eth_call 200",
+           "1004+155 robinhood-rpc.publicnode eth_call 200",
+           "1053+77 robinhood.drpc eth_getBlockByNumber 200",
+           "1053+154 robinhood-rpc.publicnode eth_getBlockByNumber 200",
+           "1073+499 robinhood-rpc.publicnode eth_call 200",
+           "1169+400 chain.robinhood eth_call 200",
+           "1207+170 robinhood-rpc.publicnode eth_getBlockByNumber 200",
+           "1561+341 robinhood-rpc.publicnode eth_call 200",
+           "1671+515 chain.robinhood eth_call 200",
+           "1970+457 robinhood-rpc.publicnode eth_call 200",
+           "2170+449 chain.robinhood eth_call 200",
+           "2670+364 chain.robinhood eth_call 200",
+           "2879+142 robinhood.drpc eth_getBlockByNumber 200",
+           "2879+154 robinhood-rpc.publicnode eth_getBlockByNumber 200",
+           "3034+109 robinhood-rpc.publicnode eth_getBlockByNumber 200",
+           "3169+304 chain.robinhood eth_call 200"
+          ]
+         }
+        }
+       ]
+      },
+      {
+       "coin": "0xfce34d21a92069100e3226638140706cf03a266e",
+       "symbol": "GLDSTN",
+       "liq_usd": "525980.1364",
+       "runs": [
+        {
+         "kind": "cold",
+         "ms": 1918,
+         "quotes": 2,
+         "ok": true,
+         "route": {
+          "venue": "uniswap-v4",
+          "currencyIn": "0x0000000000000000000000000000000000000000",
+          "hops": [
+           {
+            "currency": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+            "fee": 100,
+            "tickSpacing": 1,
+            "hooks": "0x0000000000000000000000000000000000000000",
+            "hookData": "0x"
+           },
+           {
+            "currency": "0xfce34d21a92069100e3226638140706cf03a266e",
+            "fee": 601000,
+            "tickSpacing": 6010,
+            "hooks": "0x0000000000000000000000000000000000000000",
+            "hookData": "0x"
+           }
+          ]
+         },
+         "hosts": {
+          "rpc.mainnet.chain.robinhood.com": {
+           "requests": 6,
+           "calls": 9,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood.daybreak-rpc.network": {
+           "requests": 4,
+           "calls": 14,
+           "s429": 0,
+           "logs": 4,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood.drpc.org": {
+           "requests": 13,
+           "calls": 18,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood-rpc.publicnode.com": {
+           "requests": 11,
+           "calls": 19,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          }
+         },
+         "seats": [
+          {
+           "url": "robinhood.drpc.org",
+           "rank": 0,
+           "ms": 167,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "robinhood-rpc.publicnode.com",
+           "rank": 0,
+           "ms": 250,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "rpc.mainnet.chain.robinhood.com",
+           "rank": 3,
+           "ms": 383,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "robinhood.rpc.blxrbdn.com",
+           "rank": 20,
+           "ms": 330,
+           "out": 0,
+           "oldestMs": null
+          }
+         ],
+         "waited": {
+          "methods": "eth_call",
+          "host": "rpc.mainnet.chain.robinhood.com",
+          "ms": 344,
+          "end": "200",
+          "spare": false,
+          "idle": 37,
+          "left": 0
+         }
+        },
+        {
+         "kind": "warm",
+         "ms": 535,
+         "quotes": 1,
+         "ok": true,
+         "route": {
+          "venue": "uniswap-v4",
+          "currencyIn": "0x0000000000000000000000000000000000000000",
+          "hops": [
+           {
+            "currency": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+            "fee": 100,
+            "tickSpacing": 1,
+            "hooks": "0x0000000000000000000000000000000000000000",
+            "hookData": "0x"
+           },
+           {
+            "currency": "0xfce34d21a92069100e3226638140706cf03a266e",
+            "fee": 601000,
+            "tickSpacing": 6010,
+            "hooks": "0x0000000000000000000000000000000000000000",
+            "hookData": "0x"
+           }
+          ]
+         },
+         "hosts": {
+          "rpc.mainnet.chain.robinhood.com": {
+           "requests": 3,
+           "calls": 7,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood.drpc.org": {
+           "requests": 7,
+           "calls": 10,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood-rpc.publicnode.com": {
+           "requests": 5,
+           "calls": 10,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          }
+         },
+         "seats": [
+          {
+           "url": "robinhood.drpc.org",
+           "rank": 0,
+           "ms": 117,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "robinhood-rpc.publicnode.com",
+           "rank": 0,
+           "ms": 168,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "rpc.mainnet.chain.robinhood.com",
+           "rank": 3,
+           "ms": 323,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "robinhood.rpc.blxrbdn.com",
+           "rank": 20,
+           "ms": 330,
+           "out": 0,
+           "oldestMs": null
+          }
+         ],
+         "waited": {
+          "methods": "eth_call",
+          "host": "robinhood.drpc.org",
+          "ms": 441,
+          "end": "200",
+          "spare": false,
+          "idle": 2,
+          "left": 1
+         }
+        },
+        {
+         "kind": "warm",
+         "ms": 447,
+         "quotes": 1,
+         "ok": true,
+         "route": {
+          "venue": "uniswap-v4",
+          "currencyIn": "0x0000000000000000000000000000000000000000",
+          "hops": [
+           {
+            "currency": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+            "fee": 100,
+            "tickSpacing": 1,
+            "hooks": "0x0000000000000000000000000000000000000000",
+            "hookData": "0x"
+           },
+           {
+            "currency": "0xfce34d21a92069100e3226638140706cf03a266e",
+            "fee": 601000,
+            "tickSpacing": 6010,
+            "hooks": "0x0000000000000000000000000000000000000000",
+            "hookData": "0x"
+           }
+          ]
+         },
+         "hosts": {
+          "robinhood.drpc.org": {
+           "requests": 7,
+           "calls": 10,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood-rpc.publicnode.com": {
+           "requests": 5,
+           "calls": 10,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood.daybreak-rpc.network": {
+           "requests": 3,
+           "calls": 8,
+           "s429": 0,
+           "logs": 2,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "rpc.mainnet.chain.robinhood.com": {
+           "requests": 1,
+           "calls": 1,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          }
+         },
+         "seats": [
+          {
+           "url": "robinhood.drpc.org",
+           "rank": 0,
+           "ms": 190,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "robinhood-rpc.publicnode.com",
+           "rank": 0,
+           "ms": 213,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "rpc.mainnet.chain.robinhood.com",
+           "rank": 3,
+           "ms": 310,
+           "out": 1,
+           "oldestMs": 130
+          },
+          {
+           "url": "robinhood.rpc.blxrbdn.com",
+           "rank": 20,
+           "ms": 330,
+           "out": 0,
+           "oldestMs": null
+          }
+         ],
+         "waited": {
+          "methods": "eth_call",
+          "host": "robinhood-rpc.publicnode.com",
+          "ms": 351,
+          "end": "200",
+          "spare": false,
+          "idle": 3,
+          "left": 2
+         }
+        },
+        {
+         "kind": "warm",
+         "ms": 435,
+         "quotes": 1,
+         "ok": true,
+         "route": {
+          "venue": "uniswap-v4",
+          "currencyIn": "0x0000000000000000000000000000000000000000",
+          "hops": [
+           {
+            "currency": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+            "fee": 100,
+            "tickSpacing": 1,
+            "hooks": "0x0000000000000000000000000000000000000000",
+            "hookData": "0x"
+           },
+           {
+            "currency": "0xfce34d21a92069100e3226638140706cf03a266e",
+            "fee": 601000,
+            "tickSpacing": 6010,
+            "hooks": "0x0000000000000000000000000000000000000000",
+            "hookData": "0x"
+           }
+          ]
+         },
+         "hosts": {
+          "rpc.mainnet.chain.robinhood.com": {
+           "requests": 3,
+           "calls": 3,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood.drpc.org": {
+           "requests": 8,
+           "calls": 11,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood-rpc.publicnode.com": {
+           "requests": 7,
+           "calls": 12,
+           "s429": 0,
+           "logs": 0,
+           "s429Logs": 0,
+           "s429Reads": {}
+          },
+          "robinhood.daybreak-rpc.network": {
+           "requests": 1,
+           "calls": 4,
+           "s429": 0,
+           "logs": 1,
+           "s429Logs": 0,
+           "s429Reads": {}
+          }
+         },
+         "seats": [
+          {
+           "url": "robinhood.drpc.org",
+           "rank": 0,
+           "ms": 161,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "robinhood-rpc.publicnode.com",
+           "rank": 0,
+           "ms": 196,
+           "out": 0,
+           "oldestMs": null
+          },
+          {
+           "url": "rpc.mainnet.chain.robinhood.com",
+           "rank": 3,
+           "ms": 316,
+           "out": 1,
+           "oldestMs": 88
+          },
+          {
+           "url": "robinhood.rpc.blxrbdn.com",
+           "rank": 20,
+           "ms": 330,
+           "out": 0,
+           "oldestMs": null
+          }
+         ],
+         "waited": {
+          "methods": "eth_call",
+          "host": "rpc.mainnet.chain.robinhood.com",
+          "ms": 428,
+          "end": "200",
+          "spare": false,
+          "idle": 2,
+          "left": 1
          }
         }
        ]
