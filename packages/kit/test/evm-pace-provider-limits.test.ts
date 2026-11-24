@@ -53,6 +53,10 @@ const LIMITS: readonly Limit[] = [
   // calls in the second before, 3 out at once (TORCH warm 3), under the bucket read from the Mac; so 16 in any second
   // (card evm-cold-quote-inside-the-kpi)
   { name: "robinhood.rpc.blxrbdn.com from a runner", url: "https://robinhood.rpc.blxrbdn.com", refuses: window(1_000, 16) },
+  // and lower still from later runners: sign live runs met its 429 at 12 calls in the second before, 1 post out (AI cold,
+  // 2 calls), and at 11, 1 post out (release 204's run 45482874085, 24 Nov 20:4xZ: HOOKR warm 2, 1 call), each under the
+  // 16 above; so 10 in any second (card robinhood-blxrbdn-under-the-runner-limit)
+  { name: "robinhood.rpc.blxrbdn.com from later runners", url: "https://robinhood.rpc.blxrbdn.com", refuses: window(1_000, 10) },
 ];
 
 /** `posts` posts of `size` eth_call to `url`, all asked at once through the lane, each reaching the provider `path(n)`

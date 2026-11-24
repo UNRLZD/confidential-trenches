@@ -1282,8 +1282,9 @@ export const MUTANTS = [
   [QUOTE, "      const timer = setTimeout(() => void spare().then(win, () => {}), evmHedgeAfter(", "      const timer = setTimeout(() => void spare().then(win, (e: unknown) => ((over = true), no(e))), evmHedgeAfter(", R, "KPI2 "],
   [QUOTE, "      scanHeadOf(o.rpc, o.gate).then(win, () => {\n        clearTimeout(timer);", "      scanHeadOf(o.rpc, o.gate).then(win, (e: unknown) => {\n        if (theirs === undefined) return no(e);\n        clearTimeout(timer);", R, "KPI2 "],
   [QUOTE, "      const spare = () => (theirs ??= inTurn(next));", "      const spare = () => (theirs ??= headFrom(next));", R, "KPI3 "],
-  // bloXroute's Robinhood endpoint paced to 16 calls in any second, its 429 from a runner at 17 (live run 45043534742)
-  ["src/checks/evm/pace.ts", '"https://robinhood.rpc.blxrbdn.com": Object.freeze({ perS: 10, burst: 6, unit: "call" }),', '"https://robinhood.rpc.blxrbdn.com": Object.freeze({ perS: 15, burst: 6, unit: "call" }),', "test/evm-pace-provider-limits.test.ts", "card robinhood-taps-meet-no-429: a burst of a tap's posts to robinhood.rpc.blxrbdn.com from a runner"],
+  // bloXroute's Robinhood endpoint paced to 10 calls in any second, its 429 from runners at 11 and 12 (card
+  // robinhood-blxrbdn-under-the-runner-limit; 16 before, its 429 at 17 in live run 45043534742)
+  ["src/checks/evm/pace.ts", '"https://robinhood.rpc.blxrbdn.com": Object.freeze({ perS: 6, burst: 4, unit: "call" }),', '"https://robinhood.rpc.blxrbdn.com": Object.freeze({ perS: 10, burst: 6, unit: "call" }),', "test/evm-pace-provider-limits.test.ts", "card robinhood-taps-meet-no-429: a burst of a tap's posts to robinhood.rpc.blxrbdn.com from later runners"],
   // card evm-quote-fewer-rounds: a held provider after every one not held, quoteLast too; half open after its hold
   // until it answers; held by the pace's own hold as by the ranking's
   [QUOTE, '  if (till > now) return 20 + last;', '  if (till > now) return 2 + last;', "test/evm-pair-rank.test.ts", "R6 "],
