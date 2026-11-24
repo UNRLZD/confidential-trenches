@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { CHAINS, COINS_MAX, coinsOf, judge } from "./buy-quote-before-any-note.mjs";
+import { AGAIN, CHAINS, COINS_MAX, coinsOf, judge } from "./buy-quote-before-any-note.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "buy-quote-before-any-note.answers.json"), "utf8"));
@@ -95,6 +95,28 @@ test("a coin the page cannot trade yet (venue_not_pinned, no_table_fits) moves o
   }
   assert.equal(solana(["not_funded", "out"]).verdict, "FAIL", "not_funded on the first coin");
   assert.equal(solana(["venue_not_pinned", "quote_check_failed", "down"]).verdict, "INCONCLUSIVE", "every coin refused for its own reads");
+});
+
+// card buy-quote-check-skips-a-coins-market-gap: release 200's sign live run 45396972380 (24 Nov 12:5xZ) failed on its
+// first Solana coin, B34nXKzC...pump, answered below_reference: its pumpswap pool priced under its Meteora DLMM SOL pool
+// (3.7% on DexScreener, 13:0xZ), the rule of card solana-buy-never-below-a-hidden-market, which a pool note changes not
+test("a coin whose tradable pool prices under its own market (below_reference) moves on to the next coin, as the run 45396972380 needed; every coin so is INCONCLUSIVE, not_funded after it still FAILs (red at be72fcf9e: below_reference FAILed at once)", () => {
+  const solana = (codes) => {
+    const r = copy(A.good);
+    const priced = r.asks.find((x) => x.chain === "solana" && x.ok);
+    const rest = r.asks.filter((x) => x.chain !== "solana");
+    const asks = codes.map((c, i) => (c === "out" ? { ...copy(priced), coin: r.lists.solana.coins[i] } : { chain: "solana", coin: r.lists.solana.coins[i], amount: priced.amount, ok: false, code: c }));
+    r.asks = [...asks, ...rest];
+    return judge(r);
+  };
+  // the run's own first answer, as its log names it
+  const run = solana(["below_reference", "out"]);
+  assert.equal(run.verdict, "PASS", run.lines.join("\n"));
+  const all = solana(["below_reference", "below_reference", "below_reference"]);
+  assert.equal(all.verdict, "INCONCLUSIVE", all.lines.join("\n"));
+  assert.ok(all.lines.some((l) => l.startsWith("no-answer [solana]") && l.includes("below_reference")), all.lines.join("\n"));
+  assert.equal(solana(["below_reference", "not_funded"]).verdict, "FAIL", "below_reference then not_funded");
+  assert.ok(AGAIN.has("below_reference"));
 });
 
 test("the recorded skip run (the live SIGN_HOST, 22 Nov 21:15Z): Solana's venue_not_pinned coin moves the check on to the coin priced after it, PASS", () => {

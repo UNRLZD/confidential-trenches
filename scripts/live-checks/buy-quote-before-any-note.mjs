@@ -7,16 +7,21 @@
 // (packages/signpage/src/pools.ts poolBuyDryKind, pool-buy-evm.ts evmBuyDry, near-buy.ts nearBuyDry).
 //   Each chain's coins: the helper's own lists (GET /v1/market/lists?chain=<chain> on HELPER_HOST, trending then new),
 //   asked in order until one answers with an out, or a refusal that is no coin's own (a venue the page cannot read,
-//   quote_check_failed; a venue it cannot trade yet, venue_not_pinned or no_table_fits; a provider down; no quote of
-//   that coin: an answer with no out go on to the next coin).
+//   quote_check_failed; a venue it cannot trade yet, venue_not_pinned or no_table_fits; a coin whose pool the page can
+//   trade prices under the coin's own market, below_reference; a provider down; no quote of that coin: an answer with no
+//   out go on to the next coin).
 //   PASS per chain only when the answer is ok with tap_max "0" (one tap spends nothing of a pool with no note), with_cash
 //   absent or "0" (Max $0: no Cash), and `out` a decimal above 0 (You receive: the typed amount priced as the buy from
 //   Cash would run). not_funded (or any refusal not a coin's own), or no out on every coin asked, FAILs: the page
 //   priced no buy for a user with no pool note.
-//   Every coin of a chain refused quote_check_failed, venue_not_pinned, no_table_fits or down: INCONCLUSIVE for that
+//   Every coin of a chain refused quote_check_failed, venue_not_pinned, no_table_fits, below_reference or down: INCONCLUSIVE for that
 //   chain (card buy-quote-check-skips-an-unpinned-venue: a venue with no pinned pool table is refused before any note is
 //   read, packages/wallet/src/pool/solana.ts SOL_POOL_TABLES, so it says nothing of a buy priced with no note; the sign
-//   live run 45066381643, 22 Nov 20:40Z, failed on the first trending Solana coin for it).
+//   live run 45066381643, 22 Nov 20:40Z, failed on the first trending Solana coin for it). below_reference is the coin's
+//   own markets (card solana-buy-never-below-a-hidden-market: a pool the page trades held to the best pool it reads), read
+//   the same with no note as with one (card buy-quote-check-skips-a-coins-market-gap: release 200's sign live run
+//   45396972380, 24 Nov 12:5xZ, failed on B34nXKzC...pump, whose Meteora DLMM SOL pool Cqqm... priced it 3.7% under its
+//   pumpswap pool on DexScreener at 13:0xZ).
 // Records hold public values only: the chain, the coin, the amount asked and the page's answer. Never a key or the words.
 // After: sign
 // Bundle: out a browser and a new account on the live SIGN_HOST
@@ -44,7 +49,7 @@ export const COINS_MAX = 8;
 const ANSWER_MS = 45_000;
 const DECIMAL = /^(0|[1-9][0-9]*)(\.[0-9]+)?$/;
 /** A coin's own answers: the check asks the next coin, and every coin answered so is INCONCLUSIVE for the chain. */
-const AGAIN = new Set(["quote_check_failed", "venue_not_pinned", "no_table_fits", "down", "busy", "timeout"]);
+export const AGAIN = new Set(["quote_check_failed", "venue_not_pinned", "no_table_fits", "below_reference", "down", "busy", "timeout"]);
 /** The kit's hello, sent from the frame before the asks, so the page reads every answer at this kit's level (with_cash
  *  and out in full), whatever kit the deployed terminal names. */
 const HELLO = { v: 1, type: "hello", kit: SIGNPAGE_KIT_VERSION };
