@@ -12,7 +12,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { gunzipSync } from "node:zlib";
 import type { EvmPoolBuyQuoteRequest } from "../src/checks/evm/quote.ts";
-import { evmPaceReset } from "../src/checks/evm/pace.ts";
+import { evmPaceReset, evmPaceTake } from "../src/checks/evm/pace.ts";
 import { evmPoolVenues } from "../src/trade/evm/buy-unpinned.ts";
 import { callKey } from "./evm-quote-calls-record.ts";
 import { onTestClock } from "./test-clock.ts";
@@ -27,15 +27,19 @@ const ENDS_WITHIN_MS = 9_400;
 type Call = { id: unknown; method: string; params: unknown[] };
 type Q = { phase: string; now: number; request: Record<string, unknown> & { buys: string; amountIn: string }; outcome: string };
 /** What a post gets, by the quote's place in the recording (0, 1 or 2), its host and its calls: no answer until its
- *  signal ends it, HTTP 429 or HTTP 503; undefined: its recorded answer. */
-type Act = (quote: number, host: string, calls: Call[]) => "hang" | "429" | "503" | undefined;
+ *  signal ends it, HTTP 429, HTTP 503 or no connection (`refused`, as a browser's "Failed to fetch"); undefined: its
+ *  recorded answer; `late`, its recorded answer LATE_MS after it is sent. */
+type Act = (quote: number, host: string, calls: Call[]) => "hang" | "429" | "503" | "refused" | "late" | undefined;
+/** A `late` post's answer time: inside the last provider's bound (EVM_SCAN_LAST_MS, 4 s), as Pocket's 1,670 ms at most
+ *  from the Mac (24 Nov 12:1xZ). */
+const LATE_MS = 2_500;
 
 
 /** The recording's taps replayed, each quote's time on the test clock; with `hang`, the first post of that quote it
  *  names hangs until its signal ends it (the provider's 10 s timeout), as a post no provider answers. Each run on its
  *  own instance of the quote module, so no scan, plan or measure of one run reaches the next. */
 let runs = 0;
-const run = async (act?: Act) => {
+const run = async (act?: Act, before?: (quote: number) => void) => {
   const { evmAgreedReset, evmJsonRpc, evmPoolBuyQuoteWith, evmPoolIndexReset, evmPoolIndexUse, evmProviders, evmQuoteWarmReset, evmRanked, evmSpeedReset } = (await import(
     `../src/checks/evm/quote.ts?run=${++runs}`
   )) as typeof import("../src/checks/evm/quote.ts");
@@ -69,7 +73,8 @@ const run = async (act?: Act) => {
       if (a === "hang") await untilAborted(init?.signal);
       if (a === "429") return new Response("Too Many Requests", { status: 429 });
       if (a === "503") return new Response("Service Unavailable", { status: 503 });
-      await new Promise((go) => setTimeout(go, POST_MS));
+      if (a === "refused") throw new TypeError("Failed to fetch");
+      await new Promise((go) => setTimeout(go, a === "late" ? LATE_MS : POST_MS));
       const one = (c: Call) => {
         const k = callKey(c);
         const all = answers.get(k);
@@ -95,6 +100,7 @@ const run = async (act?: Act) => {
     const why: string[] = [];
     for (const x of F.quotes as Q[]) {
       quote++;
+      before?.(quote);
       const { buys, ...rest } = x.request;
       const req = { ...rest, token: buys, amountIn: BigInt(x.request.amountIn) } as EvmPoolBuyQuoteRequest;
       const t0 = performance.now();
@@ -145,3 +151,49 @@ for (const [name, act] of [
     assert.deepEqual(r.out, base.out);
   });
 }
+
+// card rh-scan-last-provider-case: the helper's live runs since 23 Nov 20:12Z (evm-rpc-spare-list, robinhood-torch with
+// the scan list's first two refused or 503) ended every held quote rpc_error "the last scan provider did not answer
+// within 4000 ms" at 4013 to 4632 ms, and so did the same quotes from the Mac (24 Nov 12:1xZ) while Pocket answered
+// every post in 358 to 1,670 ms: the kit paces Pocket at 2 calls a second (pace.ts), a handed warm scan is about 8 calls,
+// and the bound ran from the ask, so the kit's own pace wait counted as the provider's silence: the cut came on a head
+// read that waited 3.8 s for its turn, then 178 ms for its answer. As the live check does (a quote with every provider
+// answering, then held ones), the two cold taps run as recorded; at the warm tap the first two refuse every post (no
+// connection), Pocket answers each LATE_MS after it is sent (inside the bound), and another reader's 3 posts of 2 calls
+// wait on Pocket's pace ahead of it (the pace is the device's, every reader's: pace.ts), so its turns come seconds late.
+// The warm tap ends ok as recorded, inside the last provider's bound. On main it ends rpc_error "the last scan provider
+// did not answer within 4000 ms". (A cold tap is the first's alone: no spare carries Robinhood's 10M blocks.)
+const RH = "rpc.mainnet.chain.robinhood.com";
+const POCKET_URL = `https://${POCKET}`;
+test("L3 the warm tap's first two refuse every post and Pocket's turns come late: it ends ok as recorded, inside the last provider's bound", { timeout: 300_000 }, async () => {
+  let pocketPosts = 0;
+  const r = await run(
+    (q, host) => {
+      if (q !== 2) return undefined;
+      if (host === POCKET) pocketPosts++;
+      return host === RH || host === DAYBREAK ? "refused" : host === POCKET ? "late" : undefined;
+    },
+    (q) => {
+      if (q !== 2) return;
+      for (let i = 0; i < 3; i++)
+        void Promise.resolve(evmPaceTake(POCKET_URL, [{ method: "eth_getLogs" }, { method: "eth_getBlockByNumber" }])).then((give) => setTimeout(() => give(true), POST_MS));
+    },
+  );
+  console.log(`L3: ${JSON.stringify(r.out)}, Pocket asked ${pocketPosts} posts in the warm tap`);
+  assert.equal((F.quotes as Q[])[2]!.phase, "warm");
+  assert.ok(pocketPosts > 0, "the warm tap never asked Pocket");
+  for (const [k, q] of r.out.entries()) assert.equal(q.outcome.split(" ")[0], String((F.quotes as Q[])[k]!.outcome).split(" ")[0], `quote ${k} ended ${q.outcome}: ${r.why.join(" | ")}`);
+  assert.ok(r.out[2]!.ms <= ENDS_WITHIN_MS, `the warm tap took ${r.out[2]!.ms} ms`);
+});
+
+// card rh-scan-last-provider-case, the other side: every tap's first two refuse every post and Pocket answers each in
+// POST_MS. The cold taps leave the warm one more than Pocket's pace carries (41 getLogs in the replay), so the warm tap
+// must stop at the last provider's whole bound (EVM_SCAN_LAST_WHOLE_MS), never grind on to the quote's deadline:
+// with each request's bound alone it ended rpc_error at 33.4 s, and stale_quote at 32.8 s with the bound from the post.
+test("L4 every tap's first two refuse every post: the warm tap still ends inside the last provider's bound, never stale_quote", { timeout: 300_000 }, async () => {
+  const r = await run((_q, host) => (host === RH || host === DAYBREAK ? "refused" : undefined));
+  console.log(`L4: ${JSON.stringify(r.out)}`);
+  assert.equal((F.quotes as Q[])[2]!.phase, "warm");
+  assert.notEqual(r.out[2]!.outcome, "stale_quote", "the warm tap ran out its deadline");
+  assert.ok(r.out[2]!.ms <= ENDS_WITHIN_MS, `the warm tap took ${r.out[2]!.ms} ms (${r.out[2]!.outcome})`);
+});

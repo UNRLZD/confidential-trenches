@@ -2234,15 +2234,23 @@ const SCAN_BACKOFF_MS = 500;
 export const EVM_SCAN_HOLD_MS = 2_000;
 /** A scan request's tries at its smallest span: a timeout or a failure other than a throttle spends one. */
 const SCAN_TRIES = 4;
-/** The longest a request handed to the chain's last scan provider waits for its answer (card
- *  evm-quote-no-30s-head-wait). The last takes only blocks the providers before it failed, in its own spans (Robinhood's
- *  Pocket 2,000 blocks, its batches answered in 193 to 2,238 ms, the venue's notes), and has no provider behind it, so
- *  a request it does not answer in this time, or that it throttles, stops the scan (rpc_error): never its tries of
- *  the 10 s timeout, its halves, or its throttle's backoff again and again. Robinhood taps waited that out to stale_quote
- *  at 29.6 to 51.6 s, Pocket's getLogs unanswered 10 s, then 3.9 and 6.2 s and 429 (read-only runs from this Mac,
- *  22 Nov 17:40-17:45Z; replayed on the recorded PONS tap with daybreak 503 and Pocket hung: stale_quote at 32.4 s
- *  cold, rpc_error at the 60 s scan bound warm). A first with no spare behind it keeps the whole bound, as before. */
+/** The longest a request handed to the chain's last scan provider waits for its answer, from its post leaving the device
+ *  (card evm-quote-no-30s-head-wait; from the post, not the ask, since card rh-scan-last-provider-case). The last takes
+ *  only blocks the providers before it failed, in its own spans (Robinhood's Pocket 2,000 blocks, its batches answered
+ *  in 193 to 2,238 ms, the venue's notes), and has no provider behind it, so a request it does not answer in this time,
+ *  or that it throttles, stops the scan (rpc_error): never its tries of the 10 s timeout, its halves, or its throttle's
+ *  backoff again and again. Robinhood taps waited that out to stale_quote at 29.6 to 51.6 s, Pocket's getLogs unanswered
+ *  10 s, then 3.9 and 6.2 s and 429 (read-only runs from this Mac, 22 Nov 17:40-17:45Z; replayed on the recorded PONS
+ *  tap with daybreak 503 and Pocket hung: stale_quote at 32.4 s cold, rpc_error at the 60 s scan bound warm). A first
+ *  with no spare behind it keeps the whole bound, as before. */
 const EVM_SCAN_LAST_MS = 4_000;
+/** The longest the chain's last scan provider carries what a scan hands it, from the scan's first request handed to it
+ *  (card rh-scan-last-provider-case). EVM_SCAN_LAST_MS bounds each request's answer from its post, not its turn at the
+ *  kit's own pace, so a scan that hands it more than its pace carries in time stops at this, never at the quote's
+ *  deadline: a warm hand-off at Pocket's pace (a head and 5 getLogs of 146 blocks) took 4.2 s from the Mac (24 Nov
+ *  12:1xZ) and 5.5 s in test L3; with each request bound alone, the replayed taps with the first two refused ground
+ *  through 41 of Pocket's getLogs to rpc_error at 33.4 s (test L4). */
+const EVM_SCAN_LAST_WHOLE_MS = 2 * EVM_SCAN_LAST_MS;
 /** The wait before a scan request is asked again whole of the same provider, times its try: one block answered short,
  *  or logs behind a block the provider holds (scanPools `short`, `behind`). */
 const SCAN_AGAIN_MS = 250;
@@ -2319,6 +2327,8 @@ function scanGateOf(parallel: number, untilMs: number, spareNext = false, deadli
   let flying = 0;
   let resumeAt = 0;
   let strikes = 0;
+  // when this scan handed the last provider its first request (sendLast): all it hands ends by EVM_SCAN_LAST_WHOLE_MS on
+  let handedAt: number | undefined;
   // the cuts so far: a request records the count when it is sent
   let cuts = 0;
   // the provider answered a request the next could carry HTTP 5xx: every such request after it in this quote goes to
@@ -2336,6 +2346,8 @@ function scanGateOf(parallel: number, untilMs: number, spareNext = false, deadli
   // the chain's last provider, handed what the ones before it failed (`handOff`): past EVM_SCAN_LAST_MS, or throttled,
   // the scan stops
   const lastSlow = () => new ScanStop("rpc_error", `the last scan provider did not answer within ${EVM_SCAN_LAST_MS} ms`);
+  // or all it was handed is not answered by EVM_SCAN_LAST_WHOLE_MS: it cannot carry the scan's blocks in time
+  const lastWhole = () => new ScanStop("rpc_error", `the last scan provider did not carry the scan's blocks within ${EVM_SCAN_LAST_WHOLE_MS} ms`);
   // past the quote's deadline (gated) no scan request is sent either, nor one waited for that would go past it
   const stale = () => new ScanStop("stale_quote", `the quote's block is more than ${EVM_QUOTE_MAX_AGE_MS / 1000} s old: no more scans are sent`);
   const left = () => (deadline === undefined ? Infinity : deadline.until - deadline.now());
@@ -2383,7 +2395,7 @@ function scanGateOf(parallel: number, untilMs: number, spareNext = false, deadli
   // EVM_SCAN_HOLD_MS
   const send = async (rpc: EvmRpc, calls: readonly EvmRpcCall[], fast: boolean, hedge?: ScanHedge) => {
     const toBound = untilMs - performance.now();
-    if (handOff && hedge === undefined) return sendBound(rpc, calls, Math.min(toBound, EVM_SCAN_LAST_MS), toBound, fast, undefined, EVM_SCAN_LAST_MS < toBound ? lastSlow : past);
+    if (handOff && hedge === undefined) return sendLast(rpc, calls, toBound);
     const left = fast && hedge === undefined ? Math.min(toBound, EVM_SCAN_HOLD_MS) : toBound;
     if (hedge !== undefined) return Promise.race([left >= EVM_RPC_TIMEOUT_MS ? rpc(calls, hedge.signal, hedge.sent) : sendBound(rpc, calls, left, toBound, fast, hedge), hedge.lost]);
     if (left >= EVM_RPC_TIMEOUT_MS) return rpc(calls);
@@ -2403,6 +2415,39 @@ function scanGateOf(parallel: number, untilMs: number, spareNext = false, deadli
       return await Promise.race([rpc(calls, hedge === undefined ? stop.signal : AbortSignal.any([stop.signal, hedge.signal]), hedge?.sent), bound]);
     } finally {
       clearTimeout(timer);
+    }
+  };
+  // a request handed to the chain's last provider: answered within EVM_SCAN_LAST_MS of its post leaving the device (each
+  // post, EvmRpc `sent`: after the kit's own gate and pace), all the scan hands it within EVM_SCAN_LAST_WHOLE_MS of the
+  // first, and the whole within the quote's bound. One EVM_SCAN_LAST_MS from the ask counted the kit's own pace wait as
+  // the provider's silence (card rh-scan-last-provider-case): Pocket, paced at 2 calls a second (pace.ts), took a handed
+  // warm scan's 8 calls in about 4 s, and every held robinhood-torch quote of the helper's live runs since 23 Nov 20:12Z
+  // ended rpc_error at 4,013 to 4,632 ms, as from the Mac (24 Nov 12:1xZ) while Pocket answered each post in 358 to
+  // 1,670 ms, the cut on a head read 3.8 s at its turn and 178 ms out. A scan that hands it more than its pace carries
+  // stops at EVM_SCAN_LAST_WHOLE_MS, never at the quote's deadline (stale_quote at 30.3 and 32.8 s in the replayed taps
+  // with each request's bound from its post alone)
+  const sendLast = async (rpc: EvmRpc, calls: readonly EvmRpcCall[], toBound: number) => {
+    const stop = new AbortController();
+    let fail: (e: EvmQuoteError) => void = () => undefined;
+    const bound = new Promise<never>((_, no) => (fail = no));
+    const cut = (e: EvmQuoteError) => {
+      stop.abort(e);
+      fail(e);
+    };
+    const now = performance.now();
+    handedAt ??= now;
+    const carry = handedAt + EVM_SCAN_LAST_WHOLE_MS - now;
+    const whole = setTimeout(() => cut(carry < toBound ? lastWhole() : past()), Math.max(0, Math.min(toBound, carry)));
+    let quiet: ReturnType<typeof setTimeout> | undefined;
+    const sent = () => {
+      clearTimeout(quiet);
+      if (EVM_SCAN_LAST_MS < untilMs - performance.now()) quiet = setTimeout(() => cut(lastSlow()), EVM_SCAN_LAST_MS);
+    };
+    try {
+      return await Promise.race([rpc(calls, stop.signal, sent), bound]);
+    } finally {
+      clearTimeout(whole);
+      clearTimeout(quiet);
     }
   };
   return {
