@@ -5451,10 +5451,28 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       }
       // a book this process already holds (its own open, or the same file's book restored before) counts restored
       let took = 0;
+      const atRestNew: [string, Entry][] = [];
       for (const [tk, e, atRest] of restored) {
         if (books.has(tk) || resting.has(restKey(tk))) took++;
         else if (!atRest && books.size < OPEN_MAX) (books.set(tk, e), took++);
-        else if (atRest && resting.size < (deps.restMax ?? REST_MAX)) (resting.set(restKey(tk), e), took++);
+        else if (atRest) atRestNew.push([tk, e]);
+      }
+      // card helper-handover-books-take-room: server.ts restores the file at the start and again at the handover, from
+      // the file the old helper wrote at its stop; a book the first left at rest that the second does not name, the old
+      // helper dropped in between, so it gives its room to the second's, the least recently asked first. Before, the
+      // second's new books found the room full and were left out (live run 45276410984: base held 101 restored 99,
+      // robinhood held 100 restored 99). The file's own books at rest are its most recently asked first, so when they
+      // are more than the room the least recently asked are the ones left out.
+      const named = new Set(restored.map(([tk]) => restKey(tk)));
+      const unnamed = [...resting].filter(([k]) => !named.has(k)).sort(([, a], [, b]) => a.touched - b.touched);
+      for (const [tk, e] of atRestNew) {
+        if (resting.size >= (deps.restMax ?? REST_MAX)) {
+          const out = unnamed.shift();
+          if (out === undefined) break;
+          resting.delete(out[0]);
+        }
+        resting.set(restKey(tk), e);
+        took++;
       }
       handedCount = { held, restored: took };
       for (const [x, v] of tradersIn) if (!traders.has(x)) {
