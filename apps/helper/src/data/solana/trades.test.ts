@@ -1299,17 +1299,20 @@ test("card helper-listed-charts-own-reads: a listed coin off pump.fun (SPYx, Ray
 });
 
 test("card helper-listed-charts-own-reads: a Raydium CPMM trade names its own mints (no pool read), turned round for the token as the output, priced in its quote coin", async () => {
-  const V = JSON.parse(readFileSync(path.join(HERE, "fixtures/sol-venue-txs.json"), "utf8")) as { txs: Record<string, { result: { meta: { logMessages: string[] } } }> };
+  const V = JSON.parse(readFileSync(path.join(HERE, "fixtures/sol-venue-txs.json"), "utf8")) as { txs: Record<string, { result: { meta: { logMessages: string[] } } }>; pools: Record<string, { owner: string; data: string }> };
   const FCAT = "2YPWT4QK1Why57mxBZGwBAFckBC4nLwEAL2t6CcCQtvw";
   const WXMR = "WXMRyRZhsa19ety5erZhHg4N3xj3EVN92u94422teJp";
   let on: SourceEvents | null = null;
   // the rpc answers the SOL price and the two mints only: a CPMM pool read would throw. The route's first hops cross
-  // Meteora DLMM (card index-sol-trades-2), so the transaction is read whole, and its DLMM pool answers no account
+  // Meteora DLMM (card index-sol-trades-2), so the transaction is read whole, and its DLMM pool (WXMR's, another coin's)
+  // answers as recorded: a pool answered with no account would leave the transaction unread (card
+  // sol-tape-pool-unread-never-kept)
   const DLMM_POOL = "BFKBQT4yFZPtzyttHQayNmjDJYduvFaPXuytMgnaqexV";
   const chain = rpcFetch({ sigs: () => [], txs: { F1: V.txs["cpmm-buy-fee"]!.result }, price: 9_342_267_796n, pub: TS, slot: 100 }, { [FCAT]: 6, [WXMR]: 12 });
   const fetchFn = async (url: string, init: RequestInit): Promise<Response> => {
     const req = JSON.parse(String(init.body)) as { method: string; params: [string] };
-    if (req.method === "getAccountInfo" && req.params[0] === DLMM_POOL) return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { context: { slot: 100 }, value: null } }));
+    const p = V.pools[DLMM_POOL]!;
+    if (req.method === "getAccountInfo" && req.params[0] === DLMM_POOL) return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { context: { slot: 100 }, value: { owner: p.owner, data: [p.data, "base64"] } } }));
     return chain(url, init);
   };
   const t = createSolanaTrades({ fetch: fetchFn, now: () => TS * 1000, listed: async (m) => m === FCAT, rpcs: ["https://rpc.test"], wholeWait: () => Promise.resolve(), source: (o) => ((on = o), { watch: async () => undefined, unwatch: () => undefined, close: () => undefined }), quoteUsd: async (m) => (m === WXMR ? "300" : null), tickMs: 0 });
@@ -1868,7 +1871,8 @@ function orderChain(opts: { sigs?: (p: Record<string, unknown>) => unknown[]; tx
     }
     const p = TO.pools[req.params[0] as string];
     if (req.method === "getAccountInfo" && p !== undefined) return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { context: { slot: 100 }, value: { owner: p.owner, data: [p.data, "base64"] } } }));
-    // the routes' PumpSwap pools not recorded: no such account
+    // any other account: no such account (the routes' PumpSwap pools are recorded: a pool answered with none leaves its
+    // transaction unread, card sol-tape-pool-unread-never-kept)
     if (req.method === "getAccountInfo" && req.params[0] !== PYTH_SOL_USD && req.params[0] !== TTW_MINT) return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { context: { slot: 100 }, value: null } }));
     return inner(url, init);
   };

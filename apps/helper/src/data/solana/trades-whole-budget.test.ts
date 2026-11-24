@@ -39,7 +39,7 @@ function pyth(price: bigint, pub: number): Buffer {
 
 /** A helper's Solana trades over a recorded chain: every coin in `coins` is TTW's twin (each answers as a mint), every
  *  getTransaction answers dlmm-buy whatever its signature; each request kept as "<url> <method>". */
-function chain(coins: string[], opts: { tape?: (m: string) => Promise<{ status: number; body: string; src?: string; asOfMs?: number }>; sigsHeld?: () => Promise<void> | null; poolsDown?: boolean; whole?: () => Response | null; wholeWait?: (ms: number) => Promise<void> } = {}) {
+function chain(coins: string[], opts: { tape?: (m: string) => Promise<{ status: number; body: string; src?: string; asOfMs?: number }>; sigsHeld?: () => Promise<void> | null; poolsDown?: boolean; poolNone?: () => boolean; whole?: () => Response | null; wholeWait?: (ms: number) => Promise<void> } = {}) {
   let ms = TS * 1000;
   const sent: string[] = [];
   const fetchFn = async (url: string, init: RequestInit): Promise<Response> => {
@@ -55,6 +55,8 @@ function chain(coins: string[], opts: { tape?: (m: string) => Promise<{ status: 
       return acct(TOKEN_PROGRAM, b);
     }
     const p = MT.pools[req.params[0]];
+    // poolNone: a node that holds no such account answers it with none
+    if (req.method === "getAccountInfo" && p !== undefined && opts.poolNone?.() === true) return ok({ context: { slot: 100 }, value: null });
     if (req.method === "getAccountInfo" && p !== undefined) return opts.poolsDown === true ? new Response("busy", { status: 429 }) : acct(p.owner, Buffer.from(p.data, "base64"));
     if (req.method === "getAccountInfo") return ok({ context: { slot: 100 }, value: null });
     if (req.method === "getSignaturesForAddress") {
@@ -80,7 +82,7 @@ function chain(coins: string[], opts: { tape?: (m: string) => Promise<{ status: 
     ...(opts.tape === undefined ? {} : { tape: opts.tape }),
   } as Parameters<typeof T.createSolanaTrades>[0]);
   let n = 0;
-  const stream = (m: string) => on!.note(m, { sig: `S${++n}`, slot: TX.result.slot, err: false, logs: TX.result.meta.logMessages });
+  const stream = (m: string, slot = TX.result.slot) => on!.note(m, { sig: `S${++n}`, slot, err: false, logs: TX.result.meta.logMessages });
   const reads = (url?: string) => sent.filter((s) => s.endsWith(" getTransaction") && (url === undefined || s.startsWith(`${url} `))).length;
   return { t, stream, reads, step: (d: number) => void (ms += d), to: (at: number) => void (ms = Math.max(ms, at)), now: () => ms };
 }
@@ -223,6 +225,35 @@ test("card helper-sol-tape-checks-hold: a stream transaction whose trade cannot 
   c.step(T.CUT_KEEP_MS + 1);
   const b = JSON.parse((await c.t.trades(TTW, 50)).body) as { whole_ms?: number };
   assert.equal(b.whole_ms, (TS + 1) * 1000, "past the cut, the reach starts the second after the unread transaction");
+  c.t.stop();
+});
+
+// Card sol-tape-pool-unread-never-kept: a pool read answered with no account (a provider's node that does not hold it)
+// was kept for the life of the process, and every later trade on that pool dropped while the tape named every trade: the
+// live helper at 30d3b63e0 held none of KMNo3nJs's Meteora DLMM trades on pool e2veMhFE (index-sol-trades FAIL, live run
+// 45366477087, 24 Nov 09:37Z; read again 10:12Z: the pool's 2 trades in the tape's span, one with its Orca leg on the
+// tape, both DLMM legs missing), while both public providers answered the pool and the helper's own decoder read each
+// trade. Such a read is unread, as a failed one is: its transaction a cut, the pool read again for the next trade.
+test("card sol-tape-pool-unread-never-kept: a pool read answered with no account is a cut, never kept: the pool's next trade is read (red at 7571bb2ed: no cut named, the next trade dropped)", async () => {
+  let none = true;
+  const c = chain([TTW], { poolNone: () => none });
+  assert.equal((await c.t.trades(TTW, 50)).status, 200);
+  await settle();
+  c.t.tick();
+  c.stream(TTW);
+  await settle();
+  const va = await c.t.trades(TTW, 50);
+  const a = JSON.parse(va.body) as { whole_ms?: number; filling?: boolean; trades: unknown[] };
+  assert.deepEqual(a.trades, [], "the trade not read");
+  assert.equal(a.whole_ms, undefined, "never whole while its trade is unread");
+  assert.match(va.timing ?? "", /sol-whole-cut;desc="a Meteora trade unread 0 s ago: its read unanswered"/);
+  none = false;
+  c.step(1_000);
+  // the pool's next trade, in a later slot (the first's slot is settled: the tape's reach starts after it)
+  c.stream(TTW, TX.result.slot + 1);
+  await settle();
+  const b = JSON.parse((await c.t.trades(TTW, 50)).body) as { trades: { tx: string }[] };
+  assert.deepEqual(b.trades.map((x) => x.tx), ["S2"], "the pool's next trade read, its pool read again");
   c.t.stop();
 });
 
