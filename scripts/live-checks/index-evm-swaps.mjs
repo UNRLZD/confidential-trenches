@@ -687,7 +687,10 @@ export async function read(base = BASE, token, fetchFn = fetch, rpcs, net = "bas
     /** One shared key's Swap logs over the window, on two agreeing providers; null when a span was not agreed. */
     const poolLogsOf = async (pool) => {
       const [address, id] = pool.split(":");
-      const topic0 = (one(run.chain.receipts[tape[0].tx]).logs ?? []).find((l) => poolKey(l, net) === pool).topics[0];
+      // the pool's Swap event in the newest trade's receipt: a v2 pair logs Sync before it, and Sync is logged as well when
+      // liquidity is added or taken out (card evm-swaps-check-reads-swap-logs: live run 45414685788 read 0x954922c7's
+      // Sync logs and counted the liquidity removal 0x42831bc7 as a swap missing from the tape)
+      const topic0 = (one(run.chain.receipts[tape[0].tx]).logs ?? []).find((l) => poolKey(l, net) === pool && SWAP_TOPICS.includes(l.topics?.[0])).topics[0];
       const topics = id === undefined ? [topic0 === TOPIC.curveBuy || topic0 === TOPIC.curveSell ? [TOPIC.curveBuy, TOPIC.curveSell] : topic0] : [TOPIC.swap4, id];
       const all = [];
       for (let lo = from; lo <= last; lo += SPAN[net]) {
