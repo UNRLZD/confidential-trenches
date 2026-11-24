@@ -5,7 +5,8 @@
 // 201's kit re-asked about 77 such pools of NVDAc on both providers at every warm tap: 154 of a tap's exact-output reads,
 // with taps of 4.9 and 11.8 s (read only from macOS, 24 Nov 16:1xZ).
 // It runs the kit's own tap (evmPoolBuyQuoteTap, read only: nothing is signed or sent) on TOKEN (--token <a>; NVDAc by
-// default) once cold and once warm, after the Base pool index's sync, and reads each tap's posts: each exact-output
+// default) once cold and once warm, after the Base pool index's sync from SIGN_HOST's snapshot (SIGN, --sign <origin>;
+// https://confidential.unrealized.trade/evm-index/base.json, as the page starts a device), and reads each tap's posts: each exact-output
 // read's pool (its key), the amount it asks and the block it is read at, and how many of the answers to those posts name
 // NotEnoughLiquidity (7a5ed734) and SafeCastOverflow (93dafdf1). For each pool the warm tap asked again, it reads the
 // PoolManager's Swap and ModifyLiquidity logs of it between its two reads' blocks on the kit's first Base provider. It
@@ -15,15 +16,17 @@
 // these counts do not tell the pools apart).
 // After: sign
 // Bundle: out EVM RPC quotes
-//   node scripts/live-checks/evm-warm-tap-skips-pools-it-pruned.mjs [--token <a>] [--record <file>]
+//   node scripts/live-checks/evm-warm-tap-skips-pools-it-pruned.mjs [--token <a>] [--sign <origin>] [--record <file>]
 //   PASS exit 0, FAIL 1, error 2 (and nothing to judge). --record writes what the run read, which the check's test replays.
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
-import { evmPoolBuyQuote, evmPoolBuyQuoteTap, evmPoolIndexRefresh, evmProviderSeats } from "../../packages/kit/src/index.ts";
+import { evmPoolBuyQuote, evmPoolBuyQuoteTap, evmPoolIndexFromSnapshot, evmPoolIndexRefresh, evmProviderSeats } from "../../packages/kit/src/index.ts";
+import { mainnetVenues } from "./mainnet-venues.mjs";
 import { keccak } from "./pool-evm-deploy.mjs";
 import { nothingToJudge, rpcAnswer } from "./provider-answer.mjs";
 
 const KEY = "evm-warm-tap-skips-pools-it-pruned";
+export const SIGN = "https://confidential.unrealized.trade";
 /** NVDAc on Base (Robinhood's tokenized stock): its route one v3 pool, beside about 77 v4 pools seeded with other
  *  currencies that cannot give its Q (24 Nov 16:1xZ). */
 export const TOKEN = "0xb20000000000000000000078ee7ce2fe4908108c";
@@ -92,11 +95,21 @@ export async function read(fetchFn = fetch, o = {}) {
     tap.over += count(text, SAFE_CAST_OVERFLOW);
     return r;
   };
+  // the device's start: SIGN_HOST's Base pool index snapshot (as the page serves it), synced to the head; none (a read
+  // that fails) syncs from nothing
+  const v = mainnetVenues().base;
+  const snap = await fetchFn(`${o.sign ?? SIGN}/evm-index/base.json`, { signal: AbortSignal.timeout(30_000) }).then((r) => (r.status === 200 ? r.json() : null)).catch(() => null);
+  let ix = null;
+  try {
+    ix = snap === null ? null : evmPoolIndexFromSnapshot(snap, { chainId: v.chainId, poolManager: v.poolManager, cap: v.index.cap });
+  } catch {
+    ix = null;
+  }
   const real = globalThis.fetch;
   globalThis.fetch = counted;
   const taps = {};
   try {
-    await evmPoolIndexRefresh("base", null, counted);
+    await evmPoolIndexRefresh("base", ix, counted);
     for (const kind of ["cold", "warm"]) {
       tap = { reads: [], short: 0, over: 0 };
       const t0 = performance.now();
@@ -132,7 +145,7 @@ export async function read(fetchFn = fetch, o = {}) {
   }
   // the record names blocks by number, never by hash (no 64-hex value in a record: gitleaks)
   const strip = (t) => ({ ...t, reads: t.reads.map(({ hash, ...x }) => ({ ...x, block: hash === null ? null : (blocks[hash] ?? null) })) });
-  return { at: new Date().toISOString(), token, cold: strip(taps.cold), warm: strip(taps.warm), moved };
+  return { at: new Date().toISOString(), token, snapshot: ix === null ? null : { through: ix.through, pools: ix.pools.length }, cold: strip(taps.cold), warm: strip(taps.warm), moved };
 }
 
 export function judge(run) {
@@ -159,7 +172,7 @@ if (import.meta.main) {
   const a = process.argv.slice(2);
   const opt = (k) => (a.includes(k) ? a[a.indexOf(k) + 1] : undefined);
   try {
-    const run = await read(fetch, { token: opt("--token") });
+    const run = await read(fetch, { token: opt("--token"), sign: opt("--sign") });
     const rec = opt("--record");
     if (rec) writeFileSync(rec, JSON.stringify(run, null, 2) + "\n");
     const v = judge(run);
