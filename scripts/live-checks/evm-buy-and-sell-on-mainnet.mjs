@@ -13,7 +13,8 @@
 //     (src/pool-sell-evm.ts EVM_OPEN_SELLS_KEY, followed until its return lands in the pool);
 //   - pins: both mainnet pools (evm-pools-on-mainnet.mjs PINS), and no testnet pool.
 //   - quotes (read only, never signed or sent; skipped with --local, as on a pull request's build): each chain's pool
-//     index synced cold on its two readers and served, then the helper's top QUOTE_ROWS list rows by liquidity, each
+//     index synced cold on its two readers and served, then kept at the head as the page keeps it through the taps (a
+//     gap sync EVM_INDEX_KEEP_MS after each one ends, at least one served), then the helper's top QUOTE_ROWS list rows by liquidity, each
 //     quoted by the tap's own quote (the kit's evmPoolBuyQuoteTap) once cold and WARM_RUNS times warm. Each tap ends
 //     in a quote or a refusal whose name is true (NAMED), asks at most EVM_BUY_TAP_QUOTES kit quotes, gets no 429 (each
 //     one named by its tap, host, share of that host's posts and the reads it answered), and
@@ -36,7 +37,7 @@ import { pageFacts as depositFacts } from "./evm-deposit-on-mainnet.mjs";
 import { PINS } from "./evm-pools-on-mainnet.mjs";
 import { WITHDRAW_MARKS } from "./evm-withdraw-mainnet.mjs";
 import { EXIT } from "./provider-answer.mjs";
-import { EVM_BUY_TAP_QUOTES, evmPoolBuyQuote, evmPoolBuyQuoteTap, evmPoolIndexRefresh, evmProviderSeats } from "../../packages/kit/src/index.ts";
+import { EVM_BUY_TAP_QUOTES, EVM_INDEX_KEEP_MS, evmPoolBuyQuote, evmPoolBuyQuoteTap, evmPoolIndexRefresh, evmProviderSeats } from "../../packages/kit/src/index.ts";
 import { HELPER } from "./evm-deposit-on-mainnet.mjs";
 
 export const KEY = "evm-buy-and-sell-on-mainnet";
@@ -87,6 +88,9 @@ function judgeQuotes(qs, say) {
     const ix = c?.index;
     say(ix?.served === true, `[${chain}] the pool index synced and served: ${ix ? `${ix.pools} pools to ${ix.covers} in ${ix.ms} ms, limited ${JSON.stringify(ix.limited)}` : "not read"}`);
     say(Array.isArray(c?.rows) && c.rows.length > 0, `[${chain}] the helper's list rows read: ${c?.rows?.length ?? 0}`);
+    // the taps ran on an index kept at the head as the page keeps it (readQuotes), at least one gap sync served
+    const keep = ix?.keep;
+    say((keep?.whole ?? 0) > 0, `[${chain}] the index was kept at the head through the taps: ${keep ? `${keep.whole} of ${keep.syncs} gap syncs served${keep.ms?.length > 0 ? `, the longest ${Math.max(...keep.ms)} ms` : ""}` : "not kept"}`);
     for (const r of c?.rows ?? []) {
       const runs = Array.isArray(r.runs) ? r.runs : [];
       const ends = runs.map((u) => (u.ok ? "ok" : u.code)).join(",");
@@ -227,36 +231,80 @@ export async function readQuotes(fetchFn = fetch, { chains: which = ["base", "ro
       take();
       const t = performance.now();
       const { sync, served } = await evmPoolIndexRefresh(chain, null, counted);
-      const index = { ms: Math.round(performance.now() - t), served, covers: sync?.coversThrough ?? null, pools: sync?.pools?.length ?? null, error: sync?.error?.code ?? null, limited: sync?.stats?.limited ?? null, hosts: take() };
-      const r = await fetchFn(`${HELPER}/v1/market/lists?chain=${chain}`, { redirect: "error" });
-      if (r.status !== 200) throw new Error(`helper lists ${chain}: HTTP ${r.status}`);
-      const lists = (await r.json())?.lists ?? {};
-      const seen = new Map();
-      for (const v of Object.values(lists)) for (const x of Array.isArray(v) ? v : []) if (typeof x?.token === "string" && !seen.has(x.token)) seen.set(x.token, x);
-      const top = [...seen.values()].sort((a, b) => Number(b.liq_usd ?? 0) - Number(a.liq_usd ?? 0)).slice(0, QUOTE_ROWS);
-      for (const [token, symbol] of Object.entries(coins[chain] ?? {})) if (!top.some((x) => x.token.toLowerCase() === token.toLowerCase())) top.push({ token, symbol, liq_usd: seen.get(token)?.liq_usd ?? null });
-      const rows = [];
-      for (const x of top) {
-        const runs = [];
-        for (const kind of ["cold", ...Array(WARM_RUNS).fill("warm")]) {
-          let quotes = 0;
-          take();
-          const seats = evmProviderSeats(chain).map((s) => ({ ...s, url: new URL(s.url).host }));
-          const t0 = performance.now();
-          let end;
-          try {
-            const q = await evmPoolBuyQuoteTap({ chain, token: x.token, amountIn: QUOTE_AMOUNT, slippageBps: 300 }, { quote: (req) => (quotes++, evmPoolBuyQuote(req)) });
-            end = { ok: true, route: q.route };
-          } catch (e) {
-            end = { ok: false, code: e?.code ?? "thrown", message: String(e?.message ?? e).slice(0, 200) };
-          }
-          const t1 = performance.now();
-          const longest = waited(t0, t1);
-          runs.push({ kind, ms: Math.round(t1 - t0), quotes, ...end, hosts: take(), seats, waited: longest });
+      const index = { ms: Math.round(performance.now() - t), served, covers: sync?.coversThrough ?? null, pools: sync?.pools?.length ?? null, error: sync?.error?.code ?? null, limited: sync?.stats?.limited ?? null, hosts: take(), keep: { syncs: 0, whole: 0, ms: [], hosts: {} } };
+      // the page's keep (packages/signpage/src/pool-testnet.ts, card evm-index-kept-at-the-head): EVM_INDEX_KEEP_MS
+      // after each sync ends (at once after one that took longer), a gap sync from the index the last one kept, on its
+      // own fetch, so its posts are never a tap's (card evm-buy-check-keeps-the-index: synced once, release 202's sign
+      // run tapped Robinhood ANT minutes past it, each tap scanning the blocks since by currency until Pocket answered 429)
+      let kept = sync?.index ?? null;
+      let stop = !served;
+      const keepFetch = async (url, init) => {
+        const h = (index.keep.hosts[new URL(typeof url === "string" ? url : url.url).host] ??= { requests: 0, s429: 0, slowest: 0 });
+        h.requests++;
+        const t0 = performance.now();
+        try {
+          const r = await fetchFn(url, init);
+          if (r.status === 429) h.s429++;
+          return r;
+        } finally {
+          h.slowest = Math.max(h.slowest, Math.round(performance.now() - t0));
         }
-        rows.push({ coin: x.token, symbol: String(x.symbol ?? "").slice(0, 32), liq_usd: x.liq_usd ?? null, runs });
+      };
+      const gap = async () => {
+        const t0 = performance.now();
+        const k = await evmPoolIndexRefresh(chain, kept, keepFetch).catch(() => ({ sync: null, served: false }));
+        if (k.sync?.index) kept = k.sync.index;
+        index.keep.syncs++;
+        if (k.served) index.keep.whole++;
+        const ms = performance.now() - t0;
+        index.keep.ms.push(Math.round(ms));
+        return ms;
+      };
+      // the cold sync took longer than EVM_INDEX_KEEP_MS, so its N is that far behind: the keep syncs the gap at once,
+      // and the taps start once it has
+      let took = served && index.ms > EVM_INDEX_KEEP_MS ? await gap() : index.ms;
+      const loop = (async () => {
+        while (!stop) {
+          await new Promise((go) => setTimeout(go, took > EVM_INDEX_KEEP_MS ? 0 : EVM_INDEX_KEEP_MS));
+          if (stop) break;
+          took = await gap();
+        }
+      })();
+      // the keep ends before the next chain (and on a throw), its last gap sync awaited
+      try {
+        const r = await fetchFn(`${HELPER}/v1/market/lists?chain=${chain}`, { redirect: "error" });
+        if (r.status !== 200) throw new Error(`helper lists ${chain}: HTTP ${r.status}`);
+        const lists = (await r.json())?.lists ?? {};
+        const seen = new Map();
+        for (const v of Object.values(lists)) for (const x of Array.isArray(v) ? v : []) if (typeof x?.token === "string" && !seen.has(x.token)) seen.set(x.token, x);
+        const top = [...seen.values()].sort((a, b) => Number(b.liq_usd ?? 0) - Number(a.liq_usd ?? 0)).slice(0, QUOTE_ROWS);
+        for (const [token, symbol] of Object.entries(coins[chain] ?? {})) if (!top.some((x) => x.token.toLowerCase() === token.toLowerCase())) top.push({ token, symbol, liq_usd: seen.get(token)?.liq_usd ?? null });
+        const rows = [];
+        for (const x of top) {
+          const runs = [];
+          for (const kind of ["cold", ...Array(WARM_RUNS).fill("warm")]) {
+            let quotes = 0;
+            take();
+            const seats = evmProviderSeats(chain).map((s) => ({ ...s, url: new URL(s.url).host }));
+            const t0 = performance.now();
+            let end;
+            try {
+              const q = await evmPoolBuyQuoteTap({ chain, token: x.token, amountIn: QUOTE_AMOUNT, slippageBps: 300 }, { quote: (req) => (quotes++, evmPoolBuyQuote(req)) });
+              end = { ok: true, route: q.route };
+            } catch (e) {
+              end = { ok: false, code: e?.code ?? "thrown", message: String(e?.message ?? e).slice(0, 200) };
+            }
+            const t1 = performance.now();
+            const longest = waited(t0, t1);
+            runs.push({ kind, ms: Math.round(t1 - t0), quotes, ...end, hosts: take(), seats, waited: longest });
+          }
+          rows.push({ coin: x.token, symbol: String(x.symbol ?? "").slice(0, 32), liq_usd: x.liq_usd ?? null, runs });
+        }
+        chains[chain] = { index, rows };
+      } finally {
+        stop = true;
+        await loop;
       }
-      chains[chain] = { index, rows };
     }
     return { readAt: new Date().toISOString(), chains };
   } finally {
