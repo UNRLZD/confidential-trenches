@@ -776,7 +776,7 @@ export function createSolanaTrades(deps: {
   const doFetch = deps.fetch ?? fetch;
   const rpcs = deps.rpcs ?? TRADES_RPCS;
   const entries = new Map<string, Entry>();
-  const pools = new Map<string, Promise<{ a: string; b: string } | null>>();
+  const pools = new Map<string, Promise<{ a: string; b: string } | null | "none">>();
   /** `<mint> <signature>` -> each of the transaction's rows' traders by its place (a row's index % 8, fold), the user its
    *  own event names (null for an event that names none), kept after the trade settles: a row is named by its own event,
    *  never by the transaction's first trade (card sol-tape-trader-is-the-events-user, as evm/swaps.ts traderAt). */
@@ -898,9 +898,9 @@ export function createSolanaTrades(deps: {
    *  Clock sysvar and getBlockTime 1795151266), so a tape dating those by their event and the rest by their block held a
    *  later row a second below an older one (live helper f5639e5bb, 20 Nov 03:15Z: "trade 31 is newer than trade 30").
    *  With no block time answering, an event's own clock stands (within a second of it); a trade with none makes the
-   *  transaction unread (null). */
-  async function dated(trades: RawTrade[], slot: number, known: number | null): Promise<RawTrade[] | null> {
-    if (trades.length === 0) return trades;
+   *  transaction unread (null), as a transaction `forMint` could not read (null) is. */
+  async function dated(trades: RawTrade[] | null, slot: number, known: number | null): Promise<RawTrade[] | null> {
+    if (trades === null || trades.length === 0) return trades;
     const t = known ?? (await timeOf(slot));
     if (t === null) return trades.every((x) => x.ts > 0) ? trades : null;
     return trades.map((x) => (x.ts === t ? x : { ...x, ts: t }));
@@ -925,15 +925,17 @@ export function createSolanaTrades(deps: {
   }
 
   /** A pool's two mints (PumpSwap: base, quote), read once (a burst of trades on one pool shares the read; a failed
-   *  read is not kept), taken only with the trade's own venue program as the pool account's owner. */
-  function poolOf(t: RawTrade): Promise<{ a: string; b: string } | null> {
+   *  read is not kept), taken only with the trade's own venue program as the pool account's owner. "none": answered with
+   *  no account, never kept either (card sol-tape-pool-unread-never-kept: a pool a venue's own event names exists, so a
+   *  node answering none of it has not read it; kept, every later trade on the pool was dropped). */
+  function poolOf(t: RawTrade): Promise<{ a: string; b: string } | null | "none"> {
     const k = `${t.venue}:${t.pool!}`;
     const kept = pools.get(k);
     if (kept !== undefined) return kept;
     const venue = t.venue;
     // Meteora DBC: the quote mint is the pool's config's (card index-sol-trades-2)
-    const read: Promise<{ a: string; b: string } | null> = venue === "meteora-dbc" ? Promise.all([account(t.pool!), account(t.config!)]).then(([a, c]) => (a === null || c === null ? null : dbcPair(a, c, t.config!))) : account(t.pool!).then((a) => {
-      if (a === null) return null;
+    const read: Promise<{ a: string; b: string } | null | "none"> = venue === "meteora-dbc" ? Promise.all([account(t.pool!), account(t.config!)]).then(([a, c]) => (a === null || c === null ? "none" : dbcPair(a, c, t.config!))) : account(t.pool!).then((a) => {
+      if (a === null) return "none";
       if (venue === "pumpswap") {
         const p = a.owner === PUMP_AMM ? poolMints(a.data) : null;
         return p === null ? null : { a: p.base, b: p.quote };
@@ -942,7 +944,7 @@ export function createSolanaTrades(deps: {
     });
     if (pools.size >= POOLS_MAX) pools.delete(pools.keys().next().value!);
     pools.set(k, read);
-    read.catch(() => pools.delete(k));
+    read.then((v) => v === "none" && pools.get(k) === read && pools.delete(k), () => pools.delete(k));
     return read;
   }
 
@@ -978,8 +980,9 @@ export function createSolanaTrades(deps: {
 
   /** The trades of one transaction for `mint`, with the token named and the quote checked; pools read. A pair venue's
    *  trade (told as the pool's first mint sees it) is turned round when the token is the second; an event with no clock
-   *  keeps ts 0 (`dated` gives it its block's). */
-  async function forMint(mint: string, trades: RawTrade[]): Promise<RawTrade[]> {
+   *  keeps ts 0 (`dated` gives it its block's). Null: a pool answered with no account, so whether the transaction holds a
+   *  trade of `mint` is unknown (unread: the stream's transaction a cut, a walk's whole reach above it). */
+  async function forMint(mint: string, trades: RawTrade[]): Promise<RawTrade[] | null> {
     const out: RawTrade[] = [];
     for (const t of trades) {
       if (t.venue === "pump") {
@@ -987,6 +990,7 @@ export function createSolanaTrades(deps: {
         continue;
       }
       const p = t.pair ?? (await poolOf(t));
+      if (p === "none") return null;
       if (p === null || p.a === p.b) continue;
       if (p.a === mint) out.push({ ...t, mint, quoteMint: p.b });
       // PumpSwap: the base mint only, as before
