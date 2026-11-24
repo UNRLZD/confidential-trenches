@@ -143,6 +143,42 @@ test("card helper-tape-handover-judges-handed-books: a restored book's trades an
   cold.stop();
 });
 
+test("card helper-handover-books-take-room: the handover's file (the old helper's last, read once the senders are held) restores every book it holds at rest; a book the start's file left at rest that the old helper has since dropped gives up its room (red at main 4be15c065: held 1 restored 0; live run 45276410984: base held 101 restored 99, robinhood held 100 restored 99)", async () => {
+  const clock = { t: 1_000_000 };
+  const c = fakeChain();
+  // an old helper that keeps one book at rest: ICNT rests, then VVV rests and ICNT is dropped for it
+  const old = open(c, clock, { restMax: 1 });
+  const rest = async (t: string, from: number) => {
+    await old.candles(t, "1m", null, 500);
+    for (let h = from; h < from + 20; h += 5) {
+      c.st.head = h;
+      await old.tick();
+    }
+    clock.t += IDLE_MS + 1;
+    await old.tick();
+  };
+  await rest(ICNT, REC.lastHead - 45);
+  const atStart = handed(old);
+  await rest(VVV, REC.lastHead - 25);
+  const atStop = handed(old);
+  old.stop();
+  const restingIn = (st: Record<string, unknown>) => (st.books as [string, { rest?: true }][]).map(([t, b]) => [t, b.rest]);
+  assert.deepEqual(restingIn(atStart), [[ICNT, true]], "the start's file: ICNT at rest");
+  assert.deepEqual(restingIn(atStop), [[VVV, true]], "the stop's file: VVV at rest, ICNT dropped");
+  clock.t += 30_000;
+  const n = fakeChain();
+  n.st.head = c.st.head;
+  const next = open(n, clock, { pools: new Map(), restMax: 1 });
+  assert.equal(next.restore(atStart), true);
+  assert.deepEqual(next.handover(), { held: 1, restored: 1 }, "the start's file");
+  assert.equal(next.restore(atStop), true);
+  assert.deepEqual(next.handover(), { held: 1, restored: 1 }, "the handover's file: VVV takes the room of ICNT, which the old helper dropped");
+  const a = await next.trades(VVV, 50);
+  assert.ok((JSON.parse(a.body).trades as unknown[]).length > 0, "VVV answers its rows");
+  assert.ok((a.timing ?? "").includes(HANDED_TIMING), `VVV answers as handed: ${a.timing}`);
+  next.stop();
+});
+
 test("card helper-tape-handover-judges-handed-books: the swaps name what the warm file held and what they restored (handover(), on /v1/health): after a restore 2 of 2, at a cold start 0 of 0, after a file with a hostile book 0 of 2 (a restore is whole or nothing), so the live check fails a deploy that dropped books (red at main 5d7c3a99d: no counts)", async () => {
   const { clock, head, st } = await warmOld();
   const at = () => {
