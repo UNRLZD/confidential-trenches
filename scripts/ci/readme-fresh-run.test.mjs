@@ -4,7 +4,7 @@
 //   node --test scripts/ci/readme-fresh-run.test.mjs
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -101,6 +101,31 @@ test("the repository's .npmrc runs workspace scripts unsorted; one without the l
   assert.equal(unsorted(npmrc.replace(/^\s*sort\s*=\s*false\s*$/m, "")), false);
   assert.equal(unsorted(npmrc.replace(/^\s*sort\s*=\s*false\s*$/m, "sort=true")), false);
   assert.equal(unsorted(npmrc.replace(/^\s*sort\s*=\s*false\s*$/m, "# sort=false")), false);
+});
+
+// and all at once: pnpm's default runs 4, so the wallet waited 91 s for a slot and was the run's tail (fresh run
+// 45317477506). The .npmrc's workspace-concurrency (its last line; none is pnpm's 4; 0 or less is the machine's cores
+// less that, so not every package on a 4-core runner) must cover every workspace package with a test script.
+const concurrency = (npmrc) => {
+  const v = npmrc.split("\n").map((l) => /^\s*workspace-concurrency\s*=\s*(\S+)\s*$/.exec(l)?.[1]).filter(Boolean).at(-1);
+  if (v === undefined) return 4;
+  const n = v === "Infinity" ? Infinity : Number(v);
+  return Number.isNaN(n) || n <= 0 ? 0 : n;
+};
+test("the repository's .npmrc starts every package's tests at once; pnpm's default 4, or fewer than the packages, fails", () => {
+  const npmrc = readFileSync(path.join(ROOT, ".npmrc"), "utf8");
+  const tested = ["apps", "packages", "examples"].flatMap((d) =>
+    readdirSync(path.join(ROOT, d), { withFileTypes: true })
+      .filter((e) => e.isDirectory() && existsSync(path.join(ROOT, d, e.name, "package.json")))
+      .filter((e) => JSON.parse(readFileSync(path.join(ROOT, d, e.name, "package.json"), "utf8")).scripts?.test),
+  ).length;
+  assert.ok(tested >= 7, `${tested} packages with a test script`);
+  assert.ok(concurrency(npmrc) >= tested, `.npmrc runs ${concurrency(npmrc)} at once, under the ${tested} packages with a test script`);
+  const without = npmrc.replace(/^\s*workspace-concurrency\s*=.*$/m, "");
+  assert.equal(concurrency(without), 4, "no line is pnpm's default");
+  assert.ok(concurrency(without) < tested);
+  assert.ok(concurrency(npmrc.replace(/^\s*workspace-concurrency\s*=.*$/m, "workspace-concurrency=0")) < tested);
+  assert.ok(concurrency(npmrc.replace(/^\s*workspace-concurrency\s*=.*$/m, `workspace-concurrency=${tested - 1}`)) < tested);
 });
 
 // ---- the runner itself, on a README of its own and a throwaway git checkout
