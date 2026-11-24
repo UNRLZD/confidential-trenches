@@ -2,7 +2,7 @@
 // A Solana buy is never priced below the coin's real market (card solana-buy-never-below-a-hidden-market). The coin is
 // the kit's recorded PumpSwap coin (packages/kit/test/fixtures/solana-pool.json: its canonical pool read on two
 // providers), and beside it a deep Raydium CLMM market, planted: MPLX's real CLMM pool and vaults
-// (packages/kit/test/vectors/mplx-clmm-sim.json, read on publicnode and api.mainnet-beta on 21 Nov, 24201 SOL deep) with
+// (packages/kit/test/vectors/mplx-clmm-sim.json, read on publicnode and api.mainnet-beta on 24 Nov, 23072 SOL deep) with
 // the coin in MPLX's place and its price set so the market pays ten times the coin per SOL that the PumpSwap pool does:
 // the PumpSwap pool is a thin one at a tenth of the market. Before this card the reference read no CLMM market, so E was
 // the PumpSwap pool's own out and the buy took it (red at main, HM1). Now the market's floor is E and the buy is refused
@@ -76,9 +76,10 @@ function providers(times: bigint | null, lie: Lie | null = null): readonly [Sola
     assert.ok(times !== null, "a market read where none was asked");
     const m = market(p, PER, times, lie !== null && (lie.p === p || lie.p === "both") ? lie.f : undefined);
     if (JSON.stringify(list) === JSON.stringify([POOL])) return { context: m.context, value: [m.value[0]] };
-    const planned = solanaClmmReadList(POOL, solanaDecodeClmmPool({ owner: SOLANA_CLMM_PROGRAM, data: bytes(m.value[0]!) }), coin.mint);
+    const planned = solanaClmmReadList(POOL, solanaDecodeClmmPool({ owner: SOLANA_CLMM_PROGRAM, data: bytes(m.value[0]!) }), coin.mint, "buy");
     assert.deepEqual(list, planned);
-    return m;
+    // the planted price's tick arrays: none on either provider (no tick initialized past the price; the buy stays in its cell)
+    return { context: m.context, value: [...m.value.slice(0, 6), ...planned.slice(6).map(() => null)] };
   }, { url: `https://${"ab"[p]}.example` })) as unknown as readonly [SolanaRpc, SolanaRpc];
 }
 // the PumpSwap pool's own out for the buy, the bar the market is priced against

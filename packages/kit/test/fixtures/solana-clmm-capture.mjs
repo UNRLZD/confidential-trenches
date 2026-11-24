@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Card solana-buy-never-below-a-hidden-market: records test/vectors/<name>-clmm-sim.json, a Raydium CLMM pool's own
 // swap_v2 out beside the accounts the kit's market read takes, so test/solana-clmm.test.ts holds the kit's floor
-// (clmm.ts solanaClmmCellOut) to what the program pays. Read only: simulateTransaction with sigVerify false and
+// (clmm.ts solanaClmmSwapOut) to what the program pays. Read only: simulateTransaction with sigVerify false and
 // replaceRecentBlockhash, so nothing is signed, no key is read or made, and nothing can land. The payer is a public
 // wallet with SOL (any wallet works unsigned); the transaction wraps `amount` SOL into its wSOL account, then swaps it
 // in on the pool (swap_v2, exact input, no price limit), with the pool's current tick array and the next two in the
@@ -54,7 +54,7 @@ const head = await rpc(RPCS.B, "getAccountInfo", [POOL, { encoding: "base64" }])
 const pool = kit.solanaDecodeClmmPool({ owner: head.value.owner, data: Buffer.from(head.value.data[0], "base64") });
 const side = kit.solanaClmmSide(pool, MINT);
 if (!side || side.quote !== "sol") throw new Error("not the coin's wSOL pool");
-const list = kit.solanaClmmReadList(POOL, pool, MINT);
+const list = kit.solanaClmmReadList(POOL, pool, MINT, "buy");
 const observation = (() => { const d = Buffer.from(head.value.data[0], "base64"); let v = BigInt("0x" + d.subarray(201, 233).toString("hex")); let o = ""; while (v > 0n) { o = B58[Number(v % 58n)] + o; v /= 58n; } return o; })();
 const coinProgram = (await rpc(RPCS.B, "getAccountInfo", [MINT, { encoding: "base64", dataSlice: { offset: 0, length: 0 } }])).value.owner;
 const ata = (owner, mint, program) => kit.solanaAta(owner, mint, program);
