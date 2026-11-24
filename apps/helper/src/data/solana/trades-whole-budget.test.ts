@@ -24,6 +24,8 @@ const QUIET_COINS = "ABCDEFGHJKLMNPQRSTUV".split("").map((ch) => `${"1".repeat(3
 const TX = MT.txs["dlmm-buy"]!;
 const MAIN = "https://main.test";
 const WHOLE = "https://whole.test";
+/** The whole reads' second provider, when a test gives one (`spare`). */
+const SPARE = "https://spare.test";
 const settle = () => new Promise((r) => setTimeout(r, 20));
 
 function pyth(price: bigint, pub: number): Buffer {
@@ -39,7 +41,7 @@ function pyth(price: bigint, pub: number): Buffer {
 
 /** A helper's Solana trades over a recorded chain: every coin in `coins` is TTW's twin (each answers as a mint), every
  *  getTransaction answers dlmm-buy whatever its signature; each request kept as "<url> <method>". */
-function chain(coins: string[], opts: { tape?: (m: string) => Promise<{ status: number; body: string; src?: string; asOfMs?: number }>; sigsHeld?: () => Promise<void> | null; poolsDown?: boolean; poolNone?: () => boolean; whole?: () => Response | null; wholeWait?: (ms: number) => Promise<void> } = {}) {
+function chain(coins: string[], opts: { tape?: (m: string) => Promise<{ status: number; body: string; src?: string; asOfMs?: number }>; sigsHeld?: () => Promise<void> | null; poolsDown?: boolean; poolNone?: () => boolean; whole?: () => Response | null; spare?: () => Response | null; wholeWait?: (ms: number) => Promise<void> } = {}) {
   let ms = TS * 1000;
   const sent: string[] = [];
   const fetchFn = async (url: string, init: RequestInit): Promise<Response> => {
@@ -64,6 +66,7 @@ function chain(coins: string[], opts: { tape?: (m: string) => Promise<{ status: 
       return ok([]);
     }
     if (req.method === "getTransaction" && url === WHOLE) return opts.whole?.() ?? ok(TX.result);
+    if (req.method === "getTransaction" && url === SPARE) return opts.spare?.() ?? ok(TX.result);
     if (req.method === "getTransaction") return ok(TX.result);
     throw new Error(`unexpected ${req.method}`);
   };
@@ -73,7 +76,7 @@ function chain(coins: string[], opts: { tape?: (m: string) => Promise<{ status: 
     now: () => ms,
     listed: async (m) => coins.includes(m),
     rpcs: [MAIN],
-    wholeRpcs: [WHOLE],
+    wholeRpcs: opts.spare === undefined ? [WHOLE] : [WHOLE, SPARE],
     source: (o) => ((on = o), { watch: async () => undefined, unwatch: () => undefined, close: () => undefined }),
     tickMs: 0,
     coldWait: () => settle(),
@@ -276,6 +279,37 @@ test("card helper-sol-tape-checks-hold: a whole read unanswered, then its provid
   c.step(1_000);
   c.stream(TTW);
   await settle();
+  assert.match((await c.t.trades(TTW, 50)).timing ?? "", /sol-whole-cut;desc="a Meteora trade unread 0 s ago: its provider held"/);
+  c.t.stop();
+});
+
+// card meteora-whole-reads-second-provider: live run 45380527652 (helper 64ecd1e35, 24 Nov 11:0xZ) cut a DBC coin's
+// trades "its provider held" for 95 s, while the helper's market reads drew about 40 429s from the same public provider
+// in one second (its log, 11:04:06Z): one provider's 429 held every whole read, so the coin's trades went unread.
+test("card meteora-whole-reads-second-provider: one provider's 429 holds only it, the next trades read whole on the second, cut held only once every provider is held (red at 64ecd1e35: the first 429 held the lane)", async () => {
+  const vendor = { status: 200, body: JSON.stringify([{ t_ms: TS * 1000, side: "b", usd: "1", amt: "1", trader: null, tx: "V1" }]), src: "geckoterminal", asOfMs: TS * 1000 };
+  const busy = () => new Response("busy", { status: 429, headers: { "retry-after": "30" } });
+  let spare: () => Response | null = () => null;
+  const c = chain([TTW], { tape: async () => vendor, whole: busy, spare: () => spare() });
+  assert.equal((await c.t.trades(TTW, 50)).status, 200);
+  for (let i = 0; i < 3; i++) {
+    c.stream(TTW);
+    await settle();
+    c.step(1_000);
+  }
+  assert.equal(c.reads(WHOLE), 1, "the held provider asked once, at its 429, never again while it holds");
+  assert.equal(c.reads(SPARE), 3, "each trade read whole on the second");
+  const r = await c.t.trades(TTW, 50);
+  assert.doesNotMatch(r.timing ?? "", /sol-whole-cut/, "no trade cut while one provider answers");
+  assert.deepEqual((JSON.parse(r.body) as { trades: { tx: string }[] }).trades.map((x) => x.tx).sort(), ["S1", "S2", "S3"]);
+  // the second throttles too: every provider held, the next trade is cut held, and neither is asked
+  spare = busy;
+  c.stream(TTW);
+  await settle();
+  c.step(1_000);
+  c.stream(TTW);
+  await settle();
+  assert.equal(c.reads(WHOLE) + c.reads(SPARE), 5, "the second asked once more, at its 429; then neither");
   assert.match((await c.t.trades(TTW, 50)).timing ?? "", /sol-whole-cut;desc="a Meteora trade unread 0 s ago: its provider held"/);
   c.t.stop();
 });
