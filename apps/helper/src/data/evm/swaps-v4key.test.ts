@@ -8,6 +8,7 @@
 // already hashes to the id, so no search can find another.
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { setTimeout as sleep } from "node:timers/promises";
 import { fakeChain, open, REC, timeAt, URLS } from "../../../test/evm-swaps/robinhood.ts";
 import { callsIn, pocketRefusal } from "../../../test/pocket.ts";
 import { onVirtualTime } from "../../../test/evm-swaps/virtual-time.ts";
@@ -95,23 +96,34 @@ function rig(hopKnown: boolean) {
   return { chain, fetch };
 }
 
-/** The longest the event loop went without running a 10 ms timer while `p` ran, and `p`'s value. */
+/** The event loop's thread's own CPU so far, in ms: what a stall spends, which other processes on the machine's cores
+ *  cannot stretch (wall time between two turns grows with every process sharing them: the README run's runner held
+ *  about 22 test processes on 4 cores, run 45325214954). */
+const threadMs = (): number => {
+  const u = process.threadCpuUsage();
+  return (u.user + u.system) / 1_000;
+};
+
+/** The most CPU the event loop's thread spent between two runs of a 10 ms timer while `p` ran, and `p`'s value. */
 async function stallOf<T>(p: () => Promise<T>): Promise<{ value: T; stallMs: number }> {
-  let last = performance.now();
+  let last = threadMs();
   let stallMs = 0;
   const t = setInterval(() => {
-    const at = performance.now();
+    const at = threadMs();
     stallMs = Math.max(stallMs, at - last);
     last = at;
   }, 10);
   try {
     const value = await p();
-    stallMs = Math.max(stallMs, performance.now() - last);
+    stallMs = Math.max(stallMs, threadMs() - last);
     return { value, stallMs };
   } finally {
     clearInterval(t);
   }
 }
+
+/** Whether `a` is a 200 that says the tape is still filling. */
+const filling = (a: { status: number; body: string }): boolean => a.status === 200 && (JSON.parse(a.body) as { filling?: boolean }).filling === true;
 
 /** [design: 1 s, half a hedge (swaps.ts HEDGE_MS): a stall past it ages every post out toward a hedge that is no
  *  provider's fault; one v4Key miss with ten hook candidates stalled 5.4 s on the Mac, these tests' 3.1 s and 4.0 s at
@@ -123,7 +135,16 @@ for (const hopKnown of [true, false]) {
     const r = rig(hopKnown);
     const clock = { get t() { return Date.now(); } };
     const s = open(r.chain, clock, { pools: new Map(), fetch: r.fetch as never });
-    const { value: a, stallMs } = await stallOf(() => s.trades(TOKEN, 50));
+    // a first open past OPEN_BOUND_MS answers what it holds, filling, and reads on, as on a loaded machine (the README
+    // run's runner: 200 with no rows at 8 s, run 45325214954); the page reads the tape again, and so does this
+    const { value: a, stallMs } = await stallOf(async () => {
+      let got = await s.trades(TOKEN, 50);
+      for (const end = Date.now() + 120_000; filling(got) && (JSON.parse(got.body) as { trades: unknown[] }).trades.length < SWAPS && Date.now() < end; ) {
+        await sleep(250);
+        got = await s.trades(TOKEN, 50);
+      }
+      return got;
+    });
     s.stop();
     assert.equal(a.status, 200, a.body);
     assert.equal((JSON.parse(a.body) as { trades: unknown[] }).trades.length, SWAPS, "the token's own tape, from its USDG pool");
