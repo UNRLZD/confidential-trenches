@@ -14,6 +14,7 @@
 // - Program address: sha256(seeds || program id || "ProgramDerivedAddress"), off the ed25519 curve, bump from 255 down.
 import { base58 } from "@scure/base";
 import { sha256 } from "@noble/hashes/sha2.js";
+import { bytesToHex } from "@noble/hashes/utils.js";
 import { ed25519 } from "@noble/curves/ed25519.js";
 
 export const SOLANA_MAX_TX_BYTES = 1232;
@@ -172,7 +173,18 @@ function onCurve(b: Uint8Array): boolean {
   }
 }
 
+// A program address is a pure function of its seeds and program, and each costs a sha256 and an on-curve check (a field
+// square root) per bump tried. The device derives the same accounts again for every quote, check and sell: in the
+// signing page's pool-sell tests it was 12 of 22 busy seconds (card readme-run-fits-an-agent-timeout). The last
+// PDA_KEPT answers are kept by the seeds' bytes and the program as given, the oldest dropped first. The key's seeds
+// part holds only hex and ":", so its first "|" ends it: no other seeds and program give the same key.
+const PDA_KEPT = 4096;
+const pdaKept = new Map<string, string>();
+
 export function solanaProgramAddress(seeds: Uint8Array[], program: string): string {
+  const key = `${seeds.map(bytesToHex).join(":")}|${program}`;
+  const kept = pdaKept.get(key);
+  if (kept !== undefined) return kept;
   const prog = base58.decode(program);
   for (let bump = 255; bump >= 0; bump--) {
     const parts = [...seeds, Uint8Array.of(bump), prog, PDA_MARKER];
@@ -183,7 +195,12 @@ export function solanaProgramAddress(seeds: Uint8Array[], program: string): stri
       o += p.length;
     }
     const h = sha256(buf);
-    if (!onCurve(h)) return base58.encode(h);
+    if (!onCurve(h)) {
+      const a = base58.encode(h);
+      if (pdaKept.size >= PDA_KEPT) pdaKept.delete(pdaKept.keys().next().value!);
+      pdaKept.set(key, a);
+      return a;
+    }
   }
   throw new Error("no program address");
 }
