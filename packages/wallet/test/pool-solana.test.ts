@@ -16,6 +16,7 @@ import { SOL_MARK_BUCKET, SOL_MARK_READ_BATCH, SOL_MARK_READ_BATCH_MAX, SOL_MARK
 import { IDBFactory } from "fake-indexeddb";
 import { createRpc as createHelperRpc } from "../../../apps/helper/src/rpc/rpc.ts";
 import { SOLANA_RPC_WINDOW_RETRY, solanaHelperRpc, solanaPacedRpc } from "../../kit/src/trade/solana/send.ts";
+import { onTestClock } from "../../kit/test/test-clock.ts";
 import { RESERVED_MARKS_KEY, openNoteStore, readReservedMarks, type NoteStore } from "../src/notes/store.ts";
 import { openWalletStore, type WalletStore } from "../src/store/index.ts";
 import { refKey } from "../src/notes/store.ts";
@@ -3201,6 +3202,10 @@ test("review P2-2: a held bucket taken whole still has one counter per mark in i
 // Retry-After), its provider a stub answering from the fake chain; it reads SOL_MARK_READ_BATCH_MAX marks a call, seat 0
 // (publicnode's 10) SOL_MARK_READ_BATCH. Real clocks: before, the first window's 429 failed the 3.5 s call, a failed walk
 // kept nothing and every pass began again, so a pool past about 320 marks never closed.
+// Each run is on the test clock (kit test/test-clock.ts): the pace, the window, the Retry-After and the call's bound are
+// all timers there, firing in the order of their times as in real time, but never waited out. On the real clock the
+// 5,000-mark run spent 11.2 s of its 11.2 in the pace's waits (59 mark reads), and on the README run's loaded runner
+// this file was the wallet's last to end, at 7m24s of the 8 minutes (run 45325214954).
 async function coldThroughHelper(nPre: number, nSpent: number): Promise<{ notes: number; ok: number; throttled: number; marks: number }> {
   const { chain } = bigPool(nPre, nSpent);
   const helper = createHelperRpc({ SOLANA_RPC_URL: "https://keyed.example/?api-key=not-a-key" }, {
@@ -3232,7 +3237,7 @@ async function coldThroughHelper(nPre: number, nSpent: number): Promise<{ notes:
 
 for (const [nPre, nSpent] of [[80, 80], [200, 200], [500, 500], [2_500, 2_500]] as const)
   test(`review P2-1 of e3489b3b: a cold restore of ${nPre + nSpent} marks with seat 1 through the helper's own route and limiter closes on its first pass, the helper's mark reads ${SOL_MARK_READ_BATCH_MAX} a call`, { timeout: 240_000 }, async () => {
-    const r = await coldThroughHelper(nPre, nSpent);
+    const r = await onTestClock(() => coldThroughHelper(nPre, nSpent));
     assert.equal(r.notes, 2);
     // one mark read a SOL_MARK_READ_BATCH_MAX of each bucket's marks: never above one a 100 marks and one a bucket
     assert.ok(r.marks <= Math.ceil((nPre + nSpent) / SOL_MARK_READ_BATCH_MAX) + 2 * Math.ceil((nPre + nSpent) / SOL_MARK_BUCKET), `${r.marks} mark reads`);

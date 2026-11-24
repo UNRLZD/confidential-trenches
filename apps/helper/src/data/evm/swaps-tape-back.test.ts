@@ -235,9 +235,12 @@ test("a pool born inside the hour: its read back ends at the step that holds its
   const born = first - 2_000;
   const at = born + 100;
   const { s, asked } = rig(PCS, `${PCS.factory} ${sel("getPool(address,address,uint24)")}${w(PCS.asset0)}${w(PCS.asset1)}${w(word(BigInt(PCS.fee!)))}`, head, at, undefined, born);
-  assert.equal(await filling(s, PCS.asset0), true);
+  const row = ["b", "57.137132", "868.503865188635487108", PCS.log.transactionHash];
+  // a born pool's read back is one or two steps, so a loaded runner's first answer came after it had ended: not filling
+  // (the README's fresh run 45327464114 on GitHub's 4-core runner); either first answer firstOpen allows is right
+  await firstOpen(s, PCS.asset0, row);
   await ticks(s, 3);
-  assert.deepEqual(await rows(s, PCS.asset0), [["b", "57.137132", "868.503865188635487108", PCS.log.transactionHash]]);
+  assert.deepEqual(await rows(s, PCS.asset0), [row]);
   assert.equal(await filling(s, PCS.asset0), false, "done at its birth: not filling");
   assert.equal(await reach(s, PCS.asset0), 0, "the tape holds every trade since the pool's birth");
   const back = asked.filter((b) => b < first);
