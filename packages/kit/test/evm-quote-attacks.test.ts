@@ -340,11 +340,19 @@ type Sees = { seq: boolean; hist: boolean; beacon: boolean; baseFee: boolean; ra
 type ModelPool = { readGas?: number; gas?: bigint; deltaFee?: true; key: EvmPoolKey; give: (a: bigint) => bigint; lie?: ((a: bigint) => bigint | null) | undefined; lieAt?: (a: bigint, ctx: SimCtx) => bigint | null; exec?: (a: bigint, ctx: SimCtx) => bigint | null; neutral?: (a: bigint, ctx: SimCtx) => bigint | null; only?: 0 | 1; state?: [bigint, bigint]; ticks?: number[]; most?: bigint; mostOn?: 0 | 1; mostOf?: Record<string, bigint>; over?: 0 | 1 | "both"; plainOn?: 0 | 1 | "both" };
 // a pure function of the key, asked again for every log of every getLogs a scanner answers: hashed once per key (card
 // ci-fresh-run-ends-with-room)
+// `raw` first, by the fields as given: the 320-character encoding a hash reads was built for every call only to find the
+// key's hash, 4 of the file's 32 busy seconds (card readme-run-fits-an-agent-timeout); a miss builds it, so two spellings
+// of one key (an address's case) are two entries with one hash
 const pids = new Map<string, string>();
+const raw = new Map<string, string>();
 const pidOf = (k: EvmPoolKey) => {
+  const given = `${k.currency0}|${k.currency1}|${k.fee}|${k.tickSpacing}|${k.hooks}`;
+  let id = raw.get(given);
+  if (id !== undefined) return id;
   const text = W(BigInt(k.currency0)) + W(BigInt(k.currency1)) + W(BigInt(k.fee)) + W(BigInt(k.tickSpacing)) + W(BigInt(k.hooks));
-  let id = pids.get(text);
+  id = pids.get(text);
   if (id === undefined) pids.set(text, (id = kk(text)));
+  raw.set(given, id);
   return id;
 };
 const keyOf = (token: string, other: string, fee: number, tickSpacing: number, hooks: string): EvmPoolKey => {

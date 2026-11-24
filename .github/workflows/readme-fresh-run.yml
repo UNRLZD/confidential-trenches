@@ -134,5 +134,12 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
+      # the machine's CPU every 10 s while the steps run, printed after them (us and sy busy, id idle, r runnable): whether
+      # the run waits on the runner's four cores or on tests that sleep (card readme-run-fits-an-agent-timeout)
+      - name: sample the machine's CPU
+        run: nohup vmstat -n -t 10 > "$RUNNER_TEMP/vmstat.log" 2>&1 &
       - name: the README's AI-agent steps, from a fresh clone
         run: node scripts/ci/readme-fresh-run.mjs --checkout "$GITHUB_WORKSPACE" --workdir "$RUNNER_TEMP/fresh" --max-minutes 8
+      - name: the machine's CPU while the steps ran
+        if: always()
+        run: cat "$RUNNER_TEMP/vmstat.log"

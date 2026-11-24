@@ -13,6 +13,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { base58 } from "@scure/base";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { ed25519 } from "@noble/curves/ed25519.js";
 import { assembleSolanaSwap, parseSolanaJupiterBuild, type SolanaBuildRequest } from "../src/trade/solana/build.ts";
 import { solanaAta, solanaDecodeLookupTable, solanaProgramAddress, type SolanaLookupTable } from "../src/checks/solana/message.ts";
 import { noneWritten } from "./solana-writes.ts";
@@ -366,4 +368,38 @@ test("S6 legs: the wallet's account at the shared route's first leg (index 12) i
     assert.equal(got.ok, false, `${c.name}: ${got.detail}`);
     assert.ok(got.detail.includes(`leg account ${key} is a token account of the wallet's`), got.detail);
   }
+});
+
+// Card readme-run-fits-an-agent-timeout: solanaProgramAddress keeps its last answers. Each answer, fresh or kept, asked
+// again or between others, is the derivation's (sha256 of seeds, bump, program and marker, the first off the curve from
+// 255 down), and a program that cannot decode still throws after a kept answer whose key a colon-joined key would share
+// (seeds [bb, empty] under P, against no seeds under "P:bb").
+test("a program address is the derivation's every time it is asked, and a program that cannot decode throws", () => {
+  const MARK = new TextEncoder().encode("ProgramDerivedAddress");
+  const derive = (seeds: Uint8Array[], program: string): string => {
+    for (let bump = 255; bump >= 0; bump--) {
+      const h = sha256(Uint8Array.from([...seeds.flatMap((s) => [...s]), bump, ...base58.decode(program), ...MARK]));
+      try {
+        ed25519.Point.fromBytes(h, true);
+      } catch {
+        return base58.encode(h);
+      }
+    }
+    throw new Error("no program address");
+  };
+  const programs = [SOLANA_TOKEN_PROGRAM, SOLANA_TOKEN_2022_PROGRAM];
+  let n = 7;
+  const next = () => (n = (n * 1103515245 + 12345) % 2 ** 31);
+  const asks = Array.from({ length: 40 }, () => ({ seeds: [0, 1].map(() => Uint8Array.from({ length: next() % 33 }, () => next() % 256)), program: programs[next() % 2]! }));
+  const want = asks.map((a) => derive(a.seeds, a.program));
+  for (let round = 0; round < 3; round++)
+    for (let i = 0; i < asks.length; i++) {
+      const k = (i * (round * 2 + 1)) % asks.length;
+      assert.equal(solanaProgramAddress(asks[k]!.seeds, asks[k]!.program), want[k], `ask ${k}, round ${round}`);
+    }
+  const P = SOLANA_TOKEN_PROGRAM;
+  assert.equal(solanaProgramAddress([Uint8Array.of(0xbb), new Uint8Array(0)], P), derive([Uint8Array.of(0xbb)], P));
+  assert.throws(() => solanaProgramAddress([], `${P}:bb`), /Unknown letter|Non-base58|:/);
+  assert.equal(solanaProgramAddress([Uint8Array.of(0xbb)], P), derive([Uint8Array.of(0xbb)], P));
+  assert.throws(() => solanaProgramAddress([], `bb|${P}`), /Unknown letter|Non-base58|\|/);
 });
