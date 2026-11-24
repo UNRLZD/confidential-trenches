@@ -1413,12 +1413,12 @@ export function listenAt(port: number): { port: number; host?: string; backlog: 
  */
 export const LISTEN_BACKLOG = 4_096;
 
-export function start(commit: string, port: number, proxy?: Proxy, rpc?: Rpc, watches?: TokenWatches, lists?: Lists, fee?: Fee, withdraw?: WithdrawSender, token?: Token, bind?: BindSender, pools?: ReadonlyMap<string, SolanaPoolSender>, evmLists?: EvmLists, evmSwaps?: Swaps, ready?: () => boolean, senders: Promise<unknown> = Promise.resolve(), solana?: () => Partial<Record<SlotName, SlotState>>, release?: number | null, evmPools?: ReadonlyMap<string, EvmPoolSender>, evmTokens?: EvmTokens, held?: Held, near?: NearMarket, poolIndexes?: Partial<Record<"base" | "robinhood", Pick<PoolIndex, "pools">>>): Server {
+export function start(commit: string, port: number, proxy?: Proxy, rpc?: Rpc, watches?: TokenWatches, lists?: Lists, fee?: Fee, withdraw?: WithdrawSender, token?: Token, bind?: BindSender, pools?: ReadonlyMap<string, SolanaPoolSender>, evmLists?: EvmLists, evmSwaps?: Swaps, ready?: () => boolean, senders: Promise<unknown> = Promise.resolve(), solana?: () => Partial<Record<SlotName, SlotState>>, release?: number | null, evmPools?: ReadonlyMap<string, EvmPoolSender>, evmTokens?: EvmTokens, held?: Held, near?: NearMarket, poolIndexes?: Partial<Record<"base" | "robinhood", Pick<PoolIndex, "pools">>>, shed: () => boolean = loopShed): Server {
   const server = createServer(
     // Caddy keeps its upstream connections idle for 30 s (deploy/Caddyfile); ours outlive that, so no reused
     // connection is closed under a request
     { headersTimeout: 10_000, requestTimeout: 15_000, keepAliveTimeout: 65_000 },
-    handler(commit, proxy, rpc, watches, lists, fee, withdraw, token, bind, release, pools, evmPools, undefined, evmLists, evmSwaps, ready, senders, solana, undefined, evmTokens, held, undefined, undefined, near, undefined, poolIndexes, loopShed),
+    handler(commit, proxy, rpc, watches, lists, fee, withdraw, token, bind, release, pools, evmPools, undefined, evmLists, evmSwaps, ready, senders, solana, undefined, evmTokens, held, undefined, undefined, near, undefined, poolIndexes, shed),
   );
   // card market-data-push: the push socket, upgraded for APP_HOST's Origin only, in its own window per client
   attachPush(server, { commit, readers: pushReaders(evmSwaps, near), allowed: (req) => originIn(req, PUSH_ORIGINS) !== null, client: clientOf, take: clientWindow(API_RATE_MAX).take });
