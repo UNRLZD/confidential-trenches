@@ -1803,6 +1803,70 @@ function keyOfRoute(r: EvmV4Route): EvmPoolKey {
 // scan only adds pools, so one provider serves it; what it finds is read on both providers like any candidate. "all":
 // every pool of the currency; "markets": its pools with the native asset or WETH.
 const INITIALIZE = "dd466e674ea557f56295e2d0218a125ea4b4f0f6f3307b95f85e6110838d6438"; // Initialize(bytes32,address,address,uint24,int24,address,uint160,int24)
+// the PoolManager's events that change a pool's price or liquidity, its id their first indexed word (v4-core
+// IPoolManager.sol; read on Base 2026-11-24 15:5xZ: 123 ModifyLiquidity and 174 Swap logs over 200 blocks, topic 1 the id)
+const V4_SWAP = "40e9cecb9f5f1f1c5b9c97dec2917b7ee92e57ba5563708daca94dd84ad7112f"; // Swap(bytes32,address,int128,int128,uint160,uint128,int24,uint24)
+const V4_MODIFY_LIQUIDITY = "f208f4912782fd25c7f114ca3723a2d5dd6f3bcc3ac8db5af63baa85f711d5ec"; // ModifyLiquidity(bytes32,address,int24,int24,int256,bytes32)
+/** The pools a buy quote's X prune dropped (card evm-warm-tap-skips-pools-it-pruned): each one's id and the amount of
+ *  the token it could not give (NotEnoughLiquidity of quoteExactOutputSingle), as of the block `at` with hash `hash`. */
+type Cut = { at: bigint; hash: string; floors: Map<string, bigint> };
+/** The most blocks one eth_getLogs of unmovedSince spans: the least a chain's quote providers serve (read 2026-11-24
+ *  17:0xZ: base-mainnet.public.blastapi.io refuses past 10 blocks, base-rpc.publicnode.com and base.api.pocket.network
+ *  served 100; robinhood.drpc.org refuses past 100 on its free plan, rpc.mainnet.chain.robinhood.com served 2,000), and
+ *  the most such pieces it asks, about the warm range (EVM_WARM_RANGE_S) of either chain's blocks. A gap wider is no proof. */
+const CUT_LOG_SPAN: Readonly<Record<EvmPoolChain, bigint>> = { base: 10n, "base-sepolia": 10n, robinhood: 100n, "robinhood-testnet": 100n };
+const CUT_LOG_PIECES = 6n;
+/** The ids of `cut`'s pools whose price and liquidity at `block` are the ones the prune read at `cut.at`: the
+ *  PoolManager logged no Swap or ModifyLiquidity of them in the blocks after it through `block`, read in one batch of
+ *  eth_getLogs of CUT_LOG_SPAN blocks each (the ids an OR of topic 1) on two providers that agree, each also answering
+ *  the pruned block's and `block`'s hashes by number, before and after the logs, as the two quotes read them, so the
+ *  logs are of the chain both quotes read. Only those events move a pool's price or liquidity (v4-core PoolManager.sol:
+ *  swap and modifyLiquidity; a donate or a fee moves neither, and a fee changes only the amount in an exact output
+ *  needs). A state read alone is no proof: a position added outside the price's range moves neither slot0 nor the
+ *  liquidity in range, yet gives the pool more to give past it. Refuses where the providers disagree or fail; the
+ *  caller then asks every pool. */
+async function unmovedSince(rpcs: readonly EvmRpc[], chain: EvmPoolChain, pm: string, cut: Cut, block: Block): Promise<Set<string>> {
+  const ids = [...cut.floors.keys()];
+  if (block.number === cut.at) return new Set(lower(block.hash) === cut.hash ? ids : []);
+  const span = CUT_LOG_SPAN[chain];
+  if (block.number < cut.at || ids.length === 0 || block.number - cut.at > span * CUT_LOG_PIECES) return new Set();
+  const topics = [["0x" + V4_SWAP, "0x" + V4_MODIFY_LIQUIDITY], ids.map((id) => "0x" + id)];
+  const pieces: EvmRpcCall[] = [];
+  for (let from = cut.at + 1n; from <= block.number; from += span) {
+    const to = from + span - 1n < block.number ? from + span - 1n : block.number;
+    pieces.push({ method: "eth_getLogs", params: [{ address: lower(pm), fromBlock: qty(from), toBlock: qty(to), topics }] });
+  }
+  const calls: EvmRpcCall[] = [{ method: "eth_getBlockByNumber", params: [qty(cut.at), false] }, ...pieces, { method: "eth_getBlockByNumber", params: [qty(block.number), false] }];
+  const { a } = await agreeing(
+    rpcs,
+    async (rpc, k, gate) => {
+      const who = `provider ${k + 1}`;
+      const got = await askAt(rpc, calls, gate);
+      const logs = got.slice(1, -1).flatMap((l) => {
+        const r = (l as { result?: unknown } | null)?.result;
+        return Array.isArray(r) ? r : refuse("rpc_error", `${who} holds no logs of the pruned pools`);
+      });
+      const moved = logs.map((x) => {
+        const t = (x as { topics?: unknown } | null)?.topics;
+        const id = Array.isArray(t) && typeof t[1] === "string" ? lower(t[1]) : "";
+        if (!/^0x[0-9a-f]{64}$/.test(id)) return refuse("rpc_error", `${who}'s log of a pruned pool names no pool`);
+        return id.slice(2);
+      });
+      return { pruned: str(resultOf(got[0], who, "pruned block"), "hash", who), at: str(resultOf(got.at(-1), who, "block"), "hash", who), moved: [...new Set(moved)].sort() };
+    },
+    (x, y) => JSON.stringify(x) === JSON.stringify(y),
+    () => refuse("rpc_disagree", "the providers answer the pruned pools' logs differently"),
+    true,
+    undefined,
+    false,
+    undefined,
+    undefined,
+    roomOf(calls),
+  );
+  if (a.pruned !== cut.hash || a.at !== lower(block.hash)) return new Set();
+  const moved = new Set(a.moved);
+  return new Set(ids.filter((id) => !moved.has(id)));
+}
 type Spans = [number, number][];
 const SCANS = new Map<string, { spans: Spans; pools: EvmPoolKey[] }>();
 // The chain's tail (card evm-scan-chain-tail): blocks read with requests that name the Initialize event alone, so one
@@ -2117,7 +2181,8 @@ const gapsOf = (spans: Spans, lo: number, hi: number): Spans => {
 // twice it, is asked at the next quote's own amount, or twice it (atAmount)
 // `early`: the reads of its routes through X's markets that its fourth round did not take (card
 // evm-warm-tap-reads-in-one-round), asked beside the next quote's first round as their own read (earlyFirst)
-const PLANS = new Map<string, { ts: bigint; amount: bigint; reads: Read[]; scans: { cs: string[]; kind: ScanKind }[]; xs: string[]; early: Read[]; held: Read[] }>();
+// `cut`: the pools its X prune dropped, each not asked again while unmovedSince proves it unchanged (Cut)
+const PLANS = new Map<string, { ts: bigint; amount: bigint; reads: Read[]; scans: { cs: string[]; kind: ScanKind }[]; xs: string[]; early: Read[]; held: Read[]; cut?: Cut }>();
 /** A kept read of a quote at `from` as the same read at `to` (card evm-quote-warm-from-the-coin-page: the coin page's
  *  warm quotes the coin before the amount is typed): each 32-byte word of its calldata that is `from` becomes `to`, and
  *  each that is twice `from` becomes twice `to`, so a route's quote at the amount and at twice it (quoteCall, v4Read,
@@ -4618,6 +4683,10 @@ async function routeSetOf(a: {
   }
   const earlyReading = earlyFirst.length === 0 ? Promise.resolve(null) : readBoth(rpcs, block.hash, earlyFirst, v.reads, undefined, firstDown).catch(() => null);
   const heldReading = heldFirst.length === 0 ? Promise.resolve(null) : readBoth(rpcs, block.hash, heldFirst, v.reads, undefined, firstDown).catch(() => null);
+  // the pools the last quote's X prune dropped that are unchanged since (unmovedSince), read beside the first round,
+  // within the warm range; a failure proves none, and the prune asks them all as before
+  const cutBefore = plan !== undefined && block.timestamp >= plan.ts && block.timestamp - plan.ts <= EVM_WARM_RANGE_S ? plan.cut : undefined;
+  const unmoving = cutBefore === undefined || v.poolManager === undefined ? Promise.resolve(new Set<string>()) : unmovedSince(rpcs, chain, v.poolManager, cutBefore, block).catch(() => new Set<string>());
   // the lower head's confirmation and the reads at its hash in one round; the confirmation is judged first
   const reading = readAgreed(confirm, rpcs, block.hash, reads, v.reads, firstDown);
   if (spec !== null) {
@@ -4791,19 +4860,49 @@ async function routeSetOf(a: {
   // after the first, 2026-11-06 22:3xZ)
   const keptBefore = new Set(plan?.xs ?? []);
   const unsure = (x: string) => !keptBefore.has(x);
+  // the pools this prune finds hold too little of the token for Q, each at the least Q it is known short of, as of this
+  // block (card evm-warm-tap-skips-pools-it-pruned); none where the prune does not run
+  const cutNow = new Map<string, bigint>();
   if (ok && floor !== null && floor > 0n && floor < 1n << 127n && [...xPools.keys()].some(unsure)) {
+    const q = floor;
     const asks: [Found, number][] = [];
+    const ask = (into: Read[], f: Found) => asks.push([f, put(into, { ...exactOutRead(v.v4!, f.key, lower(token), q), ...noop([f.key]) })]);
+    // A pool the last quote dropped short of a Q this one's is at least, with its price and liquidity as they were
+    // (unmovedSince), cannot give this Q either, and is not asked again: NVDAc on Base re-asked about 77 such pools on
+    // both providers at every warm tap, 154 of a tap's exact-output reads, the taps 4.9 and 11.8 s (read only from this
+    // Mac on release 201's kit, 2026-11-24 16:1xZ). Only a NotEnoughLiquidity is kept so: a SafeCastOverflow bounds the
+    // amount in, which a fee no log names can move
     const pr: Read[] = [];
+    const was: Found[] = [];
     for (const [x, fs] of xPools) {
       if (!unsure(x)) continue;
-      for (const f of fs) if (f.key.hooks === NATIVE || replaced(f.key)) asks.push([f, put(pr, { ...exactOutRead(v.v4!, f.key, lower(token), floor), ...noop([f.key]) })]);
+      for (const f of fs) {
+        if (f.key.hooks !== NATIVE && !replaced(f.key)) continue;
+        const at = cutBefore?.floors.get(f.id);
+        if (at !== undefined && at <= q) was.push(f);
+        else ask(pr, f);
+      }
     }
-    await round(pr);
+    // the proof and the other pools' round at once; a pool the proof does not cover is asked in a round after them
+    const [same] = await Promise.all([was.length === 0 ? Promise.resolve(new Set<string>()) : unmoving, round(pr)]);
+    const again: Read[] = [];
+    for (const f of was) {
+      if (same.has(f.id)) cutNow.set(f.id, cutBefore!.floors.get(f.id)!);
+      else ask(again, f);
+    }
+    await round(again);
     // NotEnoughLiquidity: it runs out before Q; SafeCastOverflow: Q needs more than 2^127 in
-    const cannot = new Set(asks.filter(([, i]) => {
+    const cannot = new Set([
+      ...asks.filter(([, i]) => {
+        const r = ans[i]!;
+        return r.kind === "revert" && (r.partial || r.overflow === true);
+      }).map(([f]) => f),
+      ...was.filter((f) => same.has(f.id)),
+    ]);
+    for (const [f, i] of asks) {
       const r = ans[i]!;
-      return r.kind === "revert" && (r.partial || r.overflow === true);
-    }).map(([f]) => f));
+      if (r.kind === "revert" && r.partial && r.overflow !== true) cutNow.set(f.id, q);
+    }
     for (const [x, fs] of [...xPools]) {
       const left = fs.filter((f) => !cannot.has(f));
       if (left.length === 0) xPools.delete(x);
@@ -5161,7 +5260,7 @@ async function routeSetOf(a: {
   const usedHeld = reads.slice(first).filter((r, j) => r.override !== undefined && !r.data.startsWith("0x" + SEL_V4_OUT_SINGLE) && (!kept.has(readKey(r)) || hit.has(first + j)) && !untaken.has(first + j));
   const planEarly = earlyRead.flatMap((i) => (reads[i] === undefined ? [] : [reads[i]!])).filter((r) => r.override === undefined && !inPlan.has(readKey(r)));
   const planHeld = usedHeld.filter((r, k, all) => all.findIndex((x) => readKey(x) === readKey(r)) === k);
-  PLANS.set(planKey, { ts: block.timestamp, amount: amountIn, reads: planReads, scans: asked, xs: [...xPools.keys()], early: planEarly, held: planHeld });
+  PLANS.set(planKey, { ts: block.timestamp, amount: amountIn, reads: planReads, scans: asked, xs: [...xPools.keys()], early: planEarly, held: planHeld, ...(cutNow.size === 0 ? {} : { cut: { at: block.number, hash: lower(block.hash), floors: cutNow } }) });
   while (PLANS.size > PLANS_MAX) PLANS.delete(PLANS.keys().next().value!);
   return { block, out, fills, filled, outOfGas: [...outOfGas.values()] };
 }
