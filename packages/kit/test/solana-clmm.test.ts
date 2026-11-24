@@ -346,9 +346,9 @@ test("CL16 a tick array the providers read differently, or one not the pool's, e
   assert.deepEqual(solanaClmmSwapOut(pool, 1600n, false, 10n * SOL, { lo: -1800, hi: -1200, at: new Map() }), cell);
 });
 
-// test/vectors/mplx-cross-clmm-sim.json: the same pool read on mainnet 24 Nov with the program's out for a 260 SOL buy,
-// the size that crosses the pool's real initialized tick -2460 (about 230 SOL from -2582); its payer is a public wallet
-// holding that much SOL and no MPLX account (solana-clmm-capture.mjs --payer), simulated unsigned like the others
+// test/vectors/mplx-cross-clmm-sim.json: the same pool read on mainnet 24 Nov 11:1xZ with the program's out for a 700 SOL
+// buy, which crosses the pool's real initialized tick -2460 (510 SOL from that read's tick -2731); its payer is a public
+// wallet holding that much SOL and no MPLX account (solana-clmm-capture.mjs --payer), simulated unsigned like the others
 const X = JSON.parse(readFileSync(new URL("./vectors/mplx-cross-clmm-sim.json", import.meta.url), "utf8")) as typeof V;
 const replayCross = (name: "A" | "B", edit: Edit = (a) => a): SolanaRpc => {
   const rec = X.runs[0]!.providers[name];
@@ -367,6 +367,10 @@ test("CL17 a buy across a real initialized tick is the program's swap_v2 out to 
   // the buy's way up from the pool's tick meets the initialized tick -2460, whose liquidity_net is real (not planted)
   const met = ticks.filter(([t]) => t > pool.tickCurrent && t <= -2460);
   assert.ok(met.length > 0 && met.every(([, net]) => net !== 0n), JSON.stringify(met.map(([t, n]) => [t, String(n)])));
+  // and the buy crosses it: the wSOL that moves the price to -2460 on the read's liquidity, with the fee at its 10% cap,
+  // is under the buy (an earlier capture at 260 SOL stopped short of it once the price had moved: nothing crossed)
+  const toTick = (pool.liquidity * (solanaClmmSqrtPriceAtTick(-2460) - pool.sqrtPriceX64)) >> 64n;
+  assert.ok((toTick * 10n) / 9n < BigInt(run.amount), `${toTick} lamports to -2460 from ${pool.tickCurrent}, the buy ${run.amount}`);
   const v = await readSolanaClmmMarket([replayCross("A"), replayCross("B")], { ...req, amount: BigInt(run.amount) });
   assert.equal(v.kind, "ok");
   if (v.kind !== "ok") return;

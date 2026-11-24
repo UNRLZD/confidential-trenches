@@ -4,8 +4,8 @@
 // (clmm.ts solanaClmmSwapOut) to what the program pays. Read only: simulateTransaction with sigVerify false and
 // replaceRecentBlockhash, so nothing is signed, no key is read or made, and nothing can land. The payer is a public
 // wallet with SOL (any wallet works unsigned); the transaction wraps `amount` SOL into its wSOL account, then swaps it
-// in on the pool (swap_v2, exact input, no price limit), with the pool's current tick array and the next two in the
-// swap's direction, and the bitmap extension when it exists.
+// in on the pool (swap_v2, exact input, no price limit), with the pool's current tick array and each later one in the
+// swap's direction that holds an initialized tick (up to six), and the bitmap extension when it exists.
 //   node packages/kit/test/fixtures/solana-clmm-capture.mjs <name> <coin mint> <pool> <lamports>... [--payer <wallet>]
 // Each amount is simulated with the pool's accounts read just before and just after on both providers; a run whose
 // pool moved between them is read again (at most 6 tries). --payer names another public wallet, for a buy larger than
@@ -71,10 +71,18 @@ const span = pool.tickSpacing * 60;
 const start = (t) => Math.floor(t / span) * span;
 const enc = new TextEncoder();
 const be32 = (n) => { const b = new Uint8Array(4); new DataView(b.buffer).setInt32(0, n, false); return b; };
-const arrays = [0, 1, 2].map((k) => kit.solanaProgramAddress([enc.encode("tick_array"), key32(POOL), be32(start(pool.tickCurrent) + (zeroForOne ? -k : k) * span)], CLMM));
+// the tick arrays the swap walks, as swap.rs takes them: the one that holds the pool's tick, then each later one in the
+// swap's direction that holds an initialized tick (the program jumps to the next initialized array by its bitmap, so an
+// empty array between would be taken for it and refused; none passed past the first is NotEnoughTickArrayAccount, as a
+// buy across MPLX's tick -2460 was on 24 Nov). Up to 99 arrays on are looked at, their initialized_tick_count
+// (tick_array.rs, the byte after the 60 TickStates: 44 + 60 × 168) read alone.
+const ARRAYS_SEEN = 99;
+const COUNT_AT = 44 + 60 * 168;
+const arrays = Array.from({ length: ARRAYS_SEEN }, (_, k) => kit.solanaProgramAddress([enc.encode("tick_array"), key32(POOL), be32(start(pool.tickCurrent) + (zeroForOne ? -k : k) * span)], CLMM));
 const bitmap = kit.solanaProgramAddress([enc.encode("pool_tick_array_bitmap_extension"), key32(POOL)], CLMM);
-const exists = (await rpc(RPCS.B, "getMultipleAccounts", [[...arrays, bitmap], { encoding: "base64", dataSlice: { offset: 0, length: 0 } }])).value.map((v) => v !== null);
-const remaining = [...(exists[3] ? [bitmap] : []), ...arrays.filter((_, i) => exists[i])];
+const seen = (await rpc(RPCS.B, "getMultipleAccounts", [[...arrays, bitmap], { encoding: "base64", dataSlice: { offset: COUNT_AT, length: 1 } }])).value;
+const walked = arrays.filter((_, i) => seen[i] !== null && (i === 0 || Buffer.from(seen[i].data[0], "base64")[0] > 0)).slice(0, 6);
+const remaining = [...(seen[ARRAYS_SEEN] !== null ? [bitmap] : []), ...walked];
 
 const u64 = (x) => { const b = new Uint8Array(8); new DataView(b.buffer).setBigUint64(0, BigInt(x), true); return b; };
 const disc = (n) => createHash("sha256").update(`global:${n}`).digest().subarray(0, 8);
