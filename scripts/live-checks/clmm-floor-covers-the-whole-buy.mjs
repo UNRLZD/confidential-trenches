@@ -10,15 +10,19 @@
 //   - a 25 SOL buy (about 3 cells on 24 Nov, 6.4 to 9 SOL a cell) is a market both providers agree on, priced whole on
 //     each provider's read (the walk reached the buy's end inside the arrays both read alike);
 //   - its floor is the coin's real price for 25 SOL: within PRICE_BAND_BPS of 25 SOL at DexScreener's priceNative for
-//     the same pool, a source the device never uses, read at the same minute, and under the price's own bound.
+//     the same pool, a source the device never uses, read at the same minute, and under the price's own bound;
+//   - SIGN_HOST serves the walk: its /app.js holds the tick array's address seed (`tick_array`, clmm.ts
+//     solanaClmmTickArrayAddress), which no signing page before this card's held (SIGN_HOST read 24 Nov 10:2xZ: none).
 // After: sign
-// Record: both public providers' raw answers and DexScreener's price; a live run that fails keeps it beside its log
-//   node scripts/live-checks/clmm-floor-covers-the-whole-buy.mjs [--record <file>] [--plant-lie]
+// Record: both public providers' raw answers, DexScreener's price and SIGN_HOST's /app.js facts (its size, whether it
+//   holds the seed); a live run that fails keeps it beside its log
+//   node scripts/live-checks/clmm-floor-covers-the-whole-buy.mjs [--record <file>] [--plant-lie] [--app-js <file>]
 //   PASS exit 0, FAIL 1, error 2. --record writes the run, which the .test.mjs replays; --plant-lie makes provider B's
 //   tick array that holds the pool's price carry one more initialized tick than the chain's, as a provider that lies
-//   would. Reads only: no key, no transaction.
+//   would; --app-js judges a signing page build's app.js (packages/signpage/scripts/build-app.mjs) in place of
+//   SIGN_HOST's, before its deploy. Reads only: no key, no transaction.
 import "../net-window.mjs";
-import { realpathSync, writeFileSync } from "node:fs";
+import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { readSolanaClmmMarket, solanaJsonRpc } from "../../packages/kit/src/index.ts";
 import { COIN, POOL, PROVIDERS } from "./solana-buy-never-below-a-hidden-market.mjs";
@@ -29,6 +33,20 @@ const SOL = 1_000_000_000n;
 export const AMOUNT = 25n * SOL;
 // the list's seventh account: the tick array that holds the pool's price (kit solanaClmmReadList)
 const FIRST_ARRAY = 6;
+export const SIGN_HOST = "https://confidential.unrealized.trade";
+/** The walk's tick-array address seed as a string literal, in any quote the bundler writes it in. */
+export const SEED = /[`"']tick_array[`"']/;
+
+/** SIGN_HOST's /app.js (or a build's, `file`): its status, its size and whether it holds the walk's seed. */
+export async function signFacts(file) {
+  if (file !== undefined) {
+    const text = readFileSync(file, "utf8");
+    return { source: `build ${file}`, status: 200, bytes: text.length, seed: SEED.test(text) };
+  }
+  const r = await fetch(`${SIGN_HOST}/app.js`, { redirect: "error", signal: AbortSignal.timeout(15_000) });
+  const text = r.status === 200 ? await r.text() : "";
+  return { source: `${SIGN_HOST}/app.js`, status: r.status, bytes: text.length, seed: SEED.test(text) };
+}
 
 /** A provider that answers each getMultipleAccounts from `answers` (by its account list), recording none. */
 const replayRpc = (url, answers) => Object.assign(async (method, params) => {
@@ -57,12 +75,14 @@ export async function judge(run) {
   const want = Number.isFinite(dex) && dex > 0 ? BigInt(Math.round((Number(AMOUNT / SOL) * 1e6) / dex)) : 0n;
   const off = want > 0n ? ((out > want ? out - want : want - out) * 10_000n) / want : 10_000n;
   say(want > 0n && off <= PRICE_BAND_BPS && reads.every((x) => x.out < x.spotOut), `[chain] its floor is the coin's real price: a ${AMOUNT / SOL} SOL buy must get at least ${Number(out) / 1e6} MPLX, DexScreener ${want > 0n ? Number(want) / 1e6 : "no price"} (${off} bps apart, want at most ${PRICE_BAND_BPS}, under the price's own bound)`);
+  const s = run?.sign;
+  say(s?.status === 200 && s?.bytes > 0 && s?.seed === true, `[sign] ${s?.source ?? `${SIGN_HOST}/app.js`} serves the walk: ${s === undefined ? "not read" : `HTTP ${s.status}, ${s.bytes} bytes, ${s.seed === true ? "holds" : "does not hold"} the tick array's seed`}`);
   const verdict = lines.some((l) => l.startsWith("BAD")) ? "FAIL" : "PASS";
   return { ok: verdict === "PASS", verdict, lines };
 }
 
 /** Both providers' answers to the kit's read and DexScreener's price of the pool. */
-export async function read({ plantLie = false } = {}) {
+export async function read({ plantLie = false, appJs } = {}) {
   const providers = {};
   const rpcs = PROVIDERS.map((u, i) => {
     const rpc = solanaJsonRpc(u, { timeoutMs: 8_000 });
@@ -90,13 +110,13 @@ export async function read({ plantLie = false } = {}) {
   if (r.status !== 200) throw new Error(`DexScreener: HTTP ${r.status}`);
   const j = await r.json();
   const pair = Array.isArray(j?.pairs) ? j.pairs.find((p) => p?.pairAddress === POOL && p?.baseToken?.address === COIN) : null;
-  return { readAt: new Date().toISOString(), plantLie, providers, dex: { priceNative: typeof pair?.priceNative === "string" ? pair.priceNative.slice(0, 32) : null } };
+  return { readAt: new Date().toISOString(), plantLie, providers, dex: { priceNative: typeof pair?.priceNative === "string" ? pair.priceNative.slice(0, 32) : null }, sign: await signFacts(appJs) };
 }
 
 if (realpathSync(process.argv[1] ?? "") === realpathSync(fileURLToPath(import.meta.url))) {
   const a = process.argv.slice(2);
   try {
-    const run = await read({ plantLie: a.includes("--plant-lie") });
+    const run = await read({ plantLie: a.includes("--plant-lie"), appJs: a.includes("--app-js") ? a[a.indexOf("--app-js") + 1] : undefined });
     if (a.includes("--record")) writeFileSync(a[a.indexOf("--record") + 1], `${JSON.stringify(run, null, 1)}\n`);
     const { verdict, lines } = await judge(run);
     for (const l of lines) console.log(l);

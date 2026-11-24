@@ -4,8 +4,9 @@
 // (test/vectors/mplx-clmm-sim.json: the pool, its AmmConfig, both vaults, MPLX's mint, the Clock and the three tick
 // arrays a buy walks, on publicnode (A) and api.mainnet-beta (B), each beside the program's own swap_v2 out for that
 // read, from simulateTransaction; test/fixtures/solana-clmm-capture.mjs records it). Good: the kit's floor is the
-// program's out to the unit for a buy of 1, 10, 25 and 60 SOL, across up to 8 tick-spacing cells; a tick crossed takes
-// its liquidity_net; the tick math is the program's at its bounds. Bad: a provider that lies about any field the read
+// program's out to the unit for a buy of 1, 10, 25 and 60 SOL, across up to 8 tick-spacing cells, and for 260 SOL across
+// the pool's real initialized tick -2460 (test/vectors/mplx-cross-clmm-sim.json, CL17); a tick crossed takes its
+// liquidity_net; the tick math is the program's at its bounds. Bad: a provider that lies about any field the read
 // takes (a mint, a vault, the swap switch, the open time, the fee, the price, the liquidity, the SOL vault, a vault's
 // owner, mint or program) is refused after one read more, never priced; a lie once is read again; a tick array the
 // providers read differently, or one not the pool's, ends the walk before it (CL16); nothing is credited past the arrays
@@ -20,6 +21,7 @@ import {
   SOLANA_SOL_MINT,
   readSolanaClmmMarket,
   readSolanaClmmPools,
+  solanaClmmAgreedTicks,
   solanaClmmFloorFeeRate,
   solanaClmmPoolScan,
   solanaClmmSqrtPriceAtTick,
@@ -342,4 +344,34 @@ test("CL16 a tick array the providers read differently, or one not the pool's, e
   const cell = solanaClmmSwapOut(pool, 1600n, false, 10n * SOL);
   assert.equal(cell.whole, false);
   assert.deepEqual(solanaClmmSwapOut(pool, 1600n, false, 10n * SOL, { lo: -1800, hi: -1200, at: new Map() }), cell);
+});
+
+// test/vectors/mplx-cross-clmm-sim.json: the same pool read on mainnet 24 Nov with the program's out for a 260 SOL buy,
+// the size that crosses the pool's real initialized tick -2460 (about 230 SOL from -2582); its payer is a public wallet
+// holding that much SOL and no MPLX account (solana-clmm-capture.mjs --payer), simulated unsigned like the others
+const X = JSON.parse(readFileSync(new URL("./vectors/mplx-cross-clmm-sim.json", import.meta.url), "utf8")) as typeof V;
+const replayCross = (name: "A" | "B", edit: Edit = (a) => a): SolanaRpc => {
+  const rec = X.runs[0]!.providers[name];
+  const byKey = new Map(X.list.map((k, i) => [k, rec.value[i]!]));
+  return Object.assign((async (method: string, params: readonly unknown[]) => {
+    assert.equal(method, "getMultipleAccounts");
+    return edit({ context: { slot: rec.context.slot }, value: (params[0] as string[]).map((k) => structuredClone(byKey.get(k) ?? null)) }, params[0] as string[]);
+  }) as SolanaRpc, { url: `https://${name.toLowerCase()}.example` });
+};
+
+test("CL17 a buy across a real initialized tick is the program's swap_v2 out to the unit: the input's fee spent at the tick, its liquidity_net taken", async () => {
+  const run = X.runs[0]!;
+  assert.equal(X.pool, V.pool);
+  const pool = solanaDecodeClmmPool({ owner: SOLANA_CLMM_PROGRAM, data: bytes(run.providers.B.value[0]!) });
+  const ticks = [...solanaClmmAgreedTicks(run.providers.A.value.slice(6).map((a) => a && { owner: a.owner, data: bytes(a) }), run.providers.B.value.slice(6).map((a) => a && { owner: a.owner, data: bytes(a) }), solanaClmmWalkStarts(pool, X.coin, "buy"), X.pool, pool.tickSpacing)!.at];
+  // the buy's way up from the pool's tick meets the initialized tick -2460, whose liquidity_net is real (not planted)
+  const met = ticks.filter(([t]) => t > pool.tickCurrent && t <= -2460);
+  assert.ok(met.length > 0 && met.every(([, net]) => net !== 0n), JSON.stringify(met.map(([t, n]) => [t, String(n)])));
+  const v = await readSolanaClmmMarket([replayCross("A"), replayCross("B")], { ...req, amount: BigInt(run.amount) });
+  assert.equal(v.kind, "ok");
+  if (v.kind !== "ok") return;
+  for (const x of v.market.reads) {
+    assert.ok(x.whole, "priced whole: the arrays read hold the buy");
+    assert.equal(x.out, BigInt(run.programOut), `${run.amount} lamports in, across ${met.map(([t]) => t).join(", ")}`);
+  }
 });

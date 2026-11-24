@@ -32,7 +32,7 @@ const M = [
   ["credit past the tick arrays read", CLMM, "const end = zeroForOne ? known.lo : known.hi;", "const end = zeroForOne ? MIN_TICK : MAX_TICK;", "CL15"],
   ["the fee on input dropped", CLMM, "const forPrice = feeOnInput ? (remaining * (FEE_DEN - feeRate)) / FEE_DEN : remaining;", "const forPrice = remaining;", "CL2"],
   ["the fee on output dropped", CLMM, "if (!feeOnInput) out -= ceilDiv(out * feeRate, FEE_DEN);", "", "CL4"],
-  ["the input's fee not spent", CLMM, "spent = feeOnInput ? at[0] + ceilDiv(at[0] * feeRate, FEE_DEN - feeRate) : at[0];", "spent = at[0];", "CL2"],
+  ["the input's fee not spent", CLMM, "spent = feeOnInput ? at[0] + ceilDiv(at[0] * feeRate, FEE_DEN - feeRate) : at[0];", "spent = at[0];", "CL17"],
   ["a tick's liquidity_net not taken", CLMM, "liquidity = zeroForOne ? liquidity - net : liquidity + net;", "", "CL15"],
   ["a tick's liquidity_net taken the wrong way", CLMM, "liquidity = zeroForOne ? liquidity - net : liquidity + net;", "liquidity = zeroForOne ? liquidity + net : liquidity - net;", "CL15"],
   ["one provider's ticks taken", CLMM, "if (tx === null || ty === null || tx.size !== ty.size || [...tx].some(([t, net]) => ty.get(t) !== net)) break;", "if (tx === null || ty === null) break;", "CL16"],

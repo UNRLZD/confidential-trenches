@@ -6,9 +6,11 @@
 // wallet with SOL (any wallet works unsigned); the transaction wraps `amount` SOL into its wSOL account, then swaps it
 // in on the pool (swap_v2, exact input, no price limit), with the pool's current tick array and the next two in the
 // swap's direction, and the bitmap extension when it exists.
-//   node packages/kit/test/fixtures/solana-clmm-capture.mjs <name> <coin mint> <pool> <lamports>...
+//   node packages/kit/test/fixtures/solana-clmm-capture.mjs <name> <coin mint> <pool> <lamports>... [--payer <wallet>]
 // Each amount is simulated with the pool's accounts read just before and just after on both providers; a run whose
-// pool moved between them is read again (at most 6 tries).
+// pool moved between them is read again (at most 6 tries). --payer names another public wallet, for a buy larger than
+// the default one holds (card clmm-floor-covers-the-whole-buy: a buy that crosses an initialized tick); a payer that
+// already has a coin account is refused, since the run reads that account's amount as the program's out.
 import "../../../../scripts/net-window.mjs";
 import { createHash } from "node:crypto";
 import { writeFileSync } from "node:fs";
@@ -17,10 +19,12 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const KIT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const kit = await import(pathToFileURL(path.join(KIT, "src/index.ts")).href);
-const [name, MINT, POOL, ...amounts] = process.argv.slice(2);
-if (!name || !MINT || !POOL || amounts.length === 0) throw new Error("usage: solana-clmm-capture.mjs <name> <coin mint> <pool> <lamports>...");
+const argv = process.argv.slice(2);
+const payerAt = argv.indexOf("--payer");
+const [name, MINT, POOL, ...amounts] = payerAt === -1 ? argv : [...argv.slice(0, payerAt), ...argv.slice(payerAt + 2)];
+if (!name || !MINT || !POOL || amounts.length === 0 || (payerAt !== -1 && !argv[payerAt + 1])) throw new Error("usage: solana-clmm-capture.mjs <name> <coin mint> <pool> <lamports>... [--payer <wallet>]");
 const RPCS = { A: "https://solana-rpc.publicnode.com", B: "https://api.mainnet-beta.solana.com" };
-const PAYER = "5tzFkiKscXHK5ZXCGbXZxdw7gTjjD1mBwuoFbhUvuAi9";
+const PAYER = payerAt === -1 ? "5tzFkiKscXHK5ZXCGbXZxdw7gTjjD1mBwuoFbhUvuAi9" : argv[payerAt + 1];
 const CLMM = kit.SOLANA_CLMM_PROGRAM;
 const WSOL = "So11111111111111111111111111111111111111112";
 const TOKEN = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
@@ -60,6 +64,7 @@ const coinProgram = (await rpc(RPCS.B, "getAccountInfo", [MINT, { encoding: "bas
 const ata = (owner, mint, program) => kit.solanaAta(owner, mint, program);
 const wsolAta = ata(PAYER, WSOL, TOKEN);
 const coinAta = ata(PAYER, MINT, coinProgram);
+if ((await rpc(RPCS.B, "getAccountInfo", [coinAta, { encoding: "base64", dataSlice: { offset: 0, length: 0 } }])).value !== null) throw new Error(`the payer ${PAYER} has a coin account ${coinAta}: its amount would be read as the program's out`);
 // a buy puts wSOL in: zero_for_one when wSOL is token 0
 const zeroForOne = side.quoteIs0;
 const span = pool.tickSpacing * 60;

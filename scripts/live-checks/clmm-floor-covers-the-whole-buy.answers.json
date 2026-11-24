@@ -528,5 +528,21 @@
   "dex": {
    "priceNative": "0.0007720"
   }
+ },
+ "sign_before_release": {
+  "_note": "SIGN_HOST's /app.js read 2026-11-24T10:28:00.833Z, before this card's signing page release: its kit has no walk",
+  "readAt": "2026-11-24T10:28:00.833Z",
+  "source": "https://confidential.unrealized.trade/app.js",
+  "status": 200,
+  "bytes": 1948743,
+  "seed": false
+ },
+ "sign_card_build": {
+  "_note": "the signing page build of card commit f91cbda27 (packages/signpage/public/app.js, written by the sign suite's build-app.mjs), read 2026-11-24T10:28:00.833Z",
+  "readAt": "2026-11-24T10:28:00.833Z",
+  "source": "build of f91cbda27",
+  "status": 200,
+  "bytes": 1972944,
+  "seed": true
  }
 }
