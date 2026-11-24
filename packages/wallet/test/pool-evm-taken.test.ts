@@ -15,6 +15,7 @@ import { openWalletStore } from "../src/store/index.ts";
 import { evmPoolScopeOf, type EvmPoolEvent } from "../src/pool/evm.ts";
 import { EvmNotFinalError, SECOND_GAP, evmClaimTaken, evmNextNote, evmRestore, evmTakenNotes } from "../src/pool/evm-restore.ts";
 import { jOf } from "../src/pool/queue.ts";
+import { secondWalker } from "../src/notes/poseidon-walk.ts";
 
 const SEED = d.wordsToSeed64(d.entropyToWords(new Uint8Array(16)));
 const SCOPE = evmPoolScopeOf("0x00000000000000000000000000000000b1f1f001", 84532n);
@@ -163,6 +164,33 @@ test(`the restore's second-arrival walk reads past SECOND_GAP - 1 (${SECOND_GAP 
   assert.throws(() => evmNextNote(SEED, SCOPE, takes(SECOND_GAP), U0, 15n), /pending takes in a row/);
   // once those blocks are final the same chain is taken whole, and the next note named
   assert.deepEqual(evmNextNote(SEED, SCOPE, takes(SECOND_GAP), U0, 20n).next.ref, U0n(SECOND_GAP));
+});
+
+// Card readme-run-fits-an-agent-timeout: an id's second arrivals are read on secondWalker, its first arrival and the one
+// that ended its read held to poseidon-lite (src/pool/evm-restore.ts seconds). A walker that drifts at every arrival, only
+// past the first or only at the first reads the id again on poseidon-lite: the same notes, never one fewer.
+test("a second-arrival walker that drifts, at every arrival, only past the first or only at the first, restores the same notes as the real one", () => {
+  // U 0, U 3 and U 3 + SECOND_GAP - 1 (the gap's last), a stranger's deposit between: arrivals a walker wrong past U 0
+  // that went unchecked would lose
+  const far = 3 + SECOND_GAP - 1;
+  const evs = poolAt([{ pre: P(U0), value: RUNG, block: 10n }, { pre: P(U0n(0)), value: RUNG, block: 11n }, { pre: 5n, value: RUNG, block: 12n }, { pre: P(U0n(3)), value: RUNG, block: 13n }, { pre: P(U0n(far)), value: RUNG, block: 14n }]);
+  const run = (secondWalk?: typeof secondWalker) => evmRestore({ seed64: SEED, scope: SCOPE, events: evs, gap: 2, ...(secondWalk === undefined ? {} : { secondWalk }) });
+  const real = run();
+  assert.deepEqual(real.notes.map((n) => refKey(n.ref)), [U0, U0n(0), U0n(3), U0n(far)].map(refKey));
+  const asked = { right: 0, everywhere: 0, past: 0, first: 0 };
+  const counted = (k: keyof typeof asked, drift: (n: number) => bigint): typeof secondWalker => (m, id) => {
+    const w = secondWalker(m, id);
+    return (n) => (asked[k]++, w(n) + drift(n));
+  };
+  assert.deepEqual(run(counted("right", () => 0n)), real, "the real walker, counted");
+  assert.deepEqual(run(counted("everywhere", () => 1n)), real, "drifting at every arrival");
+  assert.deepEqual(run(counted("past", (n) => (n === 0 ? 0n : 1n))), real, "drifting past the first arrival only");
+  // right at the read's end, wrong at U 0 alone: only the first arrival's check finds it
+  assert.deepEqual(run(counted("first", (n) => (n === 0 ? 1n : 0n))), real, "drifting at the first arrival only");
+  // the real walker reads every arrival of U up to the gap past U far, and each id after it; the drifting ones are
+  // dropped at their check (at U 0, or at the read's end) and the id read on poseidon-lite
+  assert.ok(asked.right > far + SECOND_GAP, `the walker read the arrivals (${asked.right})`);
+  assert.ok(asked.everywhere > 0 && asked.past > asked.everywhere, `the drifting walkers were asked (${asked.everywhere}, ${asked.past})`);
 });
 
 test("a deposit note taken in a block not final yet is never passed over: its chain is found by that note alone", () => {

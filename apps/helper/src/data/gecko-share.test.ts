@@ -7,12 +7,14 @@ import { readFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { test } from "node:test";
 import { start } from "../server.ts";
+import { SHED_LATE_MS } from "../limits/loop-busy.ts";
 import { clockOf, createEvmLists, EVM_CHAINS, GT_BASE, GT_READS, LIST_KEYS, STALE_MS, TICK_MS, toRows } from "./evm/lists.ts";
 import { geckoBudget, GT_LIMIT_PER_MIN, LIST_FLOOR, PAGE_PER_CLIENT, REFRESH_URGENT_MS, WINDOW_MS } from "./gecko.ts";
 import { createSolanaToken } from "./solana/token.ts";
 import { call, listening } from "../../test/servers.ts";
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
+const NEVER_SHED = () => false;
 const NOW = Date.parse("2026-11-02T13:53:00Z"); // the token page fixture's read
 const FX = JSON.parse(readFileSync(new URL("./solana/fixtures/token-page.json", import.meta.url), "utf8"));
 const evm = (f: string) => readFileSync(new URL(`./evm/fixtures/${f}`, import.meta.url), "utf8");
@@ -72,7 +74,11 @@ async function world(handover?: unknown, settled = false) {
   if (handover !== undefined) token.restore(handover);
   const lists = { base: createEvmLists("base", budget, { fetch: doFetch as never, now }), robinhood: createEvmLists("robinhood", budget, { fetch: doFetch as never, now }) };
   if (settled) for (const c of EVM_CHAINS) assert.equal(lists[c].restore(SETTLED[c]), false, "makers alone: every list is still read from GeckoTerminal");
-  const server = start(COMMIT, 0, undefined, undefined, undefined, undefined, undefined, undefined, token, undefined, undefined, lists);
+  // card readme-run-fits-an-agent-timeout: never shed by this process's loop. A simulated hour's ticks run as one stretch
+  // of promises with no timer turn between two candles reads, so on a loaded runner the loop's sampler fired past
+  // SHED_LATE_MS late and the next read was a shed 503 (the README's fresh run 45308062620: "candles at +4320 s: 503").
+  // The shed is server.ts's own, held in src/shed.test.ts; this world holds the budget.
+  const server = start(COMMIT, 0, undefined, undefined, undefined, undefined, undefined, undefined, token, undefined, undefined, lists, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, NEVER_SHED);
   await listening(server, "the helper");
   const port = (server.address() as AddressInfo).port;
   const get = (path: string) => call(port, { path, headers: { origin: "https://ct-app.unrealized.trade" } }, "the helper");
@@ -88,6 +94,16 @@ async function world(handover?: unknown, settled = false) {
   };
   return { clock, gt, lists, candles, listsAnswer, pageCall, close };
 }
+
+test("card readme-run-fits-an-agent-timeout: the world's helper answers a chart after its loop was held past SHED_LATE_MS, as a loaded runner holds it", async (t) => {
+  const w = await world();
+  t.after(w.close);
+  await w.candles(MINTS[1]!, "1m"); // the loop's sampler starts with the first request
+  const until = performance.now() + 2 * SHED_LATE_MS;
+  while (performance.now() < until);
+  const c = await w.candles(MINTS[1]!, "1m");
+  assert.equal(c.status, 200, `candles after a held loop: ${c.status} ${c.body}`);
+});
 
 test("both EVM chains' lists warmed, then a token page: its candles answer 200, never 429", async (t) => {
   const w = await world();

@@ -117,6 +117,18 @@ const rows = async (s: ReturnType<typeof B.open>, tok: string) => {
   assert.equal(a.status, 200, a.body);
   return (JSON.parse(a.body).trades as { side: string; usd: string; amt: string; tx: string }[]).map((x) => [x.side, x.usd, x.amt, x.tx]);
 };
+/** A token's first open, whose read back starts with it in the background (card helper-listed-charts-own-reads: at the
+ *  tick after, a dozen cold Robinhood tapes said filling for a minute): its one answer holds the trade read back
+ *  already, or none and filling, so the page shows it loading. Which one is the machine's pace: a loaded runner's first
+ *  answer came after the read back's first step (the README's fresh run 45308062620, card
+ *  readme-run-fits-an-agent-timeout), and a second read for `filling` could come after the read back had ended. */
+const firstOpen = async (s: ReturnType<typeof B.open>, tok: string, row: string[]) => {
+  const a = await s.trades(tok, 50);
+  assert.equal(a.status, 200, a.body);
+  const j = JSON.parse(a.body) as { trades: { side: string; usd: string; amt: string; tx: string }[]; filling?: boolean };
+  const got = j.trades.map((x) => [x.side, x.usd, x.amt, x.tx]);
+  assert.ok(got.length === 0 ? j.filling === true : JSON.stringify(got) === JSON.stringify([row]), `first answer: ${a.body}`);
+};
 
 test("a token whose only trade lies past the cold window: its first open has none, and the tape read back finds it within TAPE_BACK blocks, in the background, then reads no further (red at cd426e5b9: never found)", async () => {
   const head = B.REC.firstHead + 200;
@@ -124,13 +136,10 @@ test("a token whose only trade lies past the cold window: its first open has non
   // 300 blocks before the first read's window: the first step back holds it
   const at = head - V.cold - 300;
   const { s, asked } = rig(PCS, `${PCS.factory} ${sel("getPool(address,address,uint24)")}${w(PCS.asset0)}${w(PCS.asset1)}${w(word(BigInt(PCS.fee!)))}`, head, at);
-  // the read back starts with the first read, in the background (card helper-listed-charts-own-reads: at the tick after,
-  // a dozen cold Robinhood tapes said filling for a minute): the first answer holds the trade read back already, or none
-  // and filling, so the page shows it loading
-  const opened = await rows(s, PCS.asset0);
-  assert.ok(opened.length === 1 || (opened.length === 0 && (await filling(s, PCS.asset0))), `first answer: ${JSON.stringify(opened)}`);
+  const row = ["b", "57.137132", "868.503865188635487108", PCS.log.transactionHash];
+  await firstOpen(s, PCS.asset0, row);
   await ticks(s, 2);
-  assert.deepEqual(await rows(s, PCS.asset0), [["b", "57.137132", "868.503865188635487108", PCS.log.transactionHash]]);
+  assert.deepEqual(await rows(s, PCS.asset0), [row]);
   // the read back went to TAPE_BACK blocks before the first read (one trade is short of TRADES_MAX), never past it
   const first = head - V.cold + 1;
   assert.equal(Math.min(...asked), first - TAPE_BACK);
@@ -151,10 +160,11 @@ test("an ETH-quoted trade read back is priced at the ETH price in force before i
   const at = B.REC.firstHead + 400;
   const head = at + V.cold + 100;
   const { s } = rig(UNI2, `${UNI2.factory} ${sel("getPair(address,address)")}${w(UNI2.asset0)}${w(UNI2.asset1)}`, head, at);
-  assert.deepEqual(await rows(s, UNI2.asset0), []);
-  await ticks(s, 2);
   const ref = B.REC.logs.ref.filter((x) => x.b < at).map(B.toLog).map((x) => S.decodeRef(x)).filter((x) => x !== null).at(-1)!;
-  assert.deepEqual(await rows(s, UNI2.asset0), [["b", fixed((3_577_223_829n * ref.ethUsd) / 10n ** 18n, 18), "123989.534258606247275177", UNI2.log.transactionHash]]);
+  const row = ["b", fixed((3_577_223_829n * ref.ethUsd) / 10n ** 18n, 18), "123989.534258606247275177", UNI2.log.transactionHash];
+  await firstOpen(s, UNI2.asset0, row);
+  await ticks(s, 2);
+  assert.deepEqual(await rows(s, UNI2.asset0), [row]);
   s.stop();
 });
 
@@ -199,11 +209,12 @@ test("a short ETH-quoted tape reads back with the ETH price read only in the ste
   const at = B.REC.firstHead + 400;
   const head = at + V.cold + 100;
   const { s, reads } = rig(UNI2, `${UNI2.factory} ${sel("getPair(address,address)")}${w(UNI2.asset0)}${w(UNI2.asset1)}`, head, at);
-  assert.deepEqual(await rows(s, UNI2.asset0), []);
+  const ref = B.REC.logs.ref.filter((x) => x.b < at).map(B.toLog).map((x) => S.decodeRef(x)).filter((x) => x !== null).at(-1)!;
+  const row = ["b", fixed((3_577_223_829n * ref.ethUsd) / 10n ** 18n, 18), "123989.534258606247275177", UNI2.log.transactionHash];
+  await firstOpen(s, UNI2.asset0, row);
   await ticks(s, 4);
   assert.equal(await filling(s, UNI2.asset0), false, "the read back is done");
-  const ref = B.REC.logs.ref.filter((x) => x.b < at).map(B.toLog).map((x) => S.decodeRef(x)).filter((x) => x !== null).at(-1)!;
-  assert.deepEqual(await rows(s, UNI2.asset0), [["b", fixed((3_577_223_829n * ref.ethUsd) / 10n ** 18n, 18), "123989.534258606247275177", UNI2.log.transactionHash]], "priced as before, at the ETH price in force before it");
+  assert.deepEqual(await rows(s, UNI2.asset0), [row], "priced as before, at the ETH price in force before it");
   const first = head - V.cold + 1;
   const back = reads.filter((r) => r.from < first - V.refBack);
   const refReads = back.filter((r) => r.id === S.REF_POOL_ID).length;

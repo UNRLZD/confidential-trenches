@@ -129,7 +129,11 @@ test("read() draws more pairs, at most PAIRS more, until COLD_MIN cold reads are
   assert.ok(run.reads.length > PAIRS * 2 && run.reads.length <= PAIRS * 4, `${run.reads.length} reads`);
   const got = Number(new RegExp(`^ok  (\\d+) of ${run.reads.length} read cold`, "m").exec(r.lines.join("\n"))?.[1]);
   assert.ok(got >= COLD_MIN && got <= COLD_MIN + 1, r.lines.join("\n"));
-  assert.match(r.lines.join("\n"), /not cold: \S+ \(its row read 60\d\d\d ms before the read was sent\)/);
+  // the fake dates a held row a minute before it answers, which is at or after the check's send time: the age named is at
+  // most 60,000 ms, a few under it when the answer comes a few ms after the send (PR 1236's merge queue run 45311140206
+  // read 59999 on a loaded runner, against a pattern that took 60000 to 60999 only)
+  const ages = [...r.lines.join("\n").matchAll(/\(its row read (\d+) ms before the read was sent\)/g)].map((m) => Number(m[1]));
+  assert.ok(ages.length > 0 && ages.every((a) => a > 50_000 && a <= 60_000), `held reads name their row's age, a minute: ${ages}\n${r.lines.join("\n")}`);
   assert.equal(r.ok, true, r.lines.join("\n"));
   // every token held: the draws stop at PAIRS more, and the run fails on its cold count
   held.clear();
