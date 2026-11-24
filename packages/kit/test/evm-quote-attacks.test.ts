@@ -723,8 +723,15 @@ const SEL_SELL = Buffer.from(keccak_256(new TextEncoder().encode("sell((address,
 /** The scan provider: its head, and the Initialize logs of `pools` at `at`; `asked` keeps each getLogs range. */
 /** `orSpan`: the most blocks a request with more than one value in a topic position may span, as Robinhood's RPC
  *  answers (-32602 "only 100000 are allowed for this request"). */
+// Each log's topics and data are its key's, written once when the scanner is made: built again for every log of every
+// answer, they were 2 of the file's 29 busy seconds (card readme-run-fits-an-agent-timeout). No test changes a key it
+// handed a scanner.
 function scanner(headNo: number, logs: { key: EvmPoolKey; at: number }[], asked: [number, number][] = [], orSpan = Infinity): EvmRpc {
-  const all = logs.map((l) => ({ ...l, topics: [null, "0x" + pidOf(l.key), "0x" + W(BigInt(l.key.currency0)), "0x" + W(BigInt(l.key.currency1))] }));
+  const all = logs.map((l) => {
+    const topics = [null, "0x" + pidOf(l.key), "0x" + W(BigInt(l.key.currency0)), "0x" + W(BigInt(l.key.currency1))];
+    const data = "0x" + W(BigInt(l.key.fee)) + W(BigInt(l.key.tickSpacing)) + W(BigInt(l.key.hooks)) + W(1n << 96n) + W(0n);
+    return { ...l, topics, data };
+  });
   return async (calls) =>
     calls.map((c, id) => {
       if (c.method === "eth_blockNumber") return { jsonrpc: "2.0", id, result: "0x" + headNo.toString(16) };
@@ -742,8 +749,8 @@ function scanner(headNo: number, logs: { key: EvmPoolKey; at: number }[], asked:
         .map((l) => ({
           address: f.address, // the PoolManager the filter names, as a node filters by address
           blockNumber: "0x" + l.at.toString(16),
-          topics: ["0xdd466e674ea557f56295e2d0218a125ea4b4f0f6f3307b95f85e6110838d6438", "0x" + pidOf(l.key), "0x" + W(BigInt(l.key.currency0)), "0x" + W(BigInt(l.key.currency1))],
-          data: "0x" + W(BigInt(l.key.fee)) + W(BigInt(l.key.tickSpacing)) + W(BigInt(l.key.hooks)) + W(1n << 96n) + W(0n),
+          topics: ["0xdd466e674ea557f56295e2d0218a125ea4b4f0f6f3307b95f85e6110838d6438", l.topics[1]!, l.topics[2]!, l.topics[3]!],
+          data: l.data,
         }));
       return { jsonrpc: "2.0", id, result };
     });
