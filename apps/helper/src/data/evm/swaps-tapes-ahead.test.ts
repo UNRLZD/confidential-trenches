@@ -15,6 +15,7 @@ import { LATE_MS, LISTED, PAGE, POCKET, rig, SWAPS, TOKENS } from "../../../test
 import { onVirtualTime } from "../../../test/evm-swaps/virtual-time.ts";
 import { providerHolds } from "../../limits/limits.ts";
 import { LOOP_BUSY_MS } from "../../limits/loop-busy.ts";
+import { operatorOf } from "../../rpc/operator.ts";
 import { AHEAD_WAIT_MS, HEADER_TIMED, OPEN_BOUND_MS, SWAP_RPCS, type Pool } from "./swaps.ts";
 
 const clock = { get t() { return Date.now(); } };
@@ -296,11 +297,37 @@ test("card robinhood-tapes-read-ahead-bounded: the read ahead's minute line, at 
   const minute = lines.filter((l) => l.includes("read ahead:"));
   console.log(`lines: ${minute.join(" | ")}`);
   assert.equal(minute.length, 1, "one line a minute");
-  const m = /^robinhood read ahead: (\d+) of 12 listed tapes ready; stood down (\d+) s: opening (\d+), no room (\d+), held (\d+), busy (\d+)$/.exec(minute[0]!);
+  const m = /^robinhood read ahead: (\d+) of 12 listed tapes ready; stood down (\d+) s: opening (\d+), no room (\d+), held (\d+)(?: \([^)]*\))?, busy (\d+)$/.exec(minute[0]!);
   assert.ok(m !== null, minute[0]);
   assert.equal(Number(m[1]), 12, "every listed tape read ahead once the loop was free");
   assert.ok(Number(m[6]) >= 10_000 / AHEAD_WAIT_MS, `the loop's 10 s busy counted in waits: ${m[6]}`);
   assert.doesNotMatch(minute[0]!, /0x[0-9a-f]/i, "no address in the line");
+});
+
+test("card read-ahead-names-the-held-provider: the minute line names the providers held at its held waits, each with its count, by company (red at 9c95790d5: 'held 42' named none, and the helper live runs from 23 Nov 20:12Z read Base 0 of 12 listed tapes whole at their first answer while the box's log counted Base's held waits with no provider to look at)", async () => {
+  const r = rig();
+  const kept = new Map(LISTED.slice(0, 2).map(({ token, pool }) => [token, { pool: { venue: "v3", id: pool, token, tokenIs0: true, quote: { kind: "usd", decimals: 6 } } as Pool, decimals: 18 }]));
+  const lines: string[] = [];
+  const held = SWAP_RPCS.robinhood.slice(1);
+  await onVirtualTime(9_000_000, async () => {
+    const holds = providerHolds(() => Date.now());
+    for (const u of held) holds.hold(u, 20);
+    const s = open(r.chain, clock, { pools: kept, rpcs: SWAP_RPCS.robinhood, headerTimed: HEADER_TIMED, fetch: r.fetch as never, holds, log: (l) => lines.push(l) });
+    void s.ahead(LISTED.slice(0, 2).map((x) => x.token));
+    await sleep(61_000);
+    await s.ahead(LISTED.slice(0, 2).map((x) => x.token));
+    s.stop();
+  });
+  const minute = lines.filter((l) => l.includes("read ahead:"));
+  console.log(`lines: ${minute.join(" | ")}`);
+  assert.equal(minute.length, 1, "one line a minute");
+  const m = /, held (\d+) \(([^)]*)\), busy \d+$/.exec(minute[0]!);
+  assert.ok(m !== null, `no held provider named: ${minute[0]}`);
+  const named = new Map(m[2]!.split(", ").map((x) => x.split(" ") as [string, string]).map(([c, n]) => [c, Number(n)]));
+  assert.deepEqual([...named.keys()].sort(), held.map((u) => operatorOf(u)).sort(), minute[0]);
+  for (const [c, n] of named) assert.ok(n > 0 && n <= Number(m[1]), `${c} ${n} of ${m[1]} held waits`);
+  assert.ok(!named.has(operatorOf(SWAP_RPCS.robinhood[0]!)), "the free provider named held");
+  assert.doesNotMatch(minute[0]!, /0x[0-9a-f]|https?:|\//i, "no address, no URL in the line");
 });
 
 test("card robinhood-tapes-whole-at-first-open: the minute line counts the lists' tapes, not a one-token search's (mainPool's hinted pool, ahead(.., false)): a hinted search the last call before the line still reads '12 of 12 listed' (red at fcf128503: the deployed helper wrote 'robinhood read ahead: 0 of 1 listed tapes ready' 19 Nov 06:50:37Z and 07:00:37Z)", async () => {

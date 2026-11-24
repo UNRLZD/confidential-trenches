@@ -2656,6 +2656,14 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   const aheadQueue = new Set<string>();
   /** What stood the reads ahead down since the last minute's line (aheadLine): each wait a worker made, by its cause. */
   const stood = { opening: 0, room: 0, held: 0, busy: 0 };
+  /** The held waits since the last line by provider: each provider held at a held wait, by company (operatorOf), so the
+   *  line names what held the reads (card read-ahead-names-the-held-provider: the box's Base lines from 23 Nov 20:12Z
+   *  counted up to 294 held waits a minute and named none). */
+  const heldBy = new Map<string, number>();
+  const heldWait = (): void => {
+    stood.held++;
+    for (const c of new Set(rpcs.filter((u) => holds.heldFor(u) > 0).map((u) => operatorOf(u)))) heldBy.set(c, (heldBy.get(c) ?? 0) + 1);
+  };
   /** The lists' tokens as the last lists answer named them, and when the last minute's line was written. */
   let listedNow: string[] = [];
   let lineAt = now();
@@ -2663,7 +2671,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    *  provider held (a held one is no roomy one), else no room. */
   const count = (): void => {
     if (busy()) stood.busy++;
-    else if (heldAny()) stood.held++;
+    else if (heldAny()) heldWait();
     else stood.room++;
   };
   const standDown = (): Promise<unknown> => {
@@ -2687,13 +2695,16 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     return e === undefined ? tapeReady(t) : e.ahead === undefined && e.first === undefined && e.readAt !== null && !backing(e) && !behind(e);
   };
   /** Once a minute, at a lists answer: the listed tapes whose open answers them whole (wholeNow) and what stood the reads
-   *  ahead down since the last line, each cause's waits counted (stood); no address in it. */
+   *  ahead down since the last line, each cause's waits counted (stood), the held ones' providers named (heldBy); no
+   *  address in it. */
   function aheadLine(): void {
     if (now() - lineAt < 60_000) return;
     const ready = listedNow.filter((t) => wholeNow(t)).length;
-    log(`${chain} read ahead: ${ready} of ${listedNow.length} listed tapes ready; stood down ${Math.round((now() - lineAt) / 1000)} s: opening ${stood.opening}, no room ${stood.room}, held ${stood.held}, busy ${stood.busy}`);
+    const by = [...heldBy].sort((a, b) => b[1] - a[1]).map(([c, n]) => `${c} ${n}`).join(", ");
+    log(`${chain} read ahead: ${ready} of ${listedNow.length} listed tapes ready; stood down ${Math.round((now() - lineAt) / 1000)} s: opening ${stood.opening}, no room ${stood.room}, held ${stood.held}${by === "" ? "" : ` (${by})`}, busy ${stood.busy}`);
     lineAt = now();
     stood.opening = stood.room = stood.held = stood.busy = 0;
+    heldBy.clear();
   }
   /** `listed`: false for one token's search (mainPool's hinted pool), which is no lists answer: the line's listed tapes
    *  stay the lists' (a hinted open wrote "0 of 1 listed tapes ready" on the deployed helper, 19 Nov 06:50Z). */
@@ -2845,7 +2856,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
           // (Robinhood's day read, the chain's own RPC): rested where it got to, the run's worker free for the next tape,
           // and the lists' next load asks again; a read back with no wait goes on whatever is held
           if (wait > 0 && heldAny()) {
-            stood.held++;
+            heldWait();
             return;
           }
           if (wait > 0) await new Promise((go) => (setTimeout(go, wait) as { unref?: () => void }).unref?.());
