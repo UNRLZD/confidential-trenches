@@ -7,7 +7,7 @@
 // bounded, each entry checked, one bad entry restores nothing.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { fakeChain, ICNT, open, REC, VVV } from "../../../test/evm-swaps/base.ts";
+import { fakeChain, ICNT, open, POOL_ICNT, REC, VVV } from "../../../test/evm-swaps/base.ts";
 import { HANDED_TIMING, IDLE_MS } from "./swaps.ts";
 
 const bodyOf = async (p: Promise<{ body: string }>) => JSON.parse((await p).body);
@@ -176,6 +176,48 @@ test("card helper-handover-books-take-room: the handover's file (the old helper'
   const a = await next.trades(VVV, 50);
   assert.ok((JSON.parse(a.body).trades as unknown[]).length > 0, "VVV answers its rows");
   assert.ok((a.timing ?? "").includes(HANDED_TIMING), `VVV answers as handed: ${a.timing}`);
+  next.stop();
+});
+
+// card handover-rest-keeps-the-hottest: the redeploy at dc876a2c2 (24 Nov 14:28Z) restored 100 of 100 books on each chain,
+// yet of the coins its warm file held at rest, Base's 20 newest answered 1 handed of 16 and Robinhood's 1 h trending 6 of
+// 10, the rest cold (read right after, every listed coin at once). The restore set the books at rest most recently asked
+// first, and rest() makes room by dropping the map's first: so each new book put at rest after a deploy (a listed coin
+// the old helper did not hold, read ahead) dropped the hottest handed book, not the coldest.
+test("card handover-rest-keeps-the-hottest: a book put at rest after a restore that fills REST_MAX drops the handed book least recently asked, never the most (red at dc876a2c2: it dropped VVV, the most recently asked, and VVV opened cold)", async () => {
+  const clock = { t: 1_000_000 };
+  const c = fakeChain();
+  const old = open(c, clock, { restMax: 2 });
+  const rest = async (t: string, from: number) => {
+    await old.candles(t, "1m", null, 500);
+    for (let h = from; h < from + 20; h += 5) {
+      c.st.head = h;
+      await old.tick();
+    }
+    clock.t += IDLE_MS + 1;
+    await old.tick();
+  };
+  // ICNT asked first, VVV after: VVV is the hotter
+  await rest(ICNT, REC.lastHead - 45);
+  await rest(VVV, REC.lastHead - 25);
+  const st = handed(old);
+  old.stop();
+  assert.deepEqual((st.books as [string, { rest?: true }][]).map(([t, b]) => [t, b.rest]), [[VVV, true], [ICNT, true]], "both handed at rest, the most recently asked first");
+  clock.t += 30_000;
+  const n = fakeChain();
+  n.st.head = c.st.head;
+  // a third coin the old helper never held (its own address on ICNT's pool's logs), opened and left idle on the new helper
+  const X = `0x${"77".repeat(20)}`;
+  const next = open(n, clock, { pools: new Map([[X, { pool: { ...POOL_ICNT, token: X }, decimals: 18 }]]), restMax: 2 });
+  assert.equal(next.restore(st), true);
+  assert.deepEqual(next.handover(), { held: 2, restored: 2 });
+  await next.candles(X, "1m", null, 500);
+  clock.t += IDLE_MS + 1;
+  await next.tick();
+  const hot = await next.trades(VVV, 50);
+  assert.ok((hot.timing ?? "").includes(HANDED_TIMING), `VVV, the most recently asked, still answers as handed: ${hot.timing}`);
+  const cold = await next.trades(ICNT, 50);
+  assert.ok(!(cold.timing ?? "").includes(HANDED_TIMING), `ICNT, the least recently asked, gave its room to X: ${cold.timing}`);
   next.stop();
 });
 
