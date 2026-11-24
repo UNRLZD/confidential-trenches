@@ -60,6 +60,10 @@ export const MUTANTS = [
   [QUOTE, "if (a.pruned !== cut.hash || a.at !== lower(block.hash)) return new Set();", "if (false) return new Set();", R, "card evm-warm-tap-skips-pools-it-pruned"],
   [QUOTE, "if (same.has(f.id)) cutNow.set(f.id, cutBefore!.floors.get(f.id)!);", "if (true) cutNow.set(f.id, cutBefore!.floors.get(f.id)!);", R, "card evm-warm-tap-skips-pools-it-pruned"],
   [QUOTE, "const span = CUT_LOG_SPAN[chain];", "const span = 1_000n;", R, "card evm-warm-tap-skips-pools-it-pruned"],
+  // card evm-cut-logs-only-where-served: a quote provider the venue does not list as answering logs is asked none, each
+  // read by the URL its gate keeps
+  [QUOTE, "return u === undefined || listed.includes(u);", "return true;", R, "card evm-cut-logs-only-where-served"],
+  [QUOTE, "const u = GATED_URL.get(r) ?? URL_OF.get(r) ?? RPC_URL.get(r);", "const u = RPC_URL.get(r);", R, "card evm-cut-logs-only-where-served"],
   // card evm-spare-list-green: the prune skips only an X the token's last quote kept (main skipped any X whose markets
   // were ever scanned)
   [QUOTE, "const unsure = (x: string) => !keptBefore.has(x);", "const unsure = (x: string) => !SCANS.has(`${chain}:markets:${x}`);", R, "card evm-spare-list-green: a quote prunes a currency the quote before scanned"],

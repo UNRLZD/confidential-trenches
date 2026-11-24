@@ -259,6 +259,7 @@ function venue(chain: EvmPoolChain, all: EvmPoolVenueList = evmPoolVenues()) {
     // the venue's reads per call and request bytes; a venue with none sends 6 a call in requests of 24,000 bytes at most
     reads: readLimits(Object.hasOwn(v, "reads") ? v.reads : undefined),
     traceProviders: Object.hasOwn(v, "traceProviders") ? v.traceProviders : undefined,
+    logProviders: Object.hasOwn(v, "logProviders") ? v.logProviders : undefined,
     maxLag: Object.hasOwn(v, "maxLag") && Number.isSafeInteger(v.maxLag) ? BigInt(v.maxLag!) : 0n,
     hookedPools: Object.hasOwn(v, "hookedPools") ? v.hookedPools! : [],
     poolManager: Object.hasOwn(v, "poolManager") && isAddress(v.poolManager) ? lower(v.poolManager) : undefined,
@@ -1837,8 +1838,14 @@ async function unmovedSince(rpcs: readonly EvmRpc[], chain: EvmPoolChain, pm: st
     pieces.push({ method: "eth_getLogs", params: [{ address: lower(pm), fromBlock: qty(from), toBlock: qty(to), topics }] });
   }
   const calls: EvmRpcCall[] = [{ method: "eth_getBlockByNumber", params: [qty(cut.at), false] }, ...pieces, { method: "eth_getBlockByNumber", params: [qty(block.number), false] }];
+  // only the providers the venue lists as answering logs (card evm-cut-logs-only-where-served: Robinhood's publicnode
+  // and bloXroute refuse every such read), each by the URL its gate (gated) or evmProviders gave it; a caller's own
+  // provider, which names no URL, as given. Fewer than two: no proof
+  const listed = venue(chain).logProviders;
+  const able = listed === undefined ? rpcs : rpcs.filter((r) => { const u = GATED_URL.get(r) ?? URL_OF.get(r) ?? RPC_URL.get(r); return u === undefined || listed.includes(u); });
+  if (able.length < 2) return new Set();
   const { a } = await agreeing(
-    rpcs,
+    able,
     async (rpc, k, gate) => {
       const who = `provider ${k + 1}`;
       const got = await askAt(rpc, calls, gate);

@@ -1,0 +1,343 @@
+{
+  "_note": "good: this card's kit (branch card/evm-cut-logs-only-where-served), read by evm-cut-logs-only-where-served.mjs --record from macOS at 2026-11-24T21:04:00.589Z on Base and Robinhood mainnet: every listed log provider answers the read, and the warm taps' 3 Base and 4 Robinhood cut-log reads all went to listed providers: PASS. bad_unfiltered: the same kit with the filter of unmovedSince taken out (every quote provider asked, as main 4c52a7d90 asks), read at 2026-11-24T21:04:45.592Z: a Base cut-log read sent to mainnet.base.org and two Robinhood ones to robinhood-rpc.publicnode.com: FAIL.",
+  "good": {
+    "at": "2026-11-24T21:04:00.589Z",
+    "chains": {
+      "base": {
+        "listed": [
+          "base-rpc.publicnode.com",
+          "base-mainnet.public.blastapi.io",
+          "base.api.pocket.network"
+        ],
+        "probe": {
+          "head": 61819323,
+          "providers": {
+            "base-rpc.publicnode.com": [
+              {
+                "logs": 3
+              },
+              {
+                "logs": 13
+              }
+            ],
+            "base-mainnet.public.blastapi.io": [
+              {
+                "logs": 3
+              },
+              {
+                "logs": 13
+              }
+            ],
+            "mainnet.base.org": [
+              {
+                "no": "mainnet.base.org HTTP 200: rate limit {\"code\":-32011,\"message\":\"request limit reached\"}"
+              },
+              {
+                "no": "mainnet.base.org HTTP 200: rate limit {\"code\":-32011,\"message\":\"request limit reached\"}"
+              }
+            ],
+            "base.api.pocket.network": [
+              {
+                "logs": 3
+              },
+              {
+                "logs": 13
+              }
+            ]
+          }
+        },
+        "taps": [
+          {
+            "ms": 3313,
+            "ok": true,
+            "kind": "cold",
+            "cut": []
+          },
+          {
+            "ms": 813,
+            "ok": true,
+            "kind": "warm",
+            "cut": [
+              {
+                "host": "base-rpc.publicnode.com",
+                "status": 200,
+                "logs": 0
+              },
+              {
+                "host": "base-mainnet.public.blastapi.io",
+                "status": 200,
+                "logs": 0
+              },
+              {
+                "host": "base.api.pocket.network",
+                "status": 200,
+                "logs": 0
+              }
+            ]
+          },
+          {
+            "ms": 629,
+            "ok": true,
+            "kind": "warm",
+            "cut": []
+          }
+        ]
+      },
+      "robinhood": {
+        "listed": [
+          "robinhood.drpc.org",
+          "rpc.mainnet.chain.robinhood.com"
+        ],
+        "probe": {
+          "head": 122525353,
+          "providers": {
+            "robinhood-rpc.publicnode.com": [
+              {
+                "no": "robinhood-rpc.publicnode.com HTTP 200: no state for the read {\"code\":-32602,\"message\":\"Archive requests require a personal token. Get one at:"
+              },
+              {
+                "no": "robinhood-rpc.publicnode.com HTTP 200: no state for the read {\"code\":-32602,\"message\":\"Archive requests require a personal token. Get one at:"
+              }
+            ],
+            "robinhood.drpc.org": [
+              {
+                "logs": 77
+              },
+              {
+                "logs": 48
+              }
+            ],
+            "rpc.mainnet.chain.robinhood.com": [
+              {
+                "logs": 77
+              },
+              {
+                "logs": 48
+              }
+            ],
+            "robinhood.rpc.blxrbdn.com": [
+              {
+                "no": "robinhood.rpc.blxrbdn.com HTTP 403: not JSON (<html><body><h1>403 Forbidden</h1> Reque)"
+              },
+              {
+                "no": "robinhood.rpc.blxrbdn.com HTTP 403: not JSON (<html><body><h1>403 Forbidden</h1> Reque)"
+              }
+            ]
+          }
+        },
+        "taps": [
+          {
+            "ms": 4389,
+            "ok": true,
+            "kind": "cold",
+            "cut": []
+          },
+          {
+            "ms": 1559,
+            "ok": true,
+            "kind": "warm",
+            "cut": [
+              {
+                "host": "robinhood.drpc.org",
+                "status": 200,
+                "logs": 0
+              },
+              {
+                "host": "rpc.mainnet.chain.robinhood.com",
+                "status": 200,
+                "logs": 0
+              }
+            ]
+          },
+          {
+            "ms": 1663,
+            "ok": true,
+            "kind": "warm",
+            "cut": [
+              {
+                "host": "robinhood.drpc.org",
+                "status": 200,
+                "logs": 0
+              },
+              {
+                "host": "rpc.mainnet.chain.robinhood.com",
+                "status": 200,
+                "logs": 0
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "bad_unfiltered": {
+    "at": "2026-11-24T21:04:45.592Z",
+    "chains": {
+      "base": {
+        "listed": [
+          "base-rpc.publicnode.com",
+          "base-mainnet.public.blastapi.io",
+          "base.api.pocket.network"
+        ],
+        "probe": {
+          "head": 61819547,
+          "providers": {
+            "base-rpc.publicnode.com": [
+              {
+                "logs": 0
+              },
+              {
+                "logs": 3
+              }
+            ],
+            "base-mainnet.public.blastapi.io": [
+              {
+                "logs": 0
+              },
+              {
+                "logs": 3
+              }
+            ],
+            "mainnet.base.org": [
+              {
+                "no": "mainnet.base.org HTTP 200: rate limit {\"code\":-32011,\"message\":\"request limit reached\"}"
+              },
+              {
+                "no": "mainnet.base.org HTTP 200: rate limit {\"code\":-32011,\"message\":\"request limit reached\"}"
+              }
+            ],
+            "base.api.pocket.network": [
+              {
+                "logs": 0
+              },
+              {
+                "logs": 3
+              }
+            ]
+          }
+        },
+        "taps": [
+          {
+            "ms": 3091,
+            "ok": true,
+            "kind": "cold",
+            "cut": []
+          },
+          {
+            "ms": 938,
+            "ok": true,
+            "kind": "warm",
+            "cut": [
+              {
+                "host": "base-rpc.publicnode.com",
+                "status": 200,
+                "logs": 0
+              },
+              {
+                "host": "mainnet.base.org",
+                "status": 200,
+                "refused": "-32011 request limit reached"
+              },
+              {
+                "host": "base-mainnet.public.blastapi.io",
+                "status": 200,
+                "logs": 0
+              }
+            ]
+          },
+          {
+            "ms": 968,
+            "ok": true,
+            "kind": "warm",
+            "cut": []
+          }
+        ]
+      },
+      "robinhood": {
+        "listed": [
+          "robinhood.drpc.org",
+          "rpc.mainnet.chain.robinhood.com"
+        ],
+        "probe": {
+          "head": 122525784,
+          "providers": {
+            "robinhood-rpc.publicnode.com": [
+              {
+                "no": "robinhood-rpc.publicnode.com HTTP 200: no state for the read {\"code\":-32602,\"message\":\"Archive requests require a personal token. Get one at:"
+              },
+              {
+                "no": "robinhood-rpc.publicnode.com HTTP 200: no state for the read {\"code\":-32602,\"message\":\"Archive requests require a personal token. Get one at:"
+              }
+            ],
+            "robinhood.drpc.org": [
+              {
+                "logs": 59
+              },
+              {
+                "logs": 65
+              }
+            ],
+            "rpc.mainnet.chain.robinhood.com": [
+              {
+                "logs": 59
+              },
+              {
+                "logs": 65
+              }
+            ],
+            "robinhood.rpc.blxrbdn.com": [
+              {
+                "no": "robinhood.rpc.blxrbdn.com HTTP 403: not JSON (<html><body><h1>403 Forbidden</h1> Reque)"
+              },
+              {
+                "refused": "-32601 Method not available on this endpoint"
+              }
+            ]
+          }
+        },
+        "taps": [
+          {
+            "ms": 3505,
+            "ok": true,
+            "kind": "cold",
+            "cut": []
+          },
+          {
+            "ms": 1497,
+            "ok": true,
+            "kind": "warm",
+            "cut": [
+              {
+                "host": "robinhood.drpc.org",
+                "status": 200,
+                "logs": 0
+              },
+              {
+                "host": "robinhood-rpc.publicnode.com",
+                "status": 200,
+                "logs": 0
+              }
+            ]
+          },
+          {
+            "ms": 945,
+            "ok": true,
+            "kind": "warm",
+            "cut": [
+              {
+                "host": "robinhood-rpc.publicnode.com",
+                "status": 200,
+                "logs": 0
+              },
+              {
+                "host": "robinhood.drpc.org",
+                "status": 200,
+                "logs": 0
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

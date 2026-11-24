@@ -97,6 +97,10 @@ export type EvmPoolVenue = {
    *  (debug_traceTransaction, prestateTracer and callTracer; card evm-sell-hook-intrablock): the state the trade saw at
    *  its start, after every earlier transaction of its block. Absent: the evidence replays at the parent block. */
   readonly traceProviders?: readonly [string, string];
+  /** Of `providers`, those that answer an eth_getLogs of the newest blocks (card evm-cut-logs-only-where-served): a warm
+   *  tap reads a pruned pool's Swap and ModifyLiquidity logs (checks/evm/quote.ts unmovedSince) of these alone, never of
+   *  a provider that refuses the method or the range. Absent: every provider. */
+  readonly logProviders?: readonly string[];
   readonly maxLag?: number;
   /** How a quote's reads are sent to `providers` (card evm-buy-quote-in-window, review of 2c02f7df): at most `perCall`
    *  reads in one aggregate3 call, and no JSON-RPC request body (a batch of calls) past `maxBytes`, the smallest request
@@ -250,6 +254,11 @@ export const evmMainnetVenues = () =>
       // Tenderly at 1,000, base.drpc.org refuses any range (code 35), nodies at 50, meowrpc 429s and has no eth_getLogs,
       // llamarpc 525, omniatech 521, lava 410, therpc 403.
       providers: Object.freeze(["https://base-rpc.publicnode.com", "https://base-mainnet.public.blastapi.io", "https://mainnet.base.org", "https://base.api.pocket.network"]),
+      // the warm tap's cut logs (card evm-cut-logs-only-where-served), read from the Mac 2026-11-24 20:46Z, the
+      // PoolManager's Swap and ModifyLiquidity over the newest 10 blocks with the blocks either side, three times each:
+      // publicnode, blastapi and Pocket answered (10, 10 and 24 logs on each); mainnet.base.org -32011 "request limit
+      // reached" every time
+      logProviders: Object.freeze(["https://base-rpc.publicnode.com", "https://base-mainnet.public.blastapi.io", "https://base.api.pocket.network"]),
       // Each provider's posts at once (card robinhood-quotes-inside-provider-limits): 5 bursts of 2, 4, 6 and 8 posts at
       // once, 1.5 s apart, each post a batch of 3 eth_call PoolManager extsload(bytes32[]) of 110 slots at latest (22 KB,
       // a quote's request), from the Mac 2026-11-14 05:10-05:11Z: every post of all four served at 8, none refused (429
@@ -476,6 +485,11 @@ export const evmMainnetVenues = () =>
       // 916/3,298 ms against publicnode's 466/941, 23:2xZ), so it is not asked; the pool list keeps it for log pages.
       // Live check rh-provider-fails-64-read-batch reads every one of this list at the batch after each app deploy.
       providers: Object.freeze(["https://robinhood-rpc.publicnode.com", "https://robinhood.drpc.org", "https://rpc.mainnet.chain.robinhood.com", "https://robinhood.rpc.blxrbdn.com"]),
+      // the warm tap's cut logs (card evm-cut-logs-only-where-served), read from the Mac 2026-11-24 20:46Z over the
+      // newest 100 blocks as Base's: dRPC and Robinhood's own answered (67, 72 and 90 logs on both); publicnode -32602
+      // "Archive requests require a personal token" and bloXroute -32601 "Method not available on this endpoint" every
+      // time (release 202's sign run 45482874085: the fresh account's walk met bloXroute's -32601 once)
+      logProviders: Object.freeze(["https://robinhood.drpc.org", "https://rpc.mainnet.chain.robinhood.com"]),
       // Robinhood's own is asked last (card robinhood-quotes-inside-provider-limits): it answers 429 past about 1 post a
       // second (apps/helper/src/limits/limits.ts PROVIDER_PACE) and is the scan's and the pool sync's seat, yet ranked in
       // by its speed whenever publicnode was held it carried a warm tap's rounds of reads, FRONG's 35 to 38 posts in one
