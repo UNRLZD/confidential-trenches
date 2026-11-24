@@ -15,7 +15,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { APP_HOST, classify, EXIT, judge, LOADS, pickOf, probeSaid, settled } from "./app-chart-live.mjs";
+import { APP_HOST, classify, EXIT, judge, LIVE_DUE_MS, LOADS, pickOf, probeSaid, settled } from "./app-chart-live.mjs";
 import { consoleLine } from "./console-errors.mjs";
 import { footerUrl } from "../../apps/terminal/src/shell/footer.ts";
 import { VERIFY_RELEASES } from "../../apps/terminal/src/screens/verify/release.ts";
@@ -76,6 +76,27 @@ test("planted: a reload, no live read, a full read every second, a console error
   assert.ok(bad(mut((_, a) => (a.loads[0].liveReads = 0))).some((l) => /no live read/.test(l)));
   assert.ok(bad(mut((_, a) => (a.loads[0].fullReads = 90))).some((l) => /90 full reads/.test(l)));
   assert.ok(bad(mut((_, a) => a.loads[1].errors.push("Failed to load resource: the server responded with a status of 503 ()"))).some((l) => / phone: .*errors:/.test(l)));
+});
+
+// merge queue run 45386393117 (test-browser 2, job 138418359670): a Solana pick at 0 changes in the probe drew a bar the
+// helper answered at both widths, one load, no error, full reads in bound, and failed only "no live read (limit 2)": a
+// page whose answers name none of the helper's own bars reads full ones only (candles.ts followCandles, away)
+test("card app-chart-live-away-judge: no live read is due until an answer names the helper's own bars, LIVE_DUE_MS before the load ended", () => {
+  const away = mut((_, a) => {
+    for (const l of a.loads) Object.assign(l, { liveReads: 0, ownAt: null, endAt: l.readyAt + 60_000 });
+  });
+  assert.equal(away.verdict, "PASS", away.lines.join("\n"));
+  assert.ok(away.lines.some((l) => / desktop: .*no live read due: no answer named the helper's own bars/.test(l)), away.lines.join("\n"));
+  const late = mut((_, a) => {
+    for (const l of a.loads) Object.assign(l, { liveReads: 0, ownAt: l.readyAt + 60_000 - LIVE_DUE_MS + 500, endAt: l.readyAt + 60_000 });
+  });
+  assert.equal(late.verdict, "PASS", late.lines.join("\n"));
+  const owned = mut((_, a) => {
+    for (const l of a.loads) Object.assign(l, { liveReads: 0, ownAt: l.readyAt + 50_000 - LIVE_DUE_MS, endAt: l.readyAt + 60_000 });
+  });
+  assert.equal(owned.verdict, "FAIL", owned.lines.join("\n"));
+  assert.ok(bad(owned).some((l) => / desktop: .*no live read \(limit 2\)/.test(l)), owned.lines.join("\n"));
+  assert.ok(bad(owned).some((l) => / phone: .*no live read \(limit 2\)/.test(l)), owned.lines.join("\n"));
 });
 
 test("planted: a helper silent in every pick is INCONCLUSIVE, never a FAIL; a silent pick before a moving one is no verdict", () => {

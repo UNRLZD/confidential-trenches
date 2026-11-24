@@ -28,8 +28,9 @@
 //        new Solana token's trades and 15m candles moved within 10 s on the helper, and a probe from the Mac at 06:3xZ
 //        had 16 of 100 candle reads refused 429 with Retry-After 50 to 75 s and 35 answered with none of the helper's
 //        own bars yet). A quiet probe says nothing about the page or the helper, so it is never a FAIL.
-//      At both widths in a watch with a verdict: no reload (one time origin), live reads (limit 2) made, at most one
-//      full read (limit 500) a minute after the first, no console error and no page error in the terminal's frame.
+//      At both widths in a watch with a verdict: no reload (one time origin), live reads (limit 2) made once an answer
+//      named the helper's own bars (LIVE_DUE_MS), at most one full read (limit 500) a minute after the first, no console
+//      error and no page error in the terminal's frame.
 //   The whole walk ends by RUN_MS from its start: no pick starts with less than PICK_MIN_MS left, and a probe and a
 //   watch stop at it, so the run ends with its own verdict inside the bound the merge queue gives it (card
 //   app-chart-solana-full-read-on-time).
@@ -83,6 +84,14 @@ export const PICK_MIN_MS = PROBE_MS + READY_MS + WATCH_MIN_MS;
 export const pickFits = (now, deadline) => deadline - now >= PICK_MIN_MS;
 /** The page's full reads: its first, one a minute after (candles.ts RESYNC_MS), and one after a failed read. */
 const fullMax = (watchMs) => 1 + Math.ceil(watchMs / 60_000) + 1;
+/** How long before a load's end the page must have had an answer naming the helper's own bars (`own_from_s`) for its
+ *  live reads (limit 2) to be due. While every answer names none, the page reads full ones only, AWAY_MS apart
+ *  (apps/terminal/src/screens/token/candles.ts followCandles, `away`), and its first live read comes LIVE_MS (1 s) after
+ *  an own answer; the margin covers that and the answer's own time. Merge queue run 45386393117 (test-browser 2, job
+ *  138418359670): a Solana pick at 0 changes in the probe drew a bar the helper answered at both widths, one load, no
+ *  error, full reads in bound, and failed only "no live read (limit 2)". A record with no `ownAt` (before this) is
+ *  judged as before: live reads due. */
+export const LIVE_DUE_MS = 3_000;
 
 // ------------------------------------------------------------------------------------------------ the verdict
 /** A helper bar [t_s, open, high, low, close, ...] as the page writes its last bar: time in ms and close. */
@@ -151,7 +160,10 @@ export function judge(rec) {
       else if (final === first) bad.push(`the helper's own bars moved after the chart was ready, the page's last bar stayed ${l.first} for ${l.watchedMs} ms`);
       else if (!helperBars.has(final)) bad.push(`the last bar drawn ${l.final} is none the helper answered during the watch (the page's ${(l.answered ?? []).length} answers or Node's reads)`);
       if (!(l.origin > 0) || l.originEnd !== l.origin) bad.push(`the frame was loaded again (time origin ${l.origin} -> ${l.originEnd})`);
-      if (!(l.liveReads > 0)) bad.push("no live read (limit 2)");
+      // live reads are due once an answer named the helper's own bars LIVE_DUE_MS before the load ended (no `ownAt`: due)
+      const liveDue = l.ownAt === undefined || (l.ownAt !== null && !(l.endAt - l.ownAt <= LIVE_DUE_MS));
+      if (!(l.liveReads > 0) && liveDue) bad.push("no live read (limit 2)");
+      const live = l.liveReads > 0 || liveDue ? `${l.liveReads} live reads` : `no live read due: no answer named the helper's own bars ${l.ownAt === null ? "in the load" : `until ${l.endAt - l.ownAt} ms before its end`} (the page reads full ones while away)`;
       if (!(l.fullReads >= 1 && l.fullReads <= fullMax(l.watchedMs ?? WATCH_MAX_MS))) bad.push(`${l.fullReads} full reads (limit 500) in ${l.watchedMs} ms`);
       // a footer read of a release NEAR RPC that failed, the footer showing the pair answered, is no error; any other failed load
       // of a release RPC needs a Verify panel to show it, and the token page draws none (rpc-outage.mjs, card app-shell-rpc-outage-judge)
@@ -159,7 +171,7 @@ export function judge(rec) {
       if (kept.length) bad.push(`errors: ${kept.join(" | ")}`);
       outage += downNote(down);
       if (!l.shot) bad.push("no screenshot");
-      say(bad.length === 0, `${tag} ${w}: ${bad.length ? bad.join("; ") : `the last bar moved ${l.first} -> ${l.final} after ${l.changedMs} ms, a bar the helper answered; ${l.liveReads} live reads, ${l.fullReads} full, one load, no error${outage}`}`);
+      say(bad.length === 0, `${tag} ${w}: ${bad.length ? bad.join("; ") : `the last bar moved ${l.first} -> ${l.final} after ${l.changedMs} ms, a bar the helper answered; ${live}, ${l.fullReads} full, one load, no error${outage}`}`);
     }
   }
   const bad = lines.some((x) => x.startsWith("BAD"));
@@ -288,6 +300,8 @@ async function watchLoad(browser, w, i, pick, harness, shots, n, deadline) {
   let fullReads = 0;
   /** The newest bar of every candle answer the page was given, as the page writes its last bar. */
   const answered = [];
+  /** When the page first got an answer naming the helper's own bars (candles.ts readCandles `own`), null for none. */
+  let ownAt = null;
   page.on("request", (r) => {
     if (!r.url().startsWith(CANDLES)) return;
     const limit = new URL(r.url()).searchParams.get("limit");
@@ -296,7 +310,9 @@ async function watchLoad(browser, w, i, pick, harness, shots, n, deadline) {
   });
   page.on("response", (r) => {
     if (!r.url().startsWith(CANDLES) || r.status() !== 200) return;
+    const at = Date.now();
     void r.json().then((b) => {
+      if (Number.isSafeInteger(b?.own_from_s) && b.own_from_s > 0) ownAt = Math.min(ownAt ?? at, at);
       const k = keyOf(b?.candles?.at(-1));
       if (k !== null && !answered.includes(k)) answered.push(k);
     }, () => undefined);
@@ -341,8 +357,10 @@ async function watchLoad(browser, w, i, pick, harness, shots, n, deadline) {
   await page.screenshot({ path: path.join(shots, shot) });
   // the footer's clock for outages()'s read cap is read last, as the error list closes
   const footer = app ? await footerEvidence(app).catch(() => null) : null;
+  // the page's reads are counted until here, so the load ends here for LIVE_DUE_MS
+  const endAt = Date.now();
   await ctx.close();
-  return { width: w.name, opened, chart: m?.chart ?? null, first, final, changedMs, watchedMs: Date.now() - readyAt, readyAt, origin, originEnd, liveReads, fullReads, answered, errors, footer, shot };
+  return { width: w.name, opened, chart: m?.chart ?? null, first, final, changedMs, watchedMs: Date.now() - readyAt, readyAt, origin, originEnd, liveReads, fullReads, answered, ownAt, endAt, errors, footer, shot };
 }
 
 /** One pick watched at both widths, with the helper's newest bars read each second and its tape every two. */
