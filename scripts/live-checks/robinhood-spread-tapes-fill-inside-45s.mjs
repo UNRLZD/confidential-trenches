@@ -16,8 +16,10 @@
 // filling past 45 s when helper-robinhood-capacity opened them after this check). It passes only when each reopened
 // tape answers whole at once (not filling: a reopen read from nothing answers filling first) and still holds the newest
 // trade it held before, or answers 50 trades every one newer than that one: a coin that traded past its newest 50 since
-// (card spread-reopen-judges-a-busy-coin: 0xbbb6c29b's 50 trades spanned 86 s, live run 45428643869); a reopen that
-// answers filling is read on and its fill time printed.
+// (card spread-reopen-judges-a-busy-coin: 0xbbb6c29b's 50 trades spanned 86 s, live run 45428643869), one as old as
+// that one counted newer where the first answer did not hold it (card spread-reopen-same-second: a trade's time is its
+// block's second, and Robinhood makes several blocks a second); a reopen that answers filling is read on and its fill
+// time printed.
 // After: helper
 // Serial: evm-keyed 135 (after a Solana check: the listed Robinhood tapes it opens at once draw the keyed Robinhood providers)
 //   node scripts/live-checks/robinhood-spread-tapes-fill-inside-45s.mjs [--base <url>] [--address <a>] [--record <file>]
@@ -79,7 +81,11 @@ export function spanOf(body) {
 
 /** What a reopened tape's answer holds of the newest trade of before (`newest`, newestOf's): its trade count (spanOf),
  *  whether it holds that trade, and `past`: every trade it answers is newer, so a coin that traded past its newest 50
- *  since holds that one no more (card spread-reopen-judges-a-busy-coin); one as old means it should be there. */
+ *  since holds that one no more (card spread-reopen-judges-a-busy-coin). A trade's time is its block's, in whole
+ *  seconds, and Robinhood makes several blocks a second (0xbbb6c29b's tape held 8 trades in one second, 24 Nov
+ *  23:4xZ), so a trade as old as the newest of before is newer when the first answer, reaching back past that second,
+ *  did not hold it (card spread-reopen-same-second, live run 45428643869's 0xbbb6c29b reopen); one it held means the
+ *  newest of before should be there. */
 export function heldOf(body, newest) {
   let rows = [];
   try {
@@ -87,14 +93,20 @@ export function heldOf(body, newest) {
   } catch {}
   if (!Array.isArray(rows)) rows = [];
   const was = newest?.t_ms ?? null;
-  return { n: spanOf(body).n, kept: rows.some((x) => x?.tx === newest?.tx), past: was !== null && rows.length > 0 && rows.every((x) => Number.isSafeInteger(x?.t_ms) && x.t_ms > was) };
+  const newer = (x) => Number.isSafeInteger(x?.t_ms) && (x.t_ms > was || (x.t_ms === was && newest.reach === true && !newest.second.has(x.tx)));
+  return { n: spanOf(body).n, kept: rows.some((x) => x?.tx === newest?.tx), past: was !== null && rows.length > 0 && rows.every(newer) };
 }
 
-/** A tape's newest trade's tx and t_ms (null where it holds no time), or null. */
+/** A tape's newest trade's tx and t_ms (null where it holds no time), the txs of that second it holds (`second`), and
+ *  whether it reaches back past that second (`reach`: then it holds every trade of it up to the newest), or null. */
 const newestOf = (body) => {
   try {
-    const r = JSON.parse(body).trades[0];
-    return typeof r?.tx === "string" ? { tx: r.tx, t_ms: Number.isSafeInteger(r.t_ms) ? r.t_ms : null } : null;
+    const rows = JSON.parse(body).trades;
+    const r = rows[0];
+    if (typeof r?.tx !== "string") return null;
+    const t_ms = Number.isSafeInteger(r.t_ms) ? r.t_ms : null;
+    const second = new Set(rows.filter((x) => t_ms !== null && x?.t_ms === t_ms).map((x) => x.tx));
+    return { tx: r.tx, t_ms, second, reach: t_ms !== null && rows.some((x) => Number.isSafeInteger(x?.t_ms) && x.t_ms < t_ms) };
   } catch {
     return null;
   }
