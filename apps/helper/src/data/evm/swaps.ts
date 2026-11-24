@@ -2660,9 +2660,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    *  line names what held the reads (card read-ahead-names-the-held-provider: the box's Base lines from 23 Nov 20:12Z
    *  counted up to 294 held waits a minute and named none). */
   const heldBy = new Map<string, number>();
-  const heldWait = (): void => {
+  /** A held wait, its providers named: the held ones it waited on (every held provider of the chain when not given). */
+  const heldWait = (held: readonly string[] = rpcs.filter((u) => holds.heldFor(u) > 0)): void => {
     stood.held++;
-    for (const c of new Set(rpcs.filter((u) => holds.heldFor(u) > 0).map((u) => operatorOf(u)))) heldBy.set(c, (heldBy.get(c) ?? 0) + 1);
+    for (const c of new Set(held.map((u) => operatorOf(u)))) heldBy.set(c, (heldBy.get(c) ?? 0) + 1);
   };
   /** The lists' tokens as the last lists answer named them, and when the last minute's line was written. */
   let listedNow: string[] = [];
@@ -2806,6 +2807,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     return tapeRun ?? Promise.resolve();
   }
   const heldAny = (): boolean => rpcs.some((u) => holds.heldFor(u) > 0);
+  /** The held ones of the read back's own providers (readBack's: those that serve old blocks, and the narrow seats), the
+   *  holds its backoff may wait on, as its failed() waits on them alone. */
+  const backHeld = (): string[] => [...backRpcs, ...backNarrow].filter((u) => holds.heldFor(u) > 0);
   const tapeReady = (t: string): boolean => {
     if (books.has(t)) return true;
     const r = resting.get(restKey(t));
@@ -2852,11 +2856,15 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
           }
           const wait = (e!.back?.until ?? now()) - now();
           if (wait > BACK_RETRY_MAX_MS) return;
-          // a read back backed off (its reads failed or were refused) while a provider is held may wait on that one alone
-          // (Robinhood's day read, the chain's own RPC): rested where it got to, the run's worker free for the next tape,
-          // and the lists' next load asks again; a read back with no wait goes on whatever is held
-          if (wait > 0 && heldAny()) {
-            heldWait();
+          // a read back backed off (its reads failed or were refused) while one of its own providers is held may wait on
+          // that one alone (Robinhood's day read, the chain's own RPC): rested where it got to, the run's worker free for
+          // the next tape, and the lists' next load asks again; a read back with no wait goes on whatever is held. The hold
+          // of a provider it never reads is not its wait: it waits its backoff here, as with none held (card
+          // read-back-rests-on-its-own-held: Base's nodies.app, 50 blocks a read, held at all 212 of a minute's held waits
+          // on the box, 24 Nov 13:2xZ, rested every backed-off Base read back until the lists' next load)
+          const mine = backHeld();
+          if (wait > 0 && mine.length > 0) {
+            heldWait(mine);
             return;
           }
           if (wait > 0) await new Promise((go) => (setTimeout(go, wait) as { unref?: () => void }).unref?.());
