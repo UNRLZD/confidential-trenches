@@ -17,7 +17,9 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { haltOf, HISTORY_ACCOUNT, judge as judgeMainnet, NETS, read as readMainnet, viewOutcome } from "./helper-usdc-event-watch.mjs";
+import { verdictOf } from "../ci/live-rerun.mjs";
+import { ARCHIVAL, haltOf, HISTORY_ACCOUNT, judge as judgeMainnet, main, NETS, read as readMainnet, viewOutcome } from "./helper-usdc-event-watch.mjs";
+import { EXIT, RETRY } from "./provider-answer.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "helper-usdc-event-watch.answers.json"), "utf8"));
@@ -203,10 +205,10 @@ test("a view's outcome, by the helper's own functions (status.ts): a balance is 
   assert.equal(haltOf({ at: 9, answer: "null" }), null);
 });
 
-test("read() through a stub provider: it records each read's outcome, and a wasm that is not USDC's fails the code lines", async () => {
-  const empty = Buffer.from([0, 97, 115, 109, 1, 0, 0, 0]).toString("base64"); // a valid wasm with no exports
-  const asked = [];
-  const stub = async (url, init) => {
+const empty = Buffer.from([0, 97, 115, 109, 1, 0, 0, 0]).toString("base64"); // a valid wasm with no exports
+/** Every source the check reads, answering as the good run's (its code a wasm with no exports); each URL asked is pushed
+ *  on `asked`. */
+const stubOf = (asked) => async (url, init) => {
     asked.push(url);
     const json = (o) => new Response(JSON.stringify(o), { status: 200 });
     if (url.startsWith("https://helper.example/")) return json(JSON.parse(A.good.helper[new URL(url).searchParams.get("token") === NETS.mainnet.token ? "mainnet" : "testnet"].body));
@@ -242,6 +244,10 @@ test("read() through a stub provider: it records each read's outcome, and a wasm
     const hist = A.good.history.views.find((v) => v.at === at);
     return json({ result: { block_height: at, result: [...Buffer.from(hist ? hist.answer : "false")] } });
   };
+
+test("read() through a stub provider: it records each read's outcome, and a wasm that is not USDC's fails the code lines", async () => {
+  const asked = [];
+  const stub = stubOf(asked);
   const run = await read(stub, async () => {}, "https://helper.example");
   const r = judge(run);
   assert.deepEqual(
@@ -249,4 +255,46 @@ test("read() through a stub provider: it records each read's outcome, and a wasm
     ["mainnet", "testnet"].flatMap((n) => [...WITH_TESTNET.nets[n].pair.flatMap((u) => [`BAD [${n}] ${u} view_code`, `BAD [${n}] ${u} exports`])]),
   );
   assert.equal(asked.filter((u) => u.startsWith("https://api.nearblocks.io/")).length, 2);
+});
+
+// card usdc-watch-no-answer-inconclusive: the helper live run 45401968651 (24 Nov 13:2xZ) ended this check ERROR, exit 2,
+// never run again, on NearBlocks answering 522 (its origin timed out, 19.7 s from the Mac too): a source that did not
+// answer says nothing of the deploy. Each source the check reads that does not answer (the indexer's 5xx, an RPC's 503,
+// a fetch that failed) is now a no-answer: INCONCLUSIVE, exit 3, which the live run reads again after a pause, never
+// a PASS. The good stub as read() above, with one source not answering.
+test("a source that does not answer (the indexer's 522, an RPC's 503 twice, a dropped fetch): INCONCLUSIVE, exit 3, the live run's inconclusive, naming the host (red at 73619d713: ERROR, exit 2)", async () => {
+  RETRY.ms = 0;
+  const cases = {
+    "api.nearblocks.io": (url) => (url.startsWith("https://api.nearblocks.io/") ? new Response("error code: 522", { status: 522 }) : null),
+    "near.drpc.org": (url) => (url === "https://near.drpc.org" ? new Response("<html>503 Service Unavailable</html>", { status: 503 }) : null),
+    "archival-rpc.mainnet.fastnear.com": (url) => {
+      if (url === ARCHIVAL) throw new TypeError("fetch failed", { cause: { code: "ECONNRESET" } });
+      return null;
+    },
+  };
+  for (const [host, down] of Object.entries(cases)) {
+    const good = stubOf([]);
+    const out = [];
+    const code = await main(["--base", "https://helper.example"], { fetchFn: async (url, init) => down(url) ?? good(url, init), sleep: async () => {}, log: (l) => out.push(l), err: (l) => out.push(l) });
+    const text = out.join("\n");
+    assert.equal(code, EXIT.INCONCLUSIVE, `${host}: ${text}`);
+    assert.equal(verdictOf("helper-usdc-event-watch", code, text), "inconclusive", text);
+    assert.match(text, new RegExp(`^live-check helper-usdc-event-watch: INCONCLUSIVE: .*${host.replace(/\./g, "\\.")}`, "m"));
+  }
+  // every source answering: the run is judged, as before (the stub's wasm has no exports, so FAIL, never INCONCLUSIVE)
+  const out = [];
+  assert.equal(await main(["--base", "https://helper.example"], { fetchFn: stubOf([]), sleep: async () => {}, log: (l) => out.push(l), err: (l) => out.push(l) }), EXIT.FAIL, out.join("\n"));
+  // an RPC's 429 is waited out at its Retry-After, as before the move (up to three times): FastNEAR answered the Mac 429
+  // on a run a minute after another, 24 Nov 13:4xZ; past three it is the RPC's no-answer. The shared reader reads each
+  // no-answer again once itself (RETRY), so each wait follows two 429s: 4 in a row, two waits, then judged; 8, three
+  // waits and the fourth read's two 429s: INCONCLUSIVE
+  for (const [n, want, waits] of [[4, EXIT.FAIL, 2], [8, EXIT.INCONCLUSIVE, 3]]) {
+    const good = stubOf([]);
+    let limited = 0;
+    const slept = [];
+    const lines = [];
+    const fetchFn = async (url, init) => (url === "https://rpc.mainnet.fastnear.com" && limited++ < n ? new Response("", { status: 429, headers: { "retry-after": "7" } }) : good(url, init));
+    assert.equal(await main(["--base", "https://helper.example"], { fetchFn, sleep: async (ms) => void slept.push(ms), log: (l) => lines.push(l), err: (l) => lines.push(l) }), want, lines.join("\n"));
+    assert.equal(slept.filter((ms) => ms === 7000).length, waits, `${n} answers 429: waited Retry-After, at most three times`);
+  }
 });

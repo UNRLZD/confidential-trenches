@@ -49,7 +49,6 @@ export const NOT_MOVED = Object.freeze([
   "helper-rpc-proxy.mjs",
   "helper-rpc-sell-methods.mjs",
   "helper-tape-4337-trader.mjs",
-  "helper-usdc-event-watch.mjs",
   "helper-usdc-pending-pause.mjs",
   "helper-v4-hook-liquidity.mjs",
   "index-evm-swaps.mjs",
