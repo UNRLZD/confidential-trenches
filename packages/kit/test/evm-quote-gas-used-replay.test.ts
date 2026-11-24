@@ -152,8 +152,13 @@ test("a real Robinhood quote whose call of 64 starves reads behind honest heavy 
       return h.slice(2 * t, 2 * t + 64) + h.slice(2 * (d + 32), 2 * (d + 32 + at3(h, d)));
     });
   };
+  // the per-read gas code's last word after its results (quote.ts READ_MARKER): taken off the last entry, so a read's
+  // own answer moves alone, and written after every regrouped answer, as the code writes it (card
+  // robinhood-cut-logs-off-the-index-seat: Robinhood's warm quotes, with no pair to prove the pruned pools unmoved, ask
+  // them again in calls the recording never sent, and the kit refuses an answer without it)
+  const MARK = "d5d2d81c98f7eef530d209f98d24b60e8438438a742f7e3b44efbbe020fed2a0";
   const entriesOf = (result: string): string[] => {
-    const h = result.slice(2);
+    const h = result.slice(2).toLowerCase().endsWith(MARK) ? result.slice(2, -64) : result.slice(2);
     const n = at3(h, 32);
     const offs = Array.from({ length: n }, (_, k) => 64 + at3(h, 64 + 32 * k));
     return offs.map((o, k) => h.slice(2 * o, k + 1 < n ? 2 * offs[k + 1]! : h.length));
@@ -180,7 +185,7 @@ test("a real Robinhood quote whose call of 64 starves reads behind honest heavy 
       const w = (n: number) => n.toString(16).padStart(64, "0");
       let off = 32 * es.length;
       const heads = es.map((e) => { const o = off; off += e!.length / 2; return w(o); });
-      out.push({ jsonrpc: "2.0", id: c.id, result: "0x" + w(0x20) + w(es.length) + heads.join("") + es.join("") });
+      out.push({ jsonrpc: "2.0", id: c.id, result: "0x" + w(0x20) + w(es.length) + heads.join("") + es.join("") + MARK });
     }
     return JSON.stringify(out);
   };

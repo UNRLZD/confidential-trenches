@@ -488,8 +488,12 @@ export const evmMainnetVenues = () =>
       // the warm tap's cut logs (card evm-cut-logs-only-where-served), read from the Mac 2026-11-24 20:46Z over the
       // newest 100 blocks as Base's: dRPC and Robinhood's own answered (67, 72 and 90 logs on both); publicnode -32602
       // "Archive requests require a personal token" and bloXroute -32601 "Method not available on this endpoint" every
-      // time (release 202's sign run 45482874085: the fresh account's walk met bloXroute's -32601 once)
-      logProviders: Object.freeze(["https://robinhood.drpc.org", "https://rpc.mainnet.chain.robinhood.com"]),
+      // time (release 202's sign run 45482874085: the fresh account's walk met bloXroute's -32601 once). Robinhood's own
+      // is left out (card robinhood-cut-logs-off-the-index-seat): it is the index sync's and the scan's seat, and on
+      // release 203's sign run 45500290069 FOBO's third warm tap met its 429 on 3 of 5 cut-log posts, 3 to 4 calls in
+      // 1 s, the tap 6,311 ms and the index keep's longest sync 29,365 ms behind its 30 s hold. With one provider here a
+      // warm tap has no pair to prove a pruned pool unmoved, so it reads those pools again by eth_call
+      logProviders: Object.freeze(["https://robinhood.drpc.org"]),
       // Robinhood's own is asked last (card robinhood-quotes-inside-provider-limits): it answers 429 past about 1 post a
       // second (apps/helper/src/limits/limits.ts PROVIDER_PACE) and is the scan's and the pool sync's seat, yet ranked in
       // by its speed whenever publicnode was held it carried a warm tap's rounds of reads, FRONG's 35 to 38 posts in one

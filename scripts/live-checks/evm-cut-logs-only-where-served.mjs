@@ -17,6 +17,10 @@
 //     ModifyLiquidity, its host and whether its answer is a log list. It fails on any such read sent to a provider the
 //     venue does not list, or refused by one it does. Taps that sent no such read (no prune, or the warm range passed)
 //     have nothing to judge; with none on either chain the check is INCONCLUSIVE.
+// Card robinhood-cut-logs-off-the-index-seat added two rules. Robinhood's own RPC, the index sync's and the scan's seat
+// (SEAT), is neither listed nor asked a cut-log read: release 203's sign run 45500290069 met its 429 on 3 of 5 of FOBO's
+// third warm tap's cut-log posts. A venue that lists fewer than two (Robinhood now, dRPC alone) has no pair to prove a
+// pool unmoved, so its taps send no such read at all, judged once a warm tap has quoted.
 // After: sign
 // Bundle: out EVM RPC quotes
 //   node scripts/live-checks/evm-cut-logs-only-where-served.mjs [--sign <origin>] [--record <file>]
@@ -37,6 +41,10 @@ export const AMOUNT = 10n ** 15n;
 /** The kit's CUT_LOG_SPAN (checks/evm/quote.ts): the blocks one of its reads spans. */
 export const SPAN = Object.freeze({ base: 10, robinhood: 100 });
 export const TRIES = 2;
+/** The provider a chain's warm taps never ask the cut logs: Robinhood's own RPC, the index sync's first reader and the
+ *  scan's seat, paced at 6 calls a second (the kit's pace.ts EVM_PACE) and 429 past it (card
+ *  robinhood-cut-logs-off-the-index-seat). */
+export const SEAT = Object.freeze({ robinhood: "rpc.mainnet.chain.robinhood.com" });
 const SWAP = "0x40e9cecb9f5f1f1c5b9c97dec2917b7ee92e57ba5563708daca94dd84ad7112f";
 const MODIFY_LIQUIDITY = "0xf208f4912782fd25c7f114ca3723a2d5dd6f3bcc3ac8db5af63baa85f711d5ec";
 const hx = (n) => "0x" + n.toString(16);
@@ -141,7 +149,11 @@ export function judge(run) {
   let judged = 0;
   for (const [chain, c] of Object.entries(run.chains ?? {})) {
     const listed = new Set(c.listed ?? []);
-    if (listed.size < 2) say(false, `[${chain}] the venue lists ${listed.size} log provider(s): a warm tap needs two that agree`);
+    const seat = SEAT[chain];
+    if (seat !== undefined) say(!listed.has(seat), `[${chain}] the venue ${listed.has(seat) ? "lists" : "does not list"} ${seat}, the index sync's seat, as a log provider`);
+    // fewer than two listed: no pair can prove a pruned pool unmoved, so a tap reads none
+    const pair = listed.size >= 2;
+    if (!pair) lines.push(`--  [${chain}] the venue lists ${listed.size} log provider(s): no pair to prove a pool unmoved, so a tap reads none`);
     for (const [host, got] of Object.entries(c.probe?.providers ?? {})) {
       const text = got.length === 0 ? "not asked (no head)" : got.map(show).join(" | ");
       if (!listed.has(host)) {
@@ -155,13 +167,27 @@ export function judge(run) {
     }
     const cut = (c.taps ?? []).flatMap((t) => t.cut ?? []);
     lines.push(`--  [${chain}] taps ${(c.taps ?? []).map((t) => `${t.kind} ${t.ms} ms ${t.ok ? "quoted" : `refused ${t.code}`}, ${(t.cut ?? []).length} cut-log reads`).join("; ")}`);
+    const byHost = (xs) => [...new Set(xs.map((x) => x.host))].map((h) => `${h} ${xs.filter((x) => x.host === h).length}`).join(", ");
+    if (!pair) {
+      if (cut.length > 0) {
+        judged++;
+        say(false, `[${chain}] the venue lists ${listed.size} log provider(s), yet the taps sent ${cut.length} cut-log reads: ${byHost(cut)}`);
+      } else if ((c.taps ?? []).some((t) => t.kind === "warm" && t.ok)) {
+        judged++;
+        say(true, `[${chain}] the taps sent no cut-log read, and a warm tap quoted`);
+      } else lines.push(`--  [${chain}] no warm tap quoted: nothing to judge on this chain`);
+      continue;
+    }
     if (cut.length === 0) {
       lines.push(`--  [${chain}] no tap read the pruned pools' logs: nothing to judge on this chain`);
       continue;
     }
     judged++;
+    if (seat !== undefined) {
+      const at = cut.filter((x) => x.host === seat);
+      say(at.length === 0, `[${chain}] ${at.length} of the taps' ${cut.length} cut-log reads to ${seat}, the index sync's seat`);
+    }
     const off = cut.filter((x) => !listed.has(x.host));
-    const byHost = (xs) => [...new Set(xs.map((x) => x.host))].map((h) => `${h} ${xs.filter((x) => x.host === h).length}`).join(", ");
     say(off.length === 0, `[${chain}] the taps' ${cut.length} cut-log reads, ${off.length} to providers the venue does not list: ${byHost(off.length > 0 ? off : cut)}`);
     const refused = cut.filter((x) => listed.has(x.host) && x.refused !== undefined);
     say(refused.length === 0, `[${chain}] no listed provider refused a tap's cut-log read${refused.length > 0 ? `: ${refused.slice(0, 3).map((x) => `${x.host} ${x.refused}`).join("; ")}` : ""}`);
