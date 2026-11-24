@@ -60,6 +60,9 @@ export const PATHS = [
   // the signing page's build, which near-rpc-operators.mjs makes before it scans the served bundle (card
   // signpage-generated-merge-free, review P3-1)
   "scripts/signpage-built.mjs",
+  // the build's input and output lists, which signpage-built.mjs reads to stamp a build (card
+  // readme-run-fits-an-agent-timeout)
+  "scripts/ci/sign-build-inputs.mjs",
   // the install every script runs on
   "package.json",
   "pnpm-lock.yaml",
