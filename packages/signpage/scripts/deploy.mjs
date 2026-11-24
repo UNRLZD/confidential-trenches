@@ -153,8 +153,9 @@ const BUILD_APP = join(dirname(fileURLToPath(import.meta.url)), "build-app.mjs")
 /** Copies the package's served sources (servedSources: index.html at the root, public/'s files at their paths under it)
  *  into a fresh temp folder, builds the page's five output files there from the package's sources when it has them
  *  (src/main.ts: the real package; a test's copy of the served files is served as it is), and copies the prover's setup
- *  files and licences (SERVED); returns the folder's path. A failed build removes the folder and throws. */
-export function build(pkg = PKG) {
+ *  files and licences (SERVED); returns the folder's path. A failed build removes the folder and throws. `run` starts
+ *  the build's two node processes: spawnSync, or the deploy's own `run` (a test's stand-in). */
+export function build(pkg = PKG, run = spawnSync) {
   const out = mkdtempSync(join(tmpdir(), "ct-signpage-"));
   try {
     for (const f of servedSources(pkg)) {
@@ -166,9 +167,9 @@ export function build(pkg = PKG) {
       // the package's own build-app.mjs: in a clean checkout, that checkout's, so the bundle reads its node_modules alone,
       // and its copyServed copies the setup files and licences that checkout holds (review of 31f81cbd, P3)
       const app = existsSync(join(pkg, "scripts", "build-app.mjs")) ? join(pkg, "scripts", "build-app.mjs") : BUILD_APP;
-      const r = spawnSync(process.execPath, [app, "--out", out, "--pkg", pkg], { encoding: "utf8" });
+      const r = run(process.execPath, [app, "--out", out, "--pkg", pkg], { encoding: "utf8" });
       if (r.status !== 0) throw new Error(`build-app.mjs --out failed (exit ${r.status ?? r.signal}): ${`${r.stderr ?? ""}${r.error ?? ""}`.trim()}`);
-      const c = spawnSync(process.execPath, ["--input-type=module", "-e", `(await import(${JSON.stringify(pathToFileURL(app).href)})).copyServed(${JSON.stringify(out)});`], { encoding: "utf8" });
+      const c = run(process.execPath, ["--input-type=module", "-e", `(await import(${JSON.stringify(pathToFileURL(app).href)})).copyServed(${JSON.stringify(out)});`], { encoding: "utf8" });
       if (c.status !== 0) throw new Error(`copyServed of ${app} failed (exit ${c.status ?? c.signal}): ${`${c.stderr ?? ""}${c.error ?? ""}`.trim()}`);
     } else copyServed(out); // a caller's own copy of the served files (the tests' plants): this checkout's setup files
   } catch (e) {
@@ -393,7 +394,7 @@ export async function deploy(argv, env = process.env, run = spawnSync, pkg = PKG
   };
   let dir;
   try {
-    dir = build(clean?.pkg ?? pkg);
+    dir = build(clean?.pkg ?? pkg, run);
   } catch (e) {
     done();
     throw e;

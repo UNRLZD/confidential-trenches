@@ -86,6 +86,47 @@ function installIn(args, opts) {
   if (key && r.status === 0) INSTALLED.set(key, r);
   return r;
 }
+// A build's two node processes in one of those checkouts or in this tree's package (build-app.mjs --out <folder>, then
+// its copyServed of that folder) run for real the first time, and the folder they fill is kept; a later build of the same
+// package gets a copy of that folder, its processes not run again, since no test changes a checkout's or the tree's
+// sources or installed packages. A build anywhere else, or one whose process failed, runs every time. The file ran
+// build-app.mjs 24 times, 26 CPU-s on a Mac; it runs it 10 times, 9 CPU-s, most of them the release check's own builds
+// (release-list.mjs), and the whole file 51 CPU-s, not 83 (card readme-run-fits-an-agent-timeout).
+const BUILT = new Map();
+const building = new Map();
+const copied = new Set();
+function buildIn(args, opts) {
+  const real = () => spawnSync(process.execPath, args, { ...opts, encoding: "utf8" });
+  if (args[1] === "--out" && args[3] === "--pkg") {
+    const [, , out, , pkg] = args;
+    const at = existsSync(pkg) ? realpathSync(pkg) : null;
+    const kept = at === realpathSync(PKG) || [...CLEAN.values()].some((c) => at?.startsWith(`${realpathSync(c.dir)}/`));
+    const key = kept ? `${at}\0${realpathSync(args[0])}` : null;
+    if (key && BUILT.has(key)) {
+      cpSync(BUILT.get(key), out, { recursive: true });
+      copied.add(out);
+      return { status: 0, stdout: "", stderr: "" };
+    }
+    const r = real();
+    if (key && r.status === 0) building.set(out, key);
+    return r;
+  }
+  const out = [...copied, ...building.keys()].find((o) => args.at(-1)?.includes(`copyServed(${JSON.stringify(o)})`));
+  if (out !== undefined && copied.delete(out)) return { status: 0, stdout: "", stderr: "" };
+  const r = real();
+  if (out !== undefined) {
+    const key = building.get(out);
+    building.delete(out);
+    if (r.status === 0 && !BUILT.has(key)) {
+      const kept = mkdtempSync(join(OWN_TMP, "ct-signpage-test-built-"));
+      cpSync(out, kept, { recursive: true });
+      BUILT.set(key, kept);
+    }
+  }
+  return r;
+}
+/** This tree's real build, as build() makes it, its node processes run once for the file (buildIn). */
+const treeBuild = () => build(PKG, (cmd, args, opts) => buildIn(args, opts));
 after(() => {
   for (const { repo, dir } of CLEAN.values()) {
     if (spawnSync("git", ["-C", repo, "worktree", "remove", "--force", dir]).status !== 0) rmSync(dir, { recursive: true, force: true });
@@ -97,6 +138,8 @@ function recorder({ head = HEAD, status = "", install = 0, add = 0, lsRemote = 0
   const checkedOut = [];
   const heads = [main].flat();
   const run = (cmd, args, opts) => {
+    // the build's own node processes (build(pkg, run)) run as above, kept out of the calls a test reads
+    if (cmd === process.execPath) return buildIn(args, opts);
     calls.push({ cmd, args, opts });
     if (cmd === "pnpm" && args[0] === "install" && install) return { status: install, stdout: "", stderr: "ERR_PNPM_OUTDATED_LOCKFILE  Cannot install with \"frozen-lockfile\"\n" };
     if (cmd === "pnpm" && args[0] === "install") return args.includes("--prefer-offline") ? installIn(args, opts) : { status: 0, stdout: "", stderr: "" };
@@ -391,7 +434,7 @@ test("the build's five output files are built at the deploy from the sources: a 
   const served = servedSources(PKG);
   assert.deepEqual(served.filter((f) => ["index.html", "public/app.js", "public/prover-worker.js", "public/prover-thread.js", "public/walk-worker.js"].includes(f)), []);
   const fresh = await bundle();
-  const dir = build();
+  const dir = treeBuild();
   try {
     assert.ok(readFileSync(join(dir, "app.js")).equals(fresh.js));
     assert.equal(readFileSync(join(dir, "index.html"), "utf8"), fresh.html);
@@ -621,7 +664,7 @@ test("planted: a checkout whose node_modules lacks the kit's snarkjs gets a gate
   const repo = dirname(dirname(PKG));
   const bare = mkdtempSync(join(tmpdir(), "ct-signpage-test-bare-"));
   assert.equal(spawnSync("git", ["-C", repo, "worktree", "add", "--detach", bare, "HEAD"]).status, 0);
-  const dir = build();
+  const dir = treeBuild();
   try {
     for (const f of execFileSync("git", ["-C", repo, "diff", "--name-only", "HEAD"], { encoding: "utf8" }).split("\n").filter(Boolean)) {
       if (existsSync(join(repo, f))) cpSync(join(repo, f), join(bare, f));
@@ -671,7 +714,7 @@ test("a deploy's live runs name every live check that reads SIGN_HOST, and its s
 const zkPath = (name) => `assets/zk/${ZK_SETUP_FILES[name].sha256}.${name.split(".").pop()}`;
 
 test("the build holds the prover: the worker, the six setup files at /assets/zk/<sha256>.<ext> and the licences", () => {
-  const dir = build();
+  const dir = treeBuild();
   try {
     assert.deepEqual(checkDir(dir), []);
     assert.deepEqual(readdirSync(join(dir, "assets", "zk")).sort(), Object.keys(ZK_SETUP_FILES).map((n) => zkPath(n).slice("assets/zk/".length)).sort());
@@ -704,7 +747,7 @@ test("a build whose setup files or worker are not the pinned ones is refused", (
     "the GPL text missing": (d) => (rmSync(join(d, "licenses", "GPL-3.0.txt")), /licenses\/GPL-3\.0\.txt: missing/),
   };
   for (const [name, plant] of Object.entries(plants)) {
-    const dir = build();
+    const dir = treeBuild();
     try {
       const want = plant(dir);
       const p = checkDir(dir);
@@ -969,7 +1012,7 @@ test("planted: an ignored file in public/ (.env.local) is not in the build; buil
 // Card kit-oneclick-pins-frozen: the gate names the pinned 1Click key bytes in the build's app.js, so a build that ships
 // a test harness's key, or a 1Click pin left writable, is refused before anything is uploaded or listed.
 test("planted: a build whose app.js names a harness 1Click key, or leaves a pin unfrozen, is refused; the real build passes", () => {
-  const dir = build();
+  const dir = treeBuild();
   try {
     assert.deepEqual(checkPins(dir), []);
     const js = readFileSync(join(dir, "app.js"), "utf8");

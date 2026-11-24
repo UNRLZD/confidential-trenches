@@ -42,6 +42,7 @@
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
+import { bytesToHex } from "@noble/hashes/utils.js";
 import { base58, base64 } from "@scure/base";
 import { readSolanaRent, SOLANA_ANSWER_MAX_BYTES, SOLANA_POOL_BUY_PIECES_MAX, SOLANA_POOL_FEE_STEP, SOLANA_POOL_SEND_MARGIN_MS, solanaPoolFee, solanaPoolReleaseCost, solanaRentMin, solanaSameProvider, VAULT_FIELD_P, VaultTree, type SolanaRent, type SolanaRpc } from "@blindfill/kit";
 import { POOL_TESTNET } from "./network.ts";
@@ -137,11 +138,25 @@ function onCurve(b: Uint8Array): boolean {
   }
 }
 
+// The last PDA_KEPT answers, by the seeds' and the program's bytes (hex and ":" before the "|", so no other seeds and
+// program share a key), the oldest dropped first: each costs a sha256 and an on-curve check (a field square root) per
+// bump tried, and the pool's page and pool addresses are asked again on every read (as the kit's solanaProgramAddress
+// keeps its own; card readme-run-fits-an-agent-timeout). An answer leaves as a copy, so no caller can change a kept one.
+const PDA_KEPT = 4096;
+const pdaKept = new Map<string, { address: Uint8Array; bump: number }>();
+
 /** Solana's find_program_address: the first bump from 255 down whose sha256(seeds ‖ bump ‖ program ‖ marker) is off the curve. */
 export function solanaPda(seeds: readonly Uint8Array[], program: Uint8Array): { address: Uint8Array; bump: number } {
+  const key = `${seeds.map(bytesToHex).join(":")}|${bytesToHex(program)}`;
+  const kept = pdaKept.get(key);
+  if (kept) return { address: kept.address.slice(), bump: kept.bump };
   for (let bump = 255; bump >= 0; bump--) {
     const h = sha256(cat(...seeds, Uint8Array.of(bump), program, enc.encode("ProgramDerivedAddress")));
-    if (!onCurve(h)) return { address: h, bump };
+    if (!onCurve(h)) {
+      if (pdaKept.size >= PDA_KEPT) pdaKept.delete(pdaKept.keys().next().value!);
+      pdaKept.set(key, { address: h.slice(), bump });
+      return { address: h, bump };
+    }
   }
   throw new Error("no program address");
 }

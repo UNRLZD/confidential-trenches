@@ -23,7 +23,7 @@ import { checkPool, PassFail } from "../src/pool/pool.ts";
 import { SolanaRpcTransportError } from "../../kit/src/trade/solana/send.ts";
 import { RESTORE_LANES, WALK_SLICE_MS } from "../src/notes/restore.ts";
 import {
-  SOL_LAG_SLOTS, SOL_LAG_WAIT_MS, SOL_REACH_WAITS, SOL_PAGES_A_CALL, SOL_LIFE_MS, type SolanaLagWait, solanaLagRetry, SOL_TIP_CAP, solanaContextOf, solanaEpochFee, solanaNow, solanaPageOf, solanaPool, solanaPoolOf, solanaTreeSync, type SolanaFeeAnswer,
+  SOL_LAG_SLOTS, SOL_LAG_WAIT_MS, SOL_REACH_WAITS, SOL_PAGES_A_CALL, SOL_LIFE_MS, type SolanaLagWait, solanaLagRetry, SOL_TIP_CAP, solanaContextOf, solanaEpochFee, solanaNow, solanaPageOf, solanaPda, solanaPool, solanaPoolOf, solanaTreeSync, type SolanaFeeAnswer,
 } from "../src/pool/solana.ts";
 
 type Spend = { name: string; note: number; new_commitment: string; withdrawn: string; state_root_index: number; label_root_index: number; salt: string; public_signals: string[] };
@@ -48,11 +48,34 @@ const PIN = { program: PROGRAM, feePayer: FEE_PAYER };
 const T = (i: number): bigint => 1_800_000_000n + 13n * BigInt(i);
 
 type Entry = { leaf: bigint; root: bigint; t: bigint };
-/** One tree's entries, its roots taken one insert at a time as the program's insert does. */
+/** One tree's entries, its roots taken one insert at a time as the program's insert does. Tests ask for the same leaves
+ *  again (each chain's trees, rebuilt per slot and per case): each list is built once and every call gets its own copy
+ *  (card readme-run-fits-an-agent-timeout: the rebuilds were 6 of the file's 23 busy seconds). */
+const built = new Map<string, readonly Entry[]>();
 function entries(leaves: readonly { leaf: bigint; t: bigint }[]): Entry[] {
-  const tree = new VaultTree();
-  return leaves.map(({ leaf, t }) => (tree.append([leaf]), { leaf, root: tree.root!, t }));
+  const key = leaves.map(({ leaf, t }) => `${leaf.toString(16)}:${t}`).join(",");
+  let es = built.get(key);
+  if (!es) {
+    const tree = new VaultTree();
+    built.set(key, (es = leaves.map(({ leaf, t }) => (tree.append([leaf]), { leaf, root: tree.root!, t }))));
+  }
+  return es.map((e) => ({ ...e }));
 }
+
+// card readme-run-fits-an-agent-timeout: solanaPda keeps its last answers. A caller that writes over the bytes it was
+// given, the first answer or a kept one, never changes the next answer, which stays the page's address
+test("solanaPda's answer, written over by its caller, first or kept, never changes the next one", () => {
+  const seeds = [new TextEncoder().encode("page"), Uint8Array.of(1), Uint8Array.of(9, 0, 0, 0)];
+  const first = solanaPda(seeds, base58.decode(PROGRAM)); // page 9 of the label tree: no other test asks for it
+  const want = [base58.encode(first.address), first.bump] as const;
+  first.address.fill(0);
+  const kept = solanaPda(seeds, base58.decode(PROGRAM));
+  assert.deepEqual([base58.encode(kept.address), kept.bump], want);
+  kept.address.fill(0);
+  const again = solanaPda(seeds, base58.decode(PROGRAM));
+  assert.deepEqual([base58.encode(again.address), again.bump], want);
+  assert.equal(solanaPageOf(PROGRAM, 1, 9), want[0]);
+});
 const be32 = (x: bigint): Uint8Array => unhex(x.toString(16).padStart(64, "0"));
 /** The page accounts of one tree, byte for byte as src/state.rs writes them. */
 function pages(tree: 0 | 1, es: readonly Entry[], edit: (b: Uint8Array, i: number) => void = () => {}): Map<string, Uint8Array> {
