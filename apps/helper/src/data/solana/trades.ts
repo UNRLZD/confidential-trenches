@@ -65,6 +65,8 @@ import { CREDITS, type Slot } from "../../rpc/slot.ts";
 import { pass } from "../../limits/turn.ts";
 
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
+/** A read's own providers (the whole reads' WHOLE_RPCS), asked in order, each held for its own 429's wait. */
+type Lane = { urls: readonly string[]; held(url: string): boolean; throttled(url: string, s: number): void };
 
 export const STREAM_WS = "wss://api.mainnet-beta.solana.com";
 export const TRADES_RPCS = ["https://api.mainnet-beta.solana.com", "https://solana-rpc.publicnode.com"] as const;
@@ -77,8 +79,14 @@ export const TRADES_RPCS = ["https://api.mainnet-beta.solana.com", "https://sola
  * 429s) and logged 61 "rpc hold solana-public background" lines, the reads trades.ts's header names the stream as
  * avoiding. solana-rpc.publicnode.com names no limit (no rate header on its answers); read from the Mac 18 Nov 17:44Z,
  * getTransaction at 5, 10 and 20 a second for 10 s each answered 350 of 350, none null, p50 130-136 ms, p95 238-462 ms.
+ * Card meteora-whole-reads-second-provider: then solana.api.pocket.network, asked while publicnode holds. publicnode
+ * limits by address, and the market's reads ask it too (TRADES_RPCS): helper 64ecd1e35 logged about 40 of their 429s
+ * in one second (24 Nov 11:04:06Z), and live run 45380527652 then read a DBC coin's trades cut "its provider held" for
+ * 95 s. Pocket, read 24 Nov 11:3xZ: from the helper box one getTransaction answered 200 in 95 ms; from the Mac at 3 a
+ * second it answered 20 of 20 DBC, 19 of 20 DAMM v2 and 13 of 20 DLMM transactions, declining the other 7 DLMM (400
+ * "request declined"), so it serves as the second only. public.rpc.solanavibestation.com refused its port 443 from both.
  */
-export const WHOLE_RPCS = ["https://solana-rpc.publicnode.com"] as const;
+export const WHOLE_RPCS = ["https://solana-rpc.publicnode.com", "https://solana.api.pocket.network"] as const;
 /** The whole reads sent a second, every coin together. [design: 10, half the 20 a second publicnode answered whole
  *  above, so the trade walks' own last fallback (TRADES_RPCS) keeps the other half] */
 export const WHOLE_PER_S = 10;
@@ -792,9 +800,10 @@ export function createSolanaTrades(deps: {
   const quotes = new Map<string, { decimals: number | null; usd: bigint | null; at: number; reading: Promise<void> | null }>();
 
   /** One request, to each provider in turn until one answers a result. `lane`: the whole reads' own providers
-   *  (WHOLE_RPCS), outside the shared budget and the keyed slot, whose 429 holds only them. */
+   *  (WHOLE_RPCS), outside the shared budget and the keyed slot; a provider's 429 holds only it (card
+   *  meteora-whole-reads-second-provider), and a held one is not asked. */
   const slot = deps.slot !== undefined && deps.slot.state() !== "public" ? deps.slot : undefined;
-  async function rpc(method: string, params: unknown[], lane?: { urls: readonly string[]; throttled(s: number): void }, client?: string, patient = false): Promise<unknown> {
+  async function rpc(method: string, params: unknown[], lane?: Lane, client?: string, patient = false): Promise<unknown> {
     // card helper-fresh-tapes-whole-from-the-first-minute: a walk's read (`patient`) our own budget kept from every
     // provider (none sent to) waits the shortest hold it named and asks again, up to PACED_WAIT_MAX_MS in all: no
     // provider failed it. Before, it threw, and one such read of a cold walk's COLD_SIGS failed the whole walk, begun
@@ -805,6 +814,7 @@ export function createSolanaTrades(deps: {
     for (let waited = 0; ; ) {
       let held = Number.POSITIVE_INFINITY;
       for (const url of lane?.urls ?? (slot !== undefined && !slot.useKeyed() ? rpcs.slice(1) : rpcs)) {
+        if (lane?.held(url) === true) continue;
         const key = lane === undefined && slot !== undefined && url === rpcs[0] ? slot : undefined;
         const w = lane === undefined ? (deps.budget?.(url, method, client) ?? 0) : 0;
         if (w > 0) {
@@ -822,11 +832,11 @@ export function createSolanaTrades(deps: {
     }
   }
   /** One request to `url`: its result, or NO_ANSWER for the next provider. */
-  async function rpcAt(url: string, key: Slot | undefined, method: string, params: unknown[], lane?: { urls: readonly string[]; throttled(s: number): void }): Promise<unknown> {
+  async function rpcAt(url: string, key: Slot | undefined, method: string, params: unknown[], lane?: Lane): Promise<unknown> {
     const sent = now();
     try {
       const r = await doFetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }), signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
-      if (r.status === 429) lane === undefined ? deps.throttled?.(url, r.headers) : lane.throttled(Math.min(60, Math.max(1, Number(r.headers.get("retry-after")) || 10)));
+      if (r.status === 429) lane === undefined ? deps.throttled?.(url, r.headers) : lane.throttled(url, Math.min(60, Math.max(1, Number(r.headers.get("retry-after")) || 10)));
       if (r.status !== 200 || Number(r.headers.get("content-length") ?? "0") > ANSWER_MAX) {
         const body = key !== undefined && r.status >= 400 && r.status < 500 ? await head(r) : (await r.body?.cancel(), "");
         if (key !== undefined) {
@@ -1002,17 +1012,23 @@ export function createSolanaTrades(deps: {
   }
 
   /** Card sol-meteora-tape-inside-rpc-budget: the whole reads sent in the last second (every coin), the time before which
-   *  their providers are held (their 429), and the minute's counts for the log. */
+   *  each of their providers is held (its 429; card meteora-whole-reads-second-provider: each its own), and the minute's
+   *  counts for the log. */
   const wholeSent: number[] = [];
-  let wholeHeldTo = 0;
+  const wholeHeldTo = new Map<string, number>();
   const wholeCount = { sent: 0, over: 0, unread: 0 };
   const wholeWait = deps.wholeWait ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms).unref?.()));
-  const wholeLane = { urls: deps.wholeRpcs ?? WHOLE_RPCS, throttled: (s: number) => void (wholeHeldTo = now() + s * 1_000) };
-  /** Whether a stream transaction of `e` may be read whole now: a place in the second's WHOLE_PER_S (every coin) and in
-   *  the coin's WHOLE_COIN_MAX a WHOLE_WINDOW_MS, taken when there is one (null); else what it is past (CUT_WHY). */
+  const wholeLane: Lane = {
+    urls: deps.wholeRpcs ?? WHOLE_RPCS,
+    held: (url) => now() < (wholeHeldTo.get(url) ?? 0),
+    throttled: (url, s) => void wholeHeldTo.set(url, now() + s * 1_000),
+  };
+  /** Whether a stream transaction of `e` may be read whole now: a provider not held, a place in the second's WHOLE_PER_S
+   *  (every coin) and in the coin's WHOLE_COIN_MAX a WHOLE_WINDOW_MS, taken when there is one (null); else what it is
+   *  past (CUT_WHY). */
   function wholeTake(e: Entry): CutWhy | null {
     const t = now();
-    if (t < wholeHeldTo) return "held";
+    if (wholeLane.urls.every(wholeLane.held)) return "held";
     while (wholeSent.length > 0 && wholeSent[0]! <= t - 1_000) wholeSent.shift();
     const mine = (e.wholeSent ??= []);
     while (mine.length > 0 && mine[0]! <= t - WHOLE_WINDOW_MS) mine.shift();
