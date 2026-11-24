@@ -175,23 +175,35 @@ test("card spread-reopen-judges-a-busy-coin: read marks a reopen past only where
   const tx = (i) => `0x${i.toString(16).padStart(64, "0")}`;
   // newest first, 2 s apart: the first read's newest at 1,000,000 ms; the reopen's 50 begin `from` ms on, tx 1000 on
   const tape = (newest, txFrom) => JSON.stringify({ trades: Array.from({ length: 50 }, (_, i) => ({ t_ms: newest - i * 2_000, tx: tx(txFrom - i) })), src: "chain", as_of_ms: 1 });
-  const runWith = async (reopenBody) => {
+  const runWith = async (reopenBody, firstBody = tape(1_000_000, 900)) => {
     let n = 0;
     const fetchFn = async (url) => {
       if (url.includes("/v1/market/lists")) return new Response(JSON.stringify({ lists: { trending_1h: [{ token: t }] } }), { status: 200 });
-      return new Response(n++ === 0 ? tape(1_000_000, 900) : reopenBody, { status: 200 });
+      return new Response(n++ === 0 ? firstBody : reopenBody, { status: 200 });
     };
     return (await read("http://h", fetchFn, { sleep: async () => {}, pollMs: 0 })).reopen[0];
   };
   // 50 newer trades: the oldest of them 2 ms past the newest of before
   const past = await runWith(tape(1_000_000 + 98_002, 1_000));
   assert.deepEqual([past.kept, past.past], [false, true]);
-  // its oldest as old as the newest of before, a trade of the same time: the newest of before should be there
+  // card spread-reopen-same-second: its oldest of the same second as the newest of before, a trade the first answer
+  // (reaching back past that second) never held: newer, in a later block of that second
   const same = await runWith(tape(1_000_000 + 98_000, 1_000));
-  assert.deepEqual([same.kept, same.past], [false, false]);
+  assert.deepEqual([same.kept, same.past], [false, true]);
   // the newest of before held
   const held = await runWith(tape(1_000_000 + 20_000, 910));
   assert.deepEqual([held.kept, held.past], [true, false]);
+  // a trade of that second the first answer held (beside the newest of before), the newest of before gone: it should
+  // be there, so not past
+  const two = JSON.stringify({ trades: [{ t_ms: 1_000_000, tx: tx(900) }, { t_ms: 1_000_000, tx: tx(899) }, ...Array.from({ length: 48 }, (_, i) => ({ t_ms: 1_000_000 - (i + 1) * 2_000, tx: tx(898 - i) }))], src: "chain", as_of_ms: 1 });
+  const lostBody = JSON.stringify({ trades: [...Array.from({ length: 49 }, (_, i) => ({ t_ms: 1_000_000 + 98_000 - i * 2_000, tx: tx(1_000 - i) })), { t_ms: 1_000_000, tx: tx(899) }], src: "chain", as_of_ms: 1 });
+  const lost = await runWith(lostBody, two);
+  assert.deepEqual([lost.kept, lost.past], [false, false]);
+  // a first answer all of one second does not reach back past it, so a trade of that second it never held may be older
+  // than its 50: not past
+  const flat = JSON.stringify({ trades: Array.from({ length: 50 }, (_, i) => ({ t_ms: 1_000_000, tx: tx(900 - i) })), src: "chain", as_of_ms: 1 });
+  const narrow = await runWith(tape(1_000_000 + 98_000, 1_000), flat);
+  assert.deepEqual([narrow.kept, narrow.past], [false, false]);
 });
 
 test("spanOf reads a settled tape's trade count and the ms its trades span; a body with no times gives null", () => {
