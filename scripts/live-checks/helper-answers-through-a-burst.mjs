@@ -14,6 +14,7 @@
 //     it (a 503 the helper sheds with, a 429, a 200);
 //   - the answers' p99 is within P99_MAX_MS.
 // After: helper
+// Record: each read's route, status, times and Server-Timing; a live run that fails keeps it beside its log
 // Budget-exempt: its token reads are for a coin it takes from the Solana lists, and a listed coin takes its row from Discover's lists with no Jupiter call (apps/helper/src/data/solana/token.ts listedRow)
 //   node scripts/live-checks/helper-answers-through-a-burst.mjs [--base <url>] [--coin <Solana mint>] [--record <file>]
 // It prints each route's p50, p99 and max and the slowest reads with the helper's Server-Timing, so a p99 past the bound

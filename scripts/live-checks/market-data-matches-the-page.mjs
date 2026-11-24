@@ -10,6 +10,7 @@
 //   - market cap: no row of the Base or Robinhood lists with a price has mc_usd 0 (the FDV stands in, else null,
 //     apps/helper/src/data/evm/lists.ts and named.ts).
 // After: helper
+// Record: what the run read (the helper's public answers); a live run that fails keeps it beside its log
 //   node scripts/live-checks/market-data-matches-the-page.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";
