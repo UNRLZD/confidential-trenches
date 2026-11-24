@@ -1,6 +1,158 @@
 {
-  "_note": "good: this card's kit (branch card/evm-cut-logs-only-where-served), read by evm-cut-logs-only-where-served.mjs --record from macOS at 2026-11-24T21:04:00.589Z on Base and Robinhood mainnet: every listed log provider answers the read, and the warm taps' 3 Base and 4 Robinhood cut-log reads all went to listed providers: PASS. bad_unfiltered: the same kit with the filter of unmovedSince taken out (every quote provider asked, as main 4c52a7d90 asks), read at 2026-11-24T21:04:45.592Z: a Base cut-log read sent to mainnet.base.org and two Robinhood ones to robinhood-rpc.publicnode.com: FAIL.",
+  "_note": "good: card robinhood-cut-logs-off-the-index-seat's kit (branch card/robinhood-cut-logs-off-the-index-seat), read by evm-cut-logs-only-where-served.mjs --record from macOS at 2026-11-24T22:41:52.504Z on Base and Robinhood mainnet: every listed log provider answers the read, the warm taps' Base cut-log reads all went to listed providers, and Robinhood, listing dRPC alone, sent none while its warm taps quoted: PASS. bad_own_seat: card evm-cut-logs-only-where-served's kit (branch card/evm-cut-logs-only-where-served, as release 203 ships it), read at 2026-11-24T21:04:00.589Z: Robinhood lists its own RPC, the index sync's seat, and two of its warm taps' cut-log reads went there: FAIL. bad_unfiltered: that kit with the filter of unmovedSince taken out (every quote provider asked, as main 4c52a7d90 asks), read at 2026-11-24T21:04:45.592Z: a Base cut-log read sent to mainnet.base.org and two Robinhood ones to robinhood-rpc.publicnode.com: FAIL.",
   "good": {
+    "at": "2026-11-24T22:41:52.504Z",
+    "chains": {
+      "base": {
+        "listed": [
+          "base-rpc.publicnode.com",
+          "base-mainnet.public.blastapi.io",
+          "base.api.pocket.network"
+        ],
+        "probe": {
+          "head": 61848682,
+          "providers": {
+            "base-rpc.publicnode.com": [
+              {
+                "logs": 1
+              },
+              {
+                "logs": 7
+              }
+            ],
+            "base-mainnet.public.blastapi.io": [
+              {
+                "logs": 1
+              },
+              {
+                "logs": 7
+              }
+            ],
+            "mainnet.base.org": [
+              {
+                "no": "mainnet.base.org HTTP 200: rate limit {\"code\":-32011,\"message\":\"request limit reached\"}"
+              },
+              {
+                "no": "mainnet.base.org HTTP 200: rate limit {\"code\":-32011,\"message\":\"request limit reached\"}"
+              }
+            ],
+            "base.api.pocket.network": [
+              {
+                "no": "base.api.pocket.network HTTP 200: empty body"
+              },
+              {
+                "no": "base.api.pocket.network: no answer (TimeoutError)"
+              }
+            ]
+          }
+        },
+        "taps": [
+          {
+            "ms": 3484,
+            "ok": true,
+            "kind": "cold",
+            "cut": []
+          },
+          {
+            "ms": 785,
+            "ok": true,
+            "kind": "warm",
+            "cut": [
+              {
+                "host": "base-rpc.publicnode.com",
+                "status": 200,
+                "logs": 0
+              },
+              {
+                "host": "base-rpc.publicnode.com",
+                "status": 200,
+                "logs": 0
+              },
+              {
+                "host": "base-mainnet.public.blastapi.io",
+                "status": 200,
+                "logs": 0
+              },
+              {
+                "host": "base-mainnet.public.blastapi.io",
+                "status": 200,
+                "logs": 0
+              }
+            ]
+          },
+          {
+            "ms": 623,
+            "ok": true,
+            "kind": "warm",
+            "cut": []
+          }
+        ]
+      },
+      "robinhood": {
+        "listed": [
+          "robinhood.drpc.org"
+        ],
+        "probe": {
+          "head": 122580015,
+          "providers": {
+            "robinhood-rpc.publicnode.com": [
+              {
+                "no": "robinhood-rpc.publicnode.com HTTP 200: no state for the read {\"code\":-32602,\"message\":\"Archive requests require a personal token. Get one at:"
+              },
+              {
+                "no": "robinhood-rpc.publicnode.com HTTP 200: no state for the read {\"code\":-32602,\"message\":\"Archive requests require a personal token. Get one at:"
+              }
+            ],
+            "robinhood.drpc.org": [
+              {
+                "logs": 40
+              },
+              {
+                "logs": 31
+              }
+            ],
+            "rpc.mainnet.chain.robinhood.com": [
+              {
+                "logs": 40
+              },
+              {
+                "logs": 31
+              }
+            ],
+            "robinhood.rpc.blxrbdn.com": [
+              {
+                "refused": "-32601 Method not available on this endpoint"
+              },
+              {
+                "refused": "-32601 Method not available on this endpoint"
+              }
+            ]
+          }
+        },
+        "taps": [
+          {
+            "ms": 2819,
+            "ok": true,
+            "kind": "cold",
+            "cut": []
+          },
+          {
+            "ms": 1335,
+            "ok": true,
+            "kind": "warm",
+            "cut": []
+          },
+          {
+            "ms": 688,
+            "ok": true,
+            "kind": "warm",
+            "cut": []
+          }
+        ]
+      }
+    }
+  },
+  "bad_own_seat": {
     "at": "2026-11-24T21:04:00.589Z",
     "chains": {
       "base": {

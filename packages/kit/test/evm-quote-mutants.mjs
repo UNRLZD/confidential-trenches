@@ -64,6 +64,10 @@ export const MUTANTS = [
   // read by the URL its gate keeps
   [QUOTE, "return u === undefined || listed.includes(u);", "return true;", R, "card evm-cut-logs-only-where-served"],
   [QUOTE, "const u = GATED_URL.get(r) ?? URL_OF.get(r) ?? RPC_URL.get(r);", "const u = RPC_URL.get(r);", R, "card evm-cut-logs-only-where-served"],
+  // card robinhood-cut-logs-off-the-index-seat: Robinhood's own RPC, the index sync's seat, is asked no cut log, and
+  // dRPC alone proves nothing
+  [BUYU, 'logProviders: Object.freeze(["https://robinhood.drpc.org"]),', 'logProviders: Object.freeze(["https://robinhood.drpc.org", "https://rpc.mainnet.chain.robinhood.com"]),', R, "card robinhood-cut-logs-off-the-index-seat"],
+  [QUOTE, "if (able.length < 2) return new Set();", "if (able.length < 1) return new Set();", R, "card robinhood-cut-logs-off-the-index-seat"],
   // card evm-spare-list-green: the prune skips only an X the token's last quote kept (main skipped any X whose markets
   // were ever scanned)
   [QUOTE, "const unsure = (x: string) => !keptBefore.has(x);", "const unsure = (x: string) => !SCANS.has(`${chain}:markets:${x}`);", R, "card evm-spare-list-green: a quote prunes a currency the quote before scanned"],

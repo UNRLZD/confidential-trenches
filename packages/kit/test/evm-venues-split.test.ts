@@ -45,8 +45,11 @@ import { evmMainnetVenues, evmPoolVenues, evmTestnetVenues } from "../src/trade/
  *  c1b10c22de65c9a8042e0e87a1c0db8b6d8849a0fcb42c87e80fc8697daa69c9, so nothing else moved. Then each mainnet gained
  *  logProviders, its quote providers that answer a getLogs of the newest blocks (card evm-cut-logs-only-where-served,
  *  read 2026-11-24 20:46Z; 6,763 characters before them): the list with those two taken out hashes to the pin before
- *  it, f65d0a54be350de090712004f20fe9c46de4d3dbaba6e01b16ea19a1c1d2f245, so nothing else moved. */
-const BEFORE = "bb558142a6d1e8a4a00df33d16e6b88dfbdd4a83e89415e88ef33d71d2281f80";
+ *  it, f65d0a54be350de090712004f20fe9c46de4d3dbaba6e01b16ea19a1c1d2f245, so nothing else moved. Then Robinhood's own
+ *  left Robinhood's logProviders (card robinhood-cut-logs-off-the-index-seat: the index sync's seat, which answered a
+ *  warm tap's cut-log reads 429; 6,978 characters before it): the list with it put back hashes to the pin before it,
+ *  bb558142a6d1e8a4a00df33d16e6b88dfbdd4a83e89415e88ef33d71d2281f80, so nothing else moved. */
+const BEFORE = "4d0b02f1e5a2b9dd7a955edea8aa175023bf136aa8fa25ce5c9e00543f17eff6";
 
 test("the two halves together are the venue list before the split, entry for entry and in its order", () => {
   const all = evmPoolVenues();
@@ -55,7 +58,7 @@ test("the two halves together are the venue list before the split, entry for ent
   assert.deepEqual(Object.keys(evmTestnetVenues()), ["base-sepolia", "robinhood-testnet"]);
   assert.deepEqual({ ...all }, { ...evmMainnetVenues(), ...evmTestnetVenues() });
   const json = JSON.stringify(all);
-  assert.equal(json.length, 6_978);
+  assert.equal(json.length, 6_936);
   assert.equal(createHash("sha256").update(json).digest("hex"), BEFORE);
 });
 

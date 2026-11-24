@@ -2575,6 +2575,37 @@ test("card evm-cut-logs-only-where-served: a quote provider the venue does not l
   assert.ok(quiet.seen.logs >= 2, "their logs read on the two others");
 });
 
+test("card robinhood-cut-logs-off-the-index-seat: a Robinhood warm quote asks Robinhood's own RPC, the index sync's and the scan's seat, no log of the pools its last prune dropped; dRPC, the one provider left listed, makes no pair to prove them unmoved, so they are asked again (red at a94af2704: both asked the logs, none asked again)", async () => {
+  // release 203's sign run 45500290069: FOBO's third warm tap met Robinhood's own 429 on 3 of 5 cut-log posts
+  const coin = "0x000050e18ffa3f8f7ad170eb9cef160eb3ed11e3";
+  const eth: ModelPool = { ...rcEth, key: keyOf(coin, NATIVE, 3000, 60, NATIVE) };
+  // 8 pools, not 30: Robinhood's own is paced in calls (pace.ts EVM_PACE), and the test reads what is asked, not how much
+  const seeded = Array.from({ length: 8 }, (_, i) => rcSeeded(0x280 + i, AMOUNT / 100n, coin));
+  const pools = [eth, ...seeded];
+  const route: EvmRoute = { ...rcRoute, hops: [{ ...rcRoute.hops[0]!, currency: coin }] };
+  const at = async (d: number) => {
+    const drpc: { exactOut: number; logs: number } = { exactOut: 0, logs: 0 };
+    const own: { exactOut: number; logs: number } = { exactOut: 0, logs: 0 };
+    const byHost: Record<string, typeof fetch> = {
+      "robinhood.drpc.org": rcFetch(cutChain(pools, 0, RC_HEAD + d, [], drpc), () => null),
+      "rpc.mainnet.chain.robinhood.com": rcFetch(cutChain(pools, 1, RC_HEAD + d, [], own), () => null),
+    };
+    const f = ((u: unknown, init: unknown) => byHost[new URL(String(u)).host]!(u as string, init as RequestInit)) as typeof fetch;
+    // built as the kit builds its providers (evmProviders), each keeping its URL
+    const rpcs = quoteMod.evmProviders(["https://robinhood.drpc.org", "https://rpc.mainnet.chain.robinhood.com"], f);
+    const v = await verdict(evmPoolBuyQuoteWith({ chain: "robinhood", token: coin, amountIn: AMOUNT, slippageBps: 100, route }, rpcs, NOW, scanner(RC_HEAD + d, rcLogs(seeded), [], 100_000), undefined, () => 0));
+    return { v, drpc, own };
+  };
+  const first = await at(0);
+  assert.equal(first.v.accepted, true, String((first.v as { code?: string }).code));
+  assert.ok(first.drpc.exactOut >= 8, `the cold quote's prune: ${first.drpc.exactOut} exact-output reads`);
+  const quiet = await at(5);
+  assert.equal(quiet.v.accepted, true, String((quiet.v as { code?: string }).code));
+  assert.equal(quiet.own.logs, 0, "Robinhood's own is asked no log of the pruned pools");
+  assert.equal(quiet.drpc.logs, 0, "nor dRPC alone: one provider proves nothing");
+  assert.ok(quiet.drpc.exactOut >= 8 && quiet.own.exactOut >= 8, `the pruned pools asked again on both: ${quiet.drpc.exactOut} and ${quiet.own.exactOut}`);
+});
+
 test("card rh-cold-quote: the prune reads the token out of a currency's pool: one deep in the token and shallow in its other currency is kept, the token as currency1 or as currency0", async () => {
   // each pool holds less than Q of X, so a read that named X as the output would prune it and let the seeded route pass
   const x1 = rcAt(0x200);
