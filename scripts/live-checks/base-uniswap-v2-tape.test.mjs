@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { BASE_VENUES, TOPIC, TRADES_MAX as HELPER_TRADES_MAX, VENUES } from "../../apps/helper/src/data/evm/swaps.ts";
-import { candidates, FACTORY, judge, PACE, SWAP_TOPIC, swapOf, TRADES_MAX, WETH, WINDOW } from "./base-uniswap-v2-tape.mjs";
+import { candidates, FACTORY, judge, PACE, SETTLE_MS, SWAP_TOPIC, swapOf, TRADES_MAX, WETH, WINDOW } from "./base-uniswap-v2-tape.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./base-uniswap-v2-tape.answers.json", import.meta.url), "utf8"));
 const FIX = JSON.parse(readFileSync(new URL("../../apps/helper/src/data/evm/fixtures/swaps-univ2-base.json", import.meta.url), "utf8"));
@@ -102,4 +102,17 @@ test("candidates: a token counts only when its every pool with a trade in the ho
   assert.equal(gt, 200);
   assert.deepEqual(list, [{ coin: T[0], pair: P[0] }], "T1 has another pool trading this hour; T2's pair is quoted in no WETH");
   assert.equal(asked.length, 3, "the pool list and the two WETH pairs' tokens");
+});
+
+test("card v2-tape-check-waits-for-the-open: a tape answered from the vendor's held rows (a cold open past its bound serves them while it fills: card evm-vendor-tape-late-open-serves-held) is read again, never taken as the helper's last word; one from the chain dated past the newest swap ends the reads (red at main 4be15c065: live run 45276410984 judged 0x3c46ca0b's one read after the chain reads, src coingecko, as the helper not reading the pair, and the helper read it from the chain at its next ask)", async () => {
+  const { settled } = await import("./base-uniswap-v2-tape.mjs");
+  const at = 1_795_473_420_000;
+  const tape = (src, as_of_ms) => ({ status: 200, src, as_of_ms, filling: false, rows: [] });
+  assert.equal(settled(tape("coingecko", at), 0), false, "a vendor answer is read again, even with no swap to wait for");
+  assert.equal(settled(tape("coingecko", at), at - 60_000), false, "a vendor answer dated past the newest swap is read again");
+  assert.equal(settled(tape("chain", at), 0), true, "a chain answer with no swap to wait for ends the reads");
+  assert.equal(settled(tape("chain", at), at - SETTLE_MS), true, "a chain answer dated SETTLE_MS past the newest swap ends them");
+  assert.equal(settled(tape("chain", at), at - SETTLE_MS + 1), false, "a chain answer short of the newest swap is read again");
+  assert.equal(settled({ ...tape("chain", at), status: 503 }, 0), false, "a 503 is read again");
+  assert.equal(settled(tape("chain", null), 0), false, "an answer with no as_of_ms is read again");
 });
