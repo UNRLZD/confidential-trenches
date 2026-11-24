@@ -40,24 +40,38 @@ export function namedFiles(args, cwd) {
   return [...out].sort();
 }
 
-/** Each named file whose report is missing or short, with why; `events` are the runner's { type, data }. */
+/** Each named file whose report is missing or short, with why; `events` are the runner's { type, data }, `data.entry`
+ *  whether the event named the file the runner ran (entryFile).
+ *  A Node with no entryFile on its test events (v24.12.0 has none, v24.22.3 has it; the README asks Node 24 or later)
+ *  names the file a test is written in, so a file that runs another's tests reads as 0 of its own beside the other at
+ *  twice its own (signpage's pool-deposit-evm-base-mainnet.test.ts, a run whose every test passed refused on 24.12.0, card
+ *  readme-run-fits-an-agent-timeout). There each file must still send its summary, and the tests that ended must be
+ *  the files' summaries added up: a report cut short is refused either way, only its file is not named. */
 export function shortFiles(named, events) {
   const summary = new Map();
   const ended = new Map();
   let total = false;
+  let entry = false;
+  let endedAll = 0;
   for (const { type, data } of events) {
     if (type === "test:summary") {
       if (data.file === undefined) total = true;
       else summary.set(data.file, data.counts);
     } else if ((type === "test:pass" || type === "test:fail") && data.file !== undefined && data.details?.type !== "suite") {
       ended.set(data.file, (ended.get(data.file) ?? 0) + 1);
+      endedAll++;
+      if (data.entry === true) entry = true;
     }
   }
   const out = [];
   for (const f of named) {
     const c = summary.get(f);
     if (c === undefined) out.push(`${f}: reported no result (its process sent no summary)`);
-    else if ((ended.get(f) ?? 0) !== c.tests) out.push(`${f}: ${ended.get(f) ?? 0} of its ${c.tests} tests reported`);
+    else if (entry && (ended.get(f) ?? 0) !== c.tests) out.push(`${f}: ${ended.get(f) ?? 0} of its ${c.tests} tests reported`);
+  }
+  if (!entry) {
+    const counted = named.reduce((s, f) => s + (summary.get(f)?.tests ?? 0), 0);
+    if (endedAll !== counted) out.push(`${endedAll} of the files' ${counted} tests reported (this Node names no entryFile, so the files are counted together)`);
   }
   if (!total) out.push("the run sent no summary");
   return out;
@@ -71,7 +85,7 @@ export default new Transform({
   transform(event, encoding, done) {
     // the overall summary names no file: entryFile and file both undefined
     const file = event.data?.entryFile ?? event.data?.file;
-    seen.push({ type: event.type, data: { file: file === undefined ? undefined : (reals.get(file) ?? reals.set(file, real(file)).get(file)), counts: event.data?.counts, details: event.data?.details && { type: event.data.details.type } } });
+    seen.push({ type: event.type, data: { file: file === undefined ? undefined : (reals.get(file) ?? reals.set(file, real(file)).get(file)), entry: event.data?.entryFile !== undefined, counts: event.data?.counts, details: event.data?.details && { type: event.data.details.type } } });
     inner._transform(event, encoding, done);
   },
   flush(done) {
