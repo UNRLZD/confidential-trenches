@@ -21,7 +21,8 @@
 //     Uniswap v2 Swap logs over the WINDOW blocks to it (the helper's own cold window, VENUES.base.cold);
 //   - the token's tape (GET /v1/market/trades?chain=base&token=<t>&limit=50) and 1m candles at HELPER_HOST with Origin
 //     APP_HOST: opened before the chain reads, read again after them up to POLLS times POLL_MS apart while its as_of_ms
-//     is short of the newest swap read.
+//     is short of the newest swap read, or while it answers from anything but the chain (settled: card
+//     v2-tape-check-waits-for-the-open; a cold open past its bound answers the vendor's held rows while it fills).
 // Judged on each token whose pair two providers confirmed and whose swaps they gave alike: the tape answers 200 with
 // src "chain" (the helper read the pair itself), and every swap timed at or before its as_of_ms (less SETTLE_MS) and no
 // older than the tape's oldest row when the tape is full is on it by its transaction, with the side the swap's amounts
@@ -67,6 +68,12 @@ export const POLLS = 6;
 export const POLL_MS = 5_000;
 /** The helper's newest blocks are read again each tick: a swap this close to its as_of_ms is not judged. */
 export const SETTLE_MS = 5_000;
+/** Whether a tape read ends the reads: the helper's own read of the pair (src "chain") dated SETTLE_MS past the newest
+ *  swap read. Card v2-tape-check-waits-for-the-open: an answer from the vendor's held rows is read again, as a cold open
+ *  past its bound serves them while it fills (card evm-vendor-tape-late-open-serves-held); live run 45276410984 judged
+ *  0x3c46ca0b's one read after the chain reads, src "coingecko", and the helper answered it from the chain at its next
+ *  ask. A tape still from the vendor after POLLS reads is judged, and fails, as before. */
+export const settled = (tape, newest) => tape.status === 200 && tape.src === "chain" && tape.as_of_ms !== null && tape.as_of_ms - SETTLE_MS >= newest;
 export const TRADES_MAX = 50;
 /** The pauses, ms, between two provider reads (publicnode refuses past about 6 a second, swaps.ts) and two
  *  GeckoTerminal reads (its keyless 30 a minute). The tests set them to 0. */
@@ -278,7 +285,7 @@ export async function read(base = BASE, fetchFn = fetch, rpcs = SWAP_RPCS.base) 
     let tape;
     for (let i = 0; i < POLLS; i++) {
       tape = tapeOf(await getJson(tapeUrl(c.coin), fetchFn, helper));
-      if (tape.status === 200 && tape.as_of_ms !== null && tape.as_of_ms - SETTLE_MS >= newest) break;
+      if (settled(tape, newest)) break;
       await sleep(POLL_MS);
     }
     const candles = candlesOf(await getJson(candlesUrl(c.coin), fetchFn, helper));
