@@ -10,8 +10,10 @@
 // constants equal the package's files, and the hashes equal its poseidon2 and poseidon3 on random and edge inputs).
 // The walk (./restore.ts walkSteps) is the only user, and every index it finds and its last one are checked again with
 // poseidon-lite (noteSecrets), so a drift between the two stops the restore instead of losing a note.
-import { C2, C3, M2, M3 } from "./poseidon-constants.ts";
+import { C2, C3, C5, M2, M3, M5 } from "./poseidon-constants.ts";
 import { fieldWasm, type FieldOp, type FieldWasm } from "./field-wasm.ts";
+import { CHAINS } from "../derive/constants.ts";
+import type { SecondId } from "../derive/notes.ts";
 
 const P = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
 const FULL_HALF = 4;
@@ -142,6 +144,11 @@ export function poseidon2Walk(inputs: readonly [bigint, bigint]): bigint {
 export function poseidon3Walk(inputs: readonly [bigint, bigint, bigint]): bigint {
   return hash((threeS ??= sparse(C3, M3, 56)), inputs);
 }
+let fiveS: Sparse | null = null;
+/** poseidon-lite's poseidon5, in the sparse form. */
+export function poseidon5Walk(inputs: readonly [bigint, bigint, bigint, bigint, bigint]): bigint {
+  return hash((fiveS ??= sparse(C5, M5, 60)), inputs);
+}
 
 // The same hashes on BN254's field in WebAssembly (./field-wasm.ts, card firefox-restore-fast): the sparse form above,
 // round for round, each value a slot of the module's memory in Montgomery form, every sum and product kept under 2p
@@ -173,6 +180,17 @@ function slotsOf(f: FieldWasm, o: Sparse): SparseSlots {
   };
 }
 
+// a sum of products into r: one FieldWasm.dot of up to DOT_MAX (4) pairs, as poseidon2's and poseidon3's always are; a
+// longer one (poseidon5's six) as dots of up to four into `tmp`, added (each under 2p, as add keeps them)
+function dotW(f: FieldWasm, r: number, pairs: readonly number[], tmp: number): void {
+  if (pairs.length <= 8) return f.dot(r, pairs);
+  f.dot(r, pairs.slice(0, 8));
+  for (let k = 8; k < pairs.length; k += 8) {
+    f.dot(tmp, pairs.slice(k, k + 8));
+    f.add(r, r, tmp);
+  }
+}
+
 // one full round on the slots, as `full` above
 function fullW(f: FieldWasm, q: SparseSlots, constants: readonly number[]): void {
   const t = q.o.t;
@@ -182,7 +200,7 @@ function fullW(f: FieldWasm, q: SparseSlots, constants: readonly number[]): void
   }
   for (let y = 0; y < t; y++) f.copy(q.x[y]!, q.s[y]!);
   // each row of M times x in one reduction (FieldWasm.dot)
-  for (let i = 0; i < t; i++) f.dot(q.s[i]!, q.M[i]!.flatMap((m, j) => [m, q.x[j]!]));
+  for (let i = 0; i < t; i++) dotW(f, q.s[i]!, q.M[i]!.flatMap((m, j) => [m, q.x[j]!]), q.tmp);
 }
 
 // `hash` above on the slots: the inputs are slots, the hash goes to slot `out`
@@ -201,7 +219,7 @@ function hashW(f: FieldWasm, q: SparseSlots, inputs: readonly number[], out: num
     f.pow5(a, a);
     const w = q.w[r]!;
     const z = q.z[r]!;
-    f.dot(na, [q.m00, a, ...w.flatMap((x, j) => [x, q.s[j + 1]!])]);
+    dotW(f, na, [q.m00, a, ...w.flatMap((x, j) => [x, q.s[j + 1]!])], q.tmp);
     for (let j = 0; j < n; j++) {
       f.mul(q.tmp, a, z[j]!);
       f.add(q.s[j + 1]!, q.s[j + 1]!, q.tmp);
@@ -210,7 +228,7 @@ function hashW(f: FieldWasm, q: SparseSlots, inputs: readonly number[], out: num
   }
   // v = end u
   for (let j = 0; j < n; j++) f.copy(q.x[j]!, q.s[j + 1]!);
-  for (let i = 0; i < n; i++) f.dot(q.s[i + 1]!, q.end[i]!.flatMap((m, j) => [m, q.x[j]!]));
+  for (let i = 0; i < n; i++) dotW(f, q.s[i + 1]!, q.end[i]!.flatMap((m, j) => [m, q.x[j]!]), q.tmp);
   fullW(f, q, q.after);
   for (let x = FULL_HALF + o.nP + 1; x < 2 * FULL_HALF + o.nP; x++) fullW(f, q, q.C.slice(x * t, x * t + t));
   f.copy(out, q.s[0]!);
@@ -338,6 +356,63 @@ export function precommitmentWalker(m: { nullifier: bigint; secret: bigint }, sc
     hashW(f, q.three, [a, b, at], q.nh);
     f.load(a, ms);
     hashW(f, q.three, [a, b, at], q.sh);
+    hashW(f, q.two, [q.nh, q.sh], q.out);
+    return f.read(q.out);
+  };
+}
+
+/** A second-arrival id's first three Poseidon inputs after the master, as ../derive/notes.ts secondNote puts them. */
+function secondPrefix(id: SecondId): [bigint, bigint, bigint] {
+  switch (id.id) {
+    case "U": return [0x01n, id.s, BigInt(id.i)];
+    case "V": return [0x02n, id.l, BigInt(id.j)];
+    case "A": return [0x03n, id.l, BigInt(id.j)];
+    case "R": return [BigInt(0x10 + CHAINS[id.c].tag), id.l, BigInt(id.j)];
+    default: throw new Error("unknown second-arrival id");
+  }
+}
+// the poseidon5 slots and the five input slots, once a thread, beside slotsOnce's (poseidon2's are those)
+let fiveSlots: { five: SparseSlots; ins: number[] } | null = null;
+const fiveOnce = (f: FieldWasm): NonNullable<typeof fiveSlots> =>
+  (fiveSlots ??= { five: slotsOf(f, (fiveS ??= sparse(C5, M5, 60))), ins: [f.slot(), f.slot(), f.slot(), f.slot(), f.slot()] });
+
+/**
+ * Card readme-run-fits-an-agent-timeout: the precommitment of arrival n under a second-arrival id, as ../derive/notes.ts
+ * secondNote derives it: poseidon2(poseidon5(nullifier master, tag, a, b, n), poseidon5(secret master, tag, a, b, n)),
+ * the masters being `m` (masters(seed64, "second")). The EVM restore reads past up to SECOND_GAP - 1 empty arrivals under
+ * each U, V and R id of every note (../pool/evm-restore.ts seconds), about 100 a spent note, each a whole derivation on
+ * poseidon-lite (0.8 ms on node 24 arm64); here an arrival is two poseidon5 and one poseidon2 on the WebAssembly field
+ * where it compiles, in the sparse form on BigInt otherwise, the masters read once for the id. Its caller checks the id's
+ * first arrival against poseidon-lite (noteSecrets) and takes every hit through noteSecrets, so a drift is read on
+ * poseidon-lite instead of losing a note. The values are written into the shared slots at each call, so walkers taking
+ * turns on one thread never read each other's.
+ */
+export function secondWalker(m: { nullifier: bigint; secret: bigint }, id: SecondId): (n: number) => bigint {
+  const [tag, a, b] = secondPrefix(id);
+  const u32 = (n: number): void => {
+    if (!Number.isInteger(n) || n < 0 || n > 0xffffffff) throw new Error("an arrival is a u32");
+  };
+  const f = fieldWasm();
+  if (f === null)
+    return (n) => {
+      u32(n);
+      const xs = [tag, a, b, BigInt(n)] as const;
+      return poseidon2Walk([poseidon5Walk([m.nullifier, ...xs]), poseidon5Walk([m.secret, ...xs])]);
+    };
+  const q = slotsOnce(f);
+  const p = fiveOnce(f);
+  const [mi, ti, ai, bi, ni] = p.ins as [number, number, number, number, number];
+  const [mn, ms, tg, av, bv] = [m.nullifier, m.secret, tag, a, b].map((x) => (f.write(q.out, x), f.save(q.out))) as [Uint32Array, Uint32Array, Uint32Array, Uint32Array, Uint32Array];
+  return (n) => {
+    u32(n);
+    f.load(ti, tg);
+    f.load(ai, av);
+    f.load(bi, bv);
+    f.writeSmall(ni, n);
+    f.load(mi, mn);
+    hashW(f, p.five, [mi, ti, ai, bi, ni], q.nh);
+    f.load(mi, ms);
+    hashW(f, p.five, [mi, ti, ai, bi, ni], q.sh);
     hashW(f, q.two, [q.nh, q.sh], q.out);
     return f.read(q.out);
   };

@@ -14,8 +14,9 @@ import path from "node:path";
 import { test } from "node:test";
 import { poseidon2 } from "poseidon-lite/poseidon2";
 import { poseidon3 } from "poseidon-lite/poseidon3";
-import { C2, C3, M2, M3 } from "../src/notes/poseidon-constants.ts";
-import { poseidon2Walk, poseidon3Walk, poseidonWasm, precommitmentWalker } from "../src/notes/poseidon-walk.ts";
+import { poseidon5 } from "poseidon-lite/poseidon5";
+import { C2, C3, C5, M2, M3, M5 } from "../src/notes/poseidon-constants.ts";
+import { poseidon2Walk, poseidon3Walk, poseidon5Walk, poseidonWasm, precommitmentWalker, secondWalker } from "../src/notes/poseidon-walk.ts";
 import { FIELD_BYTES, fieldProgramBytes, fieldWasm, fieldWasmBytes } from "../src/notes/field-wasm.ts";
 import { checkedWalk, walkLaneOf } from "../src/notes/restore.ts";
 import { noteSecrets } from "../src/notes/secrets.ts";
@@ -32,6 +33,70 @@ test("the copied constants are poseidon-lite's own, string for string", () => {
   assert.deepEqual(M2.map((r) => [...r]), c2.M);
   assert.deepEqual([...C3], c3.C);
   assert.deepEqual(M3.map((r) => [...r]), c3.M);
+  const c5 = require(path.join(lite, "constants/5.js")).default as { C: string[]; M: string[][] };
+  assert.deepEqual([...C5], c5.C);
+  assert.deepEqual(M5.map((r) => [...r]), c5.M);
+});
+
+// Card readme-run-fits-an-agent-timeout: the EVM restore reads a note's second arrivals with secondWalker (poseidon5 in
+// the sparse form, on the WebAssembly field where it compiles), checking each id's first arrival against poseidon-lite
+// (src/pool/evm-restore.ts seconds; its drift is held in test/pool-evm-restore.test.ts)
+test("poseidon5Walk equals poseidon-lite's poseidon5 on edge and random inputs", () => {
+  const edges = [0n, 1n, P - 1n, P, (1n << 256n) - 1n, 0xffffffffn];
+  for (const a of edges) for (const b of edges) for (const c of [0n, 0x13n, P - 1n]) assert.equal(poseidon5Walk([a, c, b, 0xfffffff8n, a]), poseidon5([a, c, b, 0xfffffff8n, a]), `poseidon5(${a}, ${c}, ${b})`);
+  let x = 0x9e3779b97f4a7c15n;
+  const next = (): bigint => {
+    let v = 0n;
+    for (let k = 0; k < 4; k++) {
+      x ^= x >> 12n;
+      x ^= (x << 25n) & 0xffffffffffffffffn;
+      x ^= x >> 27n;
+      v = (v << 64n) | ((x * 0x2545f4914f6cdd1dn) & 0xffffffffffffffffn);
+    }
+    return v % P;
+  };
+  for (let i = 0; i < 1000; i++) {
+    const xs = [next(), BigInt(i % 0x17), next(), BigInt(i), next()] as const;
+    assert.equal(poseidon5Walk(xs), poseidon5([...xs]));
+  }
+});
+
+test("secondWalker gives every second-arrival id's precommitment as noteSecrets does, on the field and on BigInt, two walkers taking turns included", () => {
+  const seed64 = Uint8Array.from({ length: 64 }, (_, i) => (i * 37 + 11) & 0xff);
+  const m = masters(seed64, "second");
+  const ids = [
+    { id: "U", s: 12345n, i: 3 },
+    { id: "U", s: P - 1n, i: 0xffffffff },
+    { id: "V", l: P - 1n, j: 0 },
+    { id: "A", l: 99n, j: 7 },
+    { id: "R", c: "evm", l: 7n, j: 2 },
+    { id: "R", c: "sol", l: 7n, j: 2 },
+    { id: "R", c: "near", l: 1n, j: 0 },
+    { id: "R", c: "hop-near", l: 7n, j: 2 },
+  ] as const;
+  const tags = { sol: 1, evm: 2, near: 3, "hop-sol": 4, "hop-evm": 5, "hop-near": 6 } as const;
+  const walkers = ids.map((id) => secondWalker(m, id));
+  for (const n of [0, 1, 19, 20, 0xffffffff])
+    for (const [k, id] of ids.entries()) {
+      const want = noteSecrets(seed64, { kind: "second", id, n }).precommitment;
+      assert.equal(walkers[k]!(n), want, `${id.id} ${k}, arrival ${n}`);
+      const xs = id.id === "U" ? ([1n, id.s, BigInt(id.i), BigInt(n)] as const) : ([BigInt(id.id === "V" ? 2 : id.id === "A" ? 3 : 0x10 + tags[id.c]), id.l, BigInt(id.j), BigInt(n)] as const);
+      assert.equal(poseidon2Walk([poseidon5Walk([m.nullifier, ...xs]), poseidon5Walk([m.secret, ...xs])]), want, `BigInt, ${id.id} ${k}, arrival ${n}`);
+    }
+  assert.throws(() => walkers[0]!(-1), /u32/);
+  assert.throws(() => walkers[0]!(2 ** 32), /u32/);
+  // where WebAssembly is refused (a CSP without 'wasm-unsafe-eval'), the walker hashes on BigInt and gives the same
+  const here = path.dirname(new URL(import.meta.url).pathname);
+  const code = `
+    const f = await import(${JSON.stringify(path.join(here, "../src/notes/field-wasm.ts"))});
+    const w = await import(${JSON.stringify(path.join(here, "../src/notes/poseidon-walk.ts"))});
+    WebAssembly.Module = function () { throw new EvalError("WebAssembly.Module(): Refused to compile or instantiate WebAssembly module"); };
+    const p = w.secondWalker({ nullifier: ${m.nullifier}n, secret: ${m.secret}n }, { id: "V", l: ${P - 1n}n, j: 0 })(19);
+    console.log(JSON.stringify({ field: f.fieldWasm(), p: String(p) }));
+  `;
+  const run = spawnSync(process.execPath, ["--input-type=module", "-e", code], { encoding: "utf8" });
+  assert.equal(run.status, 0, run.stderr);
+  assert.deepEqual(JSON.parse(run.stdout.trim().split("\n").pop()!), { field: null, p: String(noteSecrets(seed64, { kind: "second", id: { id: "V", l: P - 1n, j: 0 }, n: 19 }).precommitment) });
 });
 
 test("poseidon2Walk and poseidon3Walk equal poseidon-lite's poseidon2 and poseidon3 on edge and random inputs", () => {

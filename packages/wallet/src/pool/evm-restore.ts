@@ -56,6 +56,7 @@ import { masters } from "../derive/index.ts";
 import { checkedLane, type LaneWalk, RESTORE_GAP, RESTORE_LANES, type SeedUse, slices, withSeed } from "../notes/restore.ts";
 import { walkLanes, type WalkPort } from "../restore/walk.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../notes/secrets.ts";
+import { secondWalker } from "../notes/poseidon-walk.ts";
 import { refKey, type Landed, type Leaf, type NoteRecord, type NoteStore } from "../notes/store.ts";
 import { solanaSameProvider } from "@blindfill/kit";
 import { evmHelperRpc } from "./buy-wallets.ts";
@@ -96,6 +97,8 @@ export type EvmRestoreArgs = {
    *  Each lane is held to checkedWalk, and one that fails it is walked again once on BigInt (checkedLane); a second
    *  failure stops the restore. */
   lanes?: readonly LaneWalk[];
+  /** tests only: the second-arrival walker, secondWalker unless given (a drifting one is planted) */
+  secondWalk?: typeof secondWalker;
 };
 
 type Deposits = { byPre: Map<bigint, { at: number; nonce: bigint }>; byNull: Map<bigint, number> };
@@ -196,10 +199,35 @@ function* evmRestoreSteps(a: Omit<EvmRestoreArgs, "seed64">): Generator<void, Ev
     return true;
   };
   // on U, V and R up to SECOND_GAP - 1 empty notes in a row read past (a pending take evmNextNote passed over, then
-  // reorged out); A, which evmNextNote never signs on, stops at its first miss
+  // reorged out); A, which evmNextNote never signs on, stops at its first miss.
+  // Card readme-run-fits-an-agent-timeout: on U, V and R an arrival is read on the walk's hash (../notes/poseidon-walk.ts
+  // secondWalker: 0.15 ms against noteSecrets' 0.9, about 100 a spent note), the masters read once for the id; one whose
+  // precommitment the pool holds is taken as before (asDeposit, on poseidon-lite), and one it does not hold is a miss as
+  // before. As the deposit walk's last index is (../notes/restore.ts checkedWalk), the id's first arrival and the one
+  // whose miss ended the read are held to poseidon-lite: a walker that drifts at either reads the id again on
+  // poseidon-lite as before, never losing a note. Each arrival is still a step of its own (a wait), so the slices
+  // between the event loop's turns are as short as before.
   const seconds = function* (id: SecondId): Generator<void, void, Uint8Array> {
     const gap = id.id === "A" ? 1 : SECOND_GAP;
-    for (let n = 0, miss = 0; n <= U32 && miss < gap; n++) miss = (yield* asDeposit({ kind: "second", id, n })) ? 0 : miss + 1;
+    const at = (n: number): NoteRef => ({ kind: "second", id, n });
+    // the id's arrivals from 0 until `gap` misses in a row, on `walk` or on poseidon-lite; the arrival that ended it
+    const read = function* (walk: ((n: number) => bigint) | null): Generator<void, number, Uint8Array> {
+      let n = 0;
+      for (let miss = 0; n <= U32 && miss < gap; n++) {
+        if (walk === null || byPre.has(walk(n))) miss = (yield* asDeposit(at(n))) ? 0 : miss + 1;
+        else {
+          seed64 = yield;
+          miss++;
+        }
+      }
+      return n - 1;
+    };
+    if (gap === 1) return void (yield* read(null));
+    seed64 = yield;
+    const w = (a.secondWalk ?? secondWalker)(masters(seed64, "second"), id);
+    const lite = (n: number): boolean => w(n) === noteSecrets(seed64, at(n)).precommitment;
+    if (!lite(0)) return void (yield* read(null));
+    if (!lite(yield* read(w))) yield* read(null);
   };
 
   for (let lane = 0; lane < RESTORE_LANES; lane++) {
