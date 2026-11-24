@@ -5493,6 +5493,13 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         resting.set(restKey(tk), e);
         took++;
       }
+      // the books at rest in the order they were last asked, the least recently first: rest() makes room by dropping the
+      // map's first, so a book put at rest after the restore drops the coldest, never the hottest the file named first
+      // (card handover-rest-keeps-the-hottest: after the 24 Nov 14:28Z redeploy Base's newest coins answered 1 of 16
+      // handed, the new helper's own books at rest having dropped the most recently asked handed ones)
+      const byAsked = [...resting].sort(([, a], [, b]) => a.touched - b.touched);
+      resting.clear();
+      for (const [k, e] of byAsked) resting.set(k, e);
       handedCount = { held, restored: took };
       for (const [x, v] of tradersIn) if (!traders.has(x)) {
         if (traders.size >= TRADERS_MAX) traders.delete(traders.keys().next().value!);
