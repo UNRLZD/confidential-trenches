@@ -20,7 +20,7 @@ import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
 import { evmPoolBuyQuote, evmPoolBuyQuoteTap, evmPoolIndexRefresh, evmProviderSeats } from "../../packages/kit/src/index.ts";
 import { keccak } from "./pool-evm-deploy.mjs";
-import { nothingToJudge } from "./provider-answer.mjs";
+import { nothingToJudge, rpcAnswer } from "./provider-answer.mjs";
 
 const KEY = "evm-warm-tap-skips-pools-it-pruned";
 /** NVDAc on Base (Robinhood's tokenized stock): its route one v3 pool, beside about 77 v4 pools seeded with other
@@ -70,10 +70,10 @@ export function exactOutReads(body) {
 }
 
 async function rpc(url, fetchFn, method, params) {
-  const r = await fetchFn(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) });
-  const j = await r.json();
-  if (j.error) throw new Error(`${method}: ${JSON.stringify(j.error).slice(0, 160)}`);
-  return j.result;
+  const a = await rpcAnswer(url, method, params, { fetchFn });
+  if (a.noAnswer !== undefined) throw new Error(`${method}: ${a.noAnswer}`);
+  if (a.error !== undefined) throw new Error(`${method}: ${JSON.stringify(a.error).slice(0, 160)}`);
+  return a.result;
 }
 
 export async function read(fetchFn = fetch, o = {}) {
