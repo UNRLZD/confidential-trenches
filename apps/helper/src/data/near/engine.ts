@@ -280,12 +280,12 @@ export function createEngineNear(deps: EngineDeps = {}) {
   }
 
   /** A per-key cache of the last good answer, read again past FRESH_MS (the held one serves meanwhile, while it is at most
-   *  `staleMs` old; past that the caller waits for the new read, and is served the held one only when it fails), one at
-   *  a time. */
+   *  `staleMs` old, the cache's or the ask's own; past that the caller waits for the new read, and is served the held one
+   *  only when it fails), one at a time. */
   function cached<T>(freshMs: number, staleMs = Infinity) {
     const held = new Map<string, { at: number; v: T | undefined }>();
     const reading = new Map<string, Promise<{ at: number; v: T | undefined } | null>>();
-    return async (key: string, read: () => Promise<T | undefined>): Promise<{ at: number; v: T | undefined } | null> => {
+    return async (key: string, read: () => Promise<T | undefined>, askStaleMs = staleMs): Promise<{ at: number; v: T | undefined } | null> => {
       const had = held.get(key);
       if (had !== undefined && now() - had.at <= freshMs) return had;
       let p = reading.get(key);
@@ -301,13 +301,18 @@ export function createEngineNear(deps: EngineDeps = {}) {
           .finally(() => reading.delete(key));
         reading.set(key, p);
       }
-      if (had !== undefined && now() - had.at <= staleMs) return had; // the held answer serves while the new read runs
+      if (had !== undefined && now() - had.at <= askStaleMs) return had; // the held answer serves while the new read runs
       return p.then((got) => got ?? had ?? null);
     };
   }
 
+  // card near-token-page-never-older-than-the-bound: a token page, its holders and its bars held past NEAR_VENDOR_REACH_MS
+  // serve no ask while the engine answers, as trade rows (below). Served at any age, the first ask after a quiet spell
+  // got the held answer: live run 45366477087 (24 Nov 09:35:22Z) read aaaaaa20….factory.bridge.near's page 21 min old
+  // while its holders and trades were read that second. The token's own read stays unbounded where an ask takes only its
+  // decimals (trades), which never change; a page and a chart's NEAR price (candles) take it bounded.
   const tokens = cached<{ raw: unknown; row: Row }>(FRESH_MS);
-  const holderReads = cached<unknown>(FRESH_MS);
+  const holderReads = cached<unknown>(FRESH_MS, NEAR_VENDOR_REACH_MS);
   // card near-tape-reach-on-trending: held trade rows serve behind their renewal only while they still claim their reach.
   // At any age they were the answer to the first ask after a quiet minute, so a tape read once (a page opened, the live
   // check) claimed none: the deployed helper served prl.omft.near's, zec.omft.near's and qtc.omft.near's 50 rows read
@@ -315,7 +320,7 @@ export function createEngineNear(deps: EngineDeps = {}) {
   // Past the bound the ask waits for the renewal, as a cold one does (0.6 to 1.0 s); a failed renewal serves the held rows,
   // their age named and no reach claimed (trades below).
   const tradeReads = cached<unknown>(FRESH_MS, NEAR_VENDOR_REACH_MS);
-  const barReads = cached<unknown>(FRESH_MS);
+  const barReads = cached<unknown>(FRESH_MS, NEAR_VENDOR_REACH_MS);
 
   let last: { body: string; gzip: Buffer; asOfMs: number } | null = null;
   let running: Promise<void> | null = null;
@@ -342,7 +347,8 @@ export function createEngineNear(deps: EngineDeps = {}) {
     last = { body, gzip: gzipSync(body), asOfMs: at };
   }
 
-  async function token(id: string): Promise<{ raw: unknown; row: Row } | null> {
+  /** The token's engine read; `staleMs` bounds how old a held one may serve while its renewal runs. */
+  async function token(id: string, staleMs = Infinity): Promise<{ raw: unknown; row: Row } | null> {
     const t = nearAccount(id);
     if (t === null) return null;
     const h = await tokens(t, async () => {
@@ -352,7 +358,7 @@ export function createEngineNear(deps: EngineDeps = {}) {
       const row = engineRow(raw, now());
       if (row === null || row.token !== t) throw new Error("engine token: shape");
       return { raw, row };
-    });
+    }, staleMs);
     return h?.v ?? null;
   }
 
@@ -375,7 +381,7 @@ export function createEngineNear(deps: EngineDeps = {}) {
     },
     /** The token page, or null when the engine has no good answer for it. */
     async page(id: string): Promise<DataAnswer | null> {
-      const t = await token(id);
+      const t = await token(id, NEAR_VENDOR_REACH_MS);
       const d = t === null ? null : decimalsOf(t.raw);
       if (t === null || d === null) return null;
       const at = t.row.as_of_ms as number;
@@ -414,7 +420,7 @@ export function createEngineNear(deps: EngineDeps = {}) {
     },
     async candles(id: string, tf: string, to: number | null, limit: number): Promise<DataAnswer | null> {
       if (!Object.hasOwn(TF_SECONDS, tf)) return NOT_FOUND;
-      const t = await token(id);
+      const t = await token(id, NEAR_VENDOR_REACH_MS);
       const j = t === null ? {} : obj(t.raw);
       const nearUsd = finite(j.priceUsd) && finite(j.priceNear) && j.priceNear > 0 ? j.priceUsd / j.priceNear : null;
       if (t === null || nearUsd === null) return null;
