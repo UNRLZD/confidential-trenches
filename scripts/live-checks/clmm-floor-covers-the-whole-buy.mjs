@@ -14,6 +14,7 @@
 //   - SIGN_HOST serves the walk: its /app.js holds the tick array's address seed (`tick_array`, clmm.ts
 //     solanaClmmTickArrayAddress), which no signing page before this card's held (SIGN_HOST read 24 Nov 10:2xZ: none).
 // After: sign
+// Bundle: out Solana RPCs and DexScreener
 // Record: both public providers' raw answers, DexScreener's price and SIGN_HOST's /app.js facts (its size, whether it
 //   holds the seed); a live run that fails keeps it beside its log
 //   node scripts/live-checks/clmm-floor-covers-the-whole-buy.mjs [--record <file>] [--plant-lie] [--app-js <file>]
