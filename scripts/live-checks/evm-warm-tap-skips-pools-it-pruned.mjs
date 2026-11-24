@@ -14,6 +14,7 @@
 // nothing to judge; nor has one whose answers name a SafeCastOverflow (a pool dropped so is asked again by design, and
 // these counts do not tell the pools apart).
 // After: sign
+// Bundle: out EVM RPC quotes
 //   node scripts/live-checks/evm-warm-tap-skips-pools-it-pruned.mjs [--token <a>] [--record <file>]
 //   PASS exit 0, FAIL 1, error 2 (and nothing to judge). --record writes what the run read, which the check's test replays.
 import "../net-window.mjs";
