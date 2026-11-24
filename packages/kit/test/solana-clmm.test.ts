@@ -1,14 +1,17 @@
 /// <reference types="node" />
-// A Raydium CLMM pool read as a market the device does not trade (card solana-buy-never-below-a-hidden-market): replays
-// MPLX's wSOL pool BxRhW4q1… as mainnet answered on 21 Nov (test/vectors/mplx-clmm-sim.json: the pool, its AmmConfig,
-// both vaults, MPLX's mint and the Clock on publicnode (A) and api.mainnet-beta (B), each beside the program's own
-// swap_v2 out for that read, from simulateTransaction; test/fixtures/solana-clmm-capture.mjs records it). Good: the
-// kit's floor is the program's out to the unit for a buy that stays in the pool's tick-spacing cell (1 SOL), and under
-// it for one that leaves the cell (60 SOL); the tick math is the program's at its bounds. Bad: a provider that lies about
-// any field the read takes (a mint, a vault, the swap switch, the open time, the fee, the price, the liquidity, the SOL
-// vault, a vault's owner, mint or program) is refused after one read more, never priced; a lie once is read again. The
-// set rule a market enters (pool.ts solanaReferenceSet): it can only raise E, never be a pool (CL13). The finder scans
-// each quote once, in the program's mint order (CL14).
+// A Raydium CLMM pool read as a market the device does not trade (cards solana-buy-never-below-a-hidden-market and
+// clmm-floor-covers-the-whole-buy): replays MPLX's wSOL pool BxRhW4q1… as mainnet answered on 24 Nov
+// (test/vectors/mplx-clmm-sim.json: the pool, its AmmConfig, both vaults, MPLX's mint, the Clock and the three tick
+// arrays a buy walks, on publicnode (A) and api.mainnet-beta (B), each beside the program's own swap_v2 out for that
+// read, from simulateTransaction; test/fixtures/solana-clmm-capture.mjs records it). Good: the kit's floor is the
+// program's out to the unit for a buy of 1, 10, 25 and 60 SOL, across up to 8 tick-spacing cells, and for 260 SOL across
+// the pool's real initialized tick -2460 (test/vectors/mplx-cross-clmm-sim.json, CL17); a tick crossed takes its
+// liquidity_net; the tick math is the program's at its bounds. Bad: a provider that lies about any field the read
+// takes (a mint, a vault, the swap switch, the open time, the fee, the price, the liquidity, the SOL vault, a vault's
+// owner, mint or program) is refused after one read more, never priced; a lie once is read again; a tick array the
+// providers read differently, or one not the pool's, ends the walk before it (CL16); nothing is credited past the arrays
+// read (CL15). The set rule a market enters (pool.ts solanaReferenceSet): it can only raise E, never be a pool (CL13).
+// The finder scans each quote once, in the program's mint order (CL14).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -18,10 +21,13 @@ import {
   SOLANA_SOL_MINT,
   readSolanaClmmMarket,
   readSolanaClmmPools,
-  solanaClmmCellOut,
+  solanaClmmAgreedTicks,
   solanaClmmFloorFeeRate,
   solanaClmmPoolScan,
   solanaClmmSqrtPriceAtTick,
+  solanaClmmSwapOut,
+  solanaClmmTickArray,
+  solanaClmmWalkStarts,
   solanaDecodeClmmPool,
   solanaLamportsAsUsdc,
   solanaReferenceSet,
@@ -67,6 +73,17 @@ const req = { token: V.coin, pool: V.pool, side: "buy" as const, amount: SOL };
 const CONFIG = V.list[1]!;
 const SOL_VAULT = V.list[3]!;
 const COIN_VAULT = V.list[2]!;
+// the tick arrays a buy walks: the one that holds the pool's tick (-3000 to -2401), then -2400 and -1800 (tick_array.rs)
+const ARRAYS = V.list.slice(6);
+/** Puts liquidity `gross` with liquidity_net `net` at tick `t` of the array that holds the pool's tick (TickState at
+ *  44 + 168 × slot: tick, liquidity_net i128 at 4, liquidity_gross u128 at 20). */
+const plantTick = (t: number, net: bigint, gross: bigint): Edit => on(ARRAYS[0]!, (d) => {
+  const o = 44 + ((t - dv(d).getInt32(40, true)) / 10) * 168;
+  dv(d).setInt32(o, t, true);
+  setU128(d, o + 4, BigInt.asUintN(128, net));
+  setU128(d, o + 20, gross);
+});
+const onArray = (f: (d: Uint8Array) => void): Edit => on(ARRAYS[0]!, f);
 
 test("CL1 the tick math is the program's at its bounds and at 0 (tick_math.rs MIN/MAX_SQRT_PRICE_X64)", () => {
   assert.equal(solanaClmmSqrtPriceAtTick(-443636), 4295048016n);
@@ -77,24 +94,18 @@ test("CL1 the tick math is the program's at its bounds and at 0 (tick_math.rs MI
   for (const t of [-28861, -1, 0, 1, 28861]) assert.ok(solanaClmmSqrtPriceAtTick(t + 1) > solanaClmmSqrtPriceAtTick(t));
 });
 
-test("CL2 the floor is the program's swap_v2 out to the unit for a buy inside the cell, and under it past the cell", async () => {
+test("CL2 the floor is the program's swap_v2 out to the unit for a buy across many tick-spacing cells, on both providers", async () => {
+  // the recording: 1 SOL stays in the pool's cell; 10, 25 and 60 SOL cross 1 to 8 more (a cell held 6.4 to 9 SOL, 24 Nov)
+  assert.deepEqual(V.runs.map((r) => r.amount), ["1000000000", "10000000000", "25000000000", "60000000000"]);
   for (const [r, run] of V.runs.entries()) {
     const v = await readSolanaClmmMarket([replay("A", undefined, [], r), replay("B", undefined, [], r)], { ...req, amount: BigInt(run.amount) });
     assert.equal(v.kind, "ok");
     if (v.kind !== "ok") continue;
     for (const x of v.market.reads) {
-      if (x.whole) assert.equal(x.out, BigInt(run.programOut), `${run.amount} lamports in`);
-      else assert.ok(x.out > 0n && x.out < BigInt(run.programOut), `${run.amount} lamports in: floor ${x.out}, program ${run.programOut}`);
+      assert.ok(x.whole, `${run.amount} lamports in: priced whole`);
+      assert.equal(x.out, BigInt(run.programOut), `${run.amount} lamports in`);
     }
   }
-  // the recording holds one of each: 1 SOL stays in the cell, 60 SOL leaves it
-  assert.deepEqual(V.runs.map((r) => r.amount), ["1000000000", "60000000000"]);
-  // no credit past the cell's edge: any input that reaches it pays the edge's out, however much more comes in (the
-  // program paid 60 SOL's out on the same liquidity past the edge, read 21 Nov; the floor never assumes that)
-  const pool = solanaDecodeClmmPool({ owner: SOLANA_CLMM_PROGRAM, data: bytes(V.runs[1]!.providers.B.value[0]!) });
-  const [at60, at120] = [60n, 120n].map((n) => solanaClmmCellOut(pool, 1600n, false, n * SOL));
-  assert.equal(at60!.whole, false);
-  assert.equal(at120!.out, at60!.out);
 });
 
 test("CL3 two honest providers: a wSOL market, its depth the wSOL vault on each, the slots each read's", async () => {
@@ -119,12 +130,12 @@ test("CL4 the floor's fee: the config's, plus a dynamic fee at its cap, never ov
   assert.equal(solanaClmmFloorFeeRate(1600n, { dynamicFee: { control: 3n, maxVolatility: 1n }, tickSpacing: 1 }), 1601n); // ceil
   assert.equal(solanaClmmFloorFeeRate(90_000n, { dynamicFee: { control: 100_000n, maxVolatility: 100_000n }, tickSpacing: 10 }), 100_000n);
   const pool = solanaDecodeClmmPool({ owner: SOLANA_CLMM_PROGRAM, data: bytes(V.runs[0]!.providers.B.value[0]!) });
-  const onIn = solanaClmmCellOut(pool, 1600n, false, SOL);
-  const onOut = solanaClmmCellOut({ ...pool, feeOn: 1 }, 1600n, false, SOL); // token 0 only: a wSOL-in buy (token 1 in) pays it out
+  const onIn = solanaClmmSwapOut(pool, 1600n, false, SOL);
+  const onOut = solanaClmmSwapOut({ ...pool, feeOn: 1 }, 1600n, false, SOL); // token 0 only: a wSOL-in buy (token 1 in) pays it out
   assert.ok(onIn.whole && onOut.whole);
   // the same fee off the out instead of the in pays a little less (the whole input moves the price), within 1 ppm
   assert.ok(onOut.out < onIn.out && (onIn.out - onOut.out) * 1_000_000n < onIn.out, `${onIn.out} ${onOut.out}`);
-  assert.ok(solanaClmmCellOut(pool, 1600n, false, SOL).out < solanaClmmCellOut(pool, 0n, false, SOL).out);
+  assert.ok(solanaClmmSwapOut(pool, 1600n, false, SOL).out < solanaClmmSwapOut(pool, 0n, false, SOL).out);
 });
 
 test("CL5 a USDC market is priced through SOL/USD at one dollar a USDC, floor both ways", () => {
@@ -277,4 +288,94 @@ test("CL14 the finder: one scan per quote, in the program's own mint order, on b
   const want = [solanaClmmPoolScan(V.coin, SOLANA_SOL_MINT), solanaClmmPoolScan(V.coin, USDC)].map((x) => JSON.stringify(x));
   assert.deepEqual(order.map((x) => JSON.stringify(x)).sort(), [...want, ...want].sort());
   assert.deepEqual(await readSolanaClmmPools([one("https://a.example"), one("https://b.example")], [replay("A"), replay("B")], USDC), []);
+});
+
+test("CL15 a buy walks the ticks both providers read: across each initialized tick with its liquidity_net, never past the arrays read", async () => {
+  const pool = solanaDecodeClmmPool({ owner: SOLANA_CLMM_PROGRAM, data: bytes(V.runs[2]!.providers.B.value[0]!) });
+  // a buy puts wSOL (token 1) in, so MPLX's price moves up: the array that holds tick -2582, then the next two up
+  assert.equal(pool.tickCurrent, -2582);
+  assert.deepEqual(solanaClmmWalkStarts(pool, V.coin, "buy"), [-3000, -2400, -1800]);
+  assert.deepEqual(solanaClmmWalkStarts(pool, V.coin, "sell"), [-3000, -3600, -4200]);
+  assert.deepEqual(ARRAYS, [-3000, -2400, -1800].map((s) => solanaClmmTickArray(V.pool, s)));
+  // past the arrays read nothing is credited: 20,000 and 40,000 SOL pay the same out, neither whole
+  const big = await readSolanaClmmMarket([replay("A", undefined, [], 2), replay("B", undefined, [], 2)], { ...req, amount: 20_000n * SOL, amounts: [20_000n * SOL, 40_000n * SOL] });
+  assert.equal(big.kind, "ok");
+  if (big.kind === "ok") {
+    for (const x of big.market.reads) {
+      assert.equal(x.whole, false);
+      assert.equal(x.outs[0], x.outs[1]);
+      assert.ok(x.out > BigInt(V.runs[3]!.programOut), "the arrays read hold more than 60 SOL's out");
+    }
+  }
+  // a tick crossed takes its liquidity_net: half the pool's liquidity off at -2570 pays less for 25 SOL, as much on pays more
+  const L = pool.liquidity;
+  const at = async (net: bigint): Promise<bigint> => {
+    const v = await readSolanaClmmMarket([replay("A", plantTick(-2570, net, L), [], 2), replay("B", plantTick(-2570, net, L), [], 2)], { ...req, amount: 25n * SOL });
+    assert.equal(v.kind, "ok");
+    if (v.kind !== "ok") return 0n;
+    assert.ok(v.market.reads.every((x) => x.whole));
+    return v.market.reads[0].out;
+  };
+  const program = BigInt(V.runs[2]!.programOut);
+  const [less, more] = [await at(-L / 2n), await at(L)];
+  assert.ok(less < program && program < more, `${less} < ${program} < ${more}`);
+});
+
+test("CL16 a tick array the providers read differently, or one not the pool's, ends the walk before it: never one provider's ticks", async () => {
+  const ten = { ...req, amount: 10n * SOL };
+  const program = BigInt(V.runs[1]!.programOut);
+  const walk = (ea?: Edit, eb?: Edit) => readSolanaClmmMarket([replay("A", ea, [], 1), replay("B", eb, [], 1)], ten);
+  const same = await walk();
+  assert.ok(same.kind === "ok" && same.market.reads.every((x) => x.whole && x.out === program));
+  const cases: [string, Edit | undefined, Edit][] = [
+    ["a tick on B alone", undefined, plantTick(-2900, 1n, 1n)],
+    ["a liquidity_net B reads one unit off", plantTick(-2900, 5n, 5n), plantTick(-2900, 6n, 5n)],
+    ["another pool's array on both", onArray((d) => void (d[8] = d[8]! ^ 1)), onArray((d) => void (d[8] = d[8]! ^ 1))],
+    ["another account kind on both", onArray((d) => void (d[0] = d[0]! ^ 1)), onArray((d) => void (d[0] = d[0]! ^ 1))],
+  ];
+  for (const [name, ea, eb] of cases) {
+    const v = await walk(ea, eb);
+    assert.equal(v.kind, "ok", name);
+    // the array that holds the price is the first, so the walk keeps the pool's own cell alone: 10 SOL is past it
+    if (v.kind === "ok") for (const x of v.market.reads) assert.ok(!x.whole && x.out < program, `${name}: ${x.out} whole ${x.whole}`);
+  }
+  // ticks of another moment (arrays that do not hold the read's price) leave the read its own cell
+  const pool = solanaDecodeClmmPool({ owner: SOLANA_CLMM_PROGRAM, data: bytes(V.runs[1]!.providers.B.value[0]!) });
+  const cell = solanaClmmSwapOut(pool, 1600n, false, 10n * SOL);
+  assert.equal(cell.whole, false);
+  assert.deepEqual(solanaClmmSwapOut(pool, 1600n, false, 10n * SOL, { lo: -1800, hi: -1200, at: new Map() }), cell);
+});
+
+// test/vectors/mplx-cross-clmm-sim.json: the same pool read on mainnet 24 Nov 11:1xZ with the program's out for a 700 SOL
+// buy, which crosses the pool's real initialized tick -2460 (510 SOL from that read's tick -2731); its payer is a public
+// wallet holding that much SOL and no MPLX account (solana-clmm-capture.mjs --payer), simulated unsigned like the others
+const X = JSON.parse(readFileSync(new URL("./vectors/mplx-cross-clmm-sim.json", import.meta.url), "utf8")) as typeof V;
+const replayCross = (name: "A" | "B", edit: Edit = (a) => a): SolanaRpc => {
+  const rec = X.runs[0]!.providers[name];
+  const byKey = new Map(X.list.map((k, i) => [k, rec.value[i]!]));
+  return Object.assign((async (method: string, params: readonly unknown[]) => {
+    assert.equal(method, "getMultipleAccounts");
+    return edit({ context: { slot: rec.context.slot }, value: (params[0] as string[]).map((k) => structuredClone(byKey.get(k) ?? null)) }, params[0] as string[]);
+  }) as SolanaRpc, { url: `https://${name.toLowerCase()}.example` });
+};
+
+test("CL17 a buy across a real initialized tick is the program's swap_v2 out to the unit: the input's fee spent at the tick, its liquidity_net taken", async () => {
+  const run = X.runs[0]!;
+  assert.equal(X.pool, V.pool);
+  const pool = solanaDecodeClmmPool({ owner: SOLANA_CLMM_PROGRAM, data: bytes(run.providers.B.value[0]!) });
+  const ticks = [...solanaClmmAgreedTicks(run.providers.A.value.slice(6).map((a) => a && { owner: a.owner, data: bytes(a) }), run.providers.B.value.slice(6).map((a) => a && { owner: a.owner, data: bytes(a) }), solanaClmmWalkStarts(pool, X.coin, "buy"), X.pool, pool.tickSpacing)!.at];
+  // the buy's way up from the pool's tick meets the initialized tick -2460, whose liquidity_net is real (not planted)
+  const met = ticks.filter(([t]) => t > pool.tickCurrent && t <= -2460);
+  assert.ok(met.length > 0 && met.every(([, net]) => net !== 0n), JSON.stringify(met.map(([t, n]) => [t, String(n)])));
+  // and the buy crosses it: the wSOL that moves the price to -2460 on the read's liquidity, with the fee at its 10% cap,
+  // is under the buy (an earlier capture at 260 SOL stopped short of it once the price had moved: nothing crossed)
+  const toTick = (pool.liquidity * (solanaClmmSqrtPriceAtTick(-2460) - pool.sqrtPriceX64)) >> 64n;
+  assert.ok((toTick * 10n) / 9n < BigInt(run.amount), `${toTick} lamports to -2460 from ${pool.tickCurrent}, the buy ${run.amount}`);
+  const v = await readSolanaClmmMarket([replayCross("A"), replayCross("B")], { ...req, amount: BigInt(run.amount) });
+  assert.equal(v.kind, "ok");
+  if (v.kind !== "ok") return;
+  for (const x of v.market.reads) {
+    assert.ok(x.whole, "priced whole: the arrays read hold the buy");
+    assert.equal(x.out, BigInt(run.programOut), `${run.amount} lamports in, across ${met.map(([t]) => t).join(", ")}`);
+  }
 });

@@ -82,8 +82,8 @@ export async function read({ plantLie = false, helper = HELPER } = {}) {
     providers[u] = {};
     return Object.assign(async (method, params, signal) => {
       let ans = await rpc(method, params, signal);
-      // the pool's SOL vault is the list's fourth (token 1: wSOL)
-      if (plantLie && i === 1 && Array.isArray(params[0]) && params[0].length === 6 && ans?.value?.[3]?.data?.[0]) {
+      // the pool's SOL vault is the list's fourth (token 1: wSOL); the list is the pool's six accounts, then its tick arrays
+      if (plantLie && i === 1 && Array.isArray(params[0]) && params[0].length >= 6 && ans?.value?.[3]?.data?.[0]) {
         const d = Buffer.from(ans.value[3].data[0], "base64");
         d.writeBigUInt64LE((d.readBigUInt64LE(64) * 105n) / 100n, 64);
         const value = [...ans.value];

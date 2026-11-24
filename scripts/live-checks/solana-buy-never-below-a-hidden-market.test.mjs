@@ -1,12 +1,14 @@
 // node --test scripts/live-checks/solana-buy-never-below-a-hidden-market.test.mjs: card
 // solana-buy-never-below-a-hidden-market's live check, replayed. solana-buy-never-below-a-hidden-market.answers.json holds
-// three real runs from the Mac (`--record`, 21 Nov), none edited after:
-// - good: the branch's helper handler (apps/helper/src/rpc/rpc.ts createRpc on localhost, route A api.mainnet-beta, via
-//   `--helper`, before its deploy) listing MPLX's CLMM pool for the kit's scan, and the pool read on api.mainnet-beta and
-//   publicnode, agreed, 24191 SOL deep, its 1 SOL floor 16 bps from DexScreener: PASS;
-// - bad_helper_refuses: the deployed helper before this card, which refuses the CLMM scan (HTTP 400): FAIL;
-// - bad_lying_provider: `--plant-lie`, publicnode's answer holding a SOL vault 5% over the chain's, as a provider that
-//   lies would: FAIL, the kit's read refusing it.
+// three real runs from the Mac (`--record`), none edited after:
+// - good (24 Nov, card clmm-floor-covers-the-whole-buy): the deployed helper listing MPLX's CLMM pool for the kit's
+//   scan, and the pool read on api.mainnet-beta and publicnode with the tick arrays a buy walks, agreed, deep, its 1 SOL
+//   floor near DexScreener's price: PASS;
+// - bad_helper_refuses (21 Nov): the deployed helper before card solana-buy-never-below-a-hidden-market, which refuses
+//   the CLMM scan (HTTP 400): FAIL. Its provider answers are that day's six accounts, before the kit read the tick
+//   arrays too, so the kit's read of them is no answer now; its helper line is the part judged;
+// - bad_lying_provider (24 Nov): `--plant-lie`, publicnode's answer holding a SOL vault 5% over the chain's, as a
+//   provider that lies would: FAIL, the kit's read refusing it.
 // And plants on the good run: each part broken fails that part.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -26,7 +28,6 @@ test("the recorded bad runs fail: a helper that refuses the scan; a provider tha
   assert.equal(h.verdict, "FAIL");
   assert.equal(A.bad_helper_refuses.helper, "deployed");
   assert.match(h.lines[0], /^BAD \[helper\].*HTTP 400/);
-  assert.ok(h.lines.slice(1).every((l) => l.startsWith("ok ")), h.lines.join("\n"));
   const v = await judge(A.bad_lying_provider);
   assert.equal(v.verdict, "FAIL");
   assert.equal(A.bad_lying_provider.plantLie, true);
@@ -49,7 +50,7 @@ test("each part broken in the good run fails: a list without the pool, a price f
   const shallow = structuredClone(A.good);
   for (const u of PROVIDERS) {
     for (const [k, a] of Object.entries(shallow.providers[u])) {
-      if (!k.includes(POOL) || a.value.length !== 6) continue;
+      if (!k.includes(POOL) || a.value.length < 6) continue;
       const d = Buffer.from(a.value[3].data[0], "base64");
       d.writeBigUInt64LE(10n ** 9n, 64);
       a.value[3].data[0] = d.toString("base64");

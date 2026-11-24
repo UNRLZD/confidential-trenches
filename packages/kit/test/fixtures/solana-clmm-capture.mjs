@@ -1,14 +1,16 @@
 #!/usr/bin/env node
 // Card solana-buy-never-below-a-hidden-market: records test/vectors/<name>-clmm-sim.json, a Raydium CLMM pool's own
 // swap_v2 out beside the accounts the kit's market read takes, so test/solana-clmm.test.ts holds the kit's floor
-// (clmm.ts solanaClmmCellOut) to what the program pays. Read only: simulateTransaction with sigVerify false and
+// (clmm.ts solanaClmmSwapOut) to what the program pays. Read only: simulateTransaction with sigVerify false and
 // replaceRecentBlockhash, so nothing is signed, no key is read or made, and nothing can land. The payer is a public
 // wallet with SOL (any wallet works unsigned); the transaction wraps `amount` SOL into its wSOL account, then swaps it
-// in on the pool (swap_v2, exact input, no price limit), with the pool's current tick array and the next two in the
-// swap's direction, and the bitmap extension when it exists.
-//   node packages/kit/test/fixtures/solana-clmm-capture.mjs <name> <coin mint> <pool> <lamports>...
+// in on the pool (swap_v2, exact input, no price limit), with the pool's current tick array and each later one in the
+// swap's direction that holds an initialized tick (up to six), and the bitmap extension when it exists.
+//   node packages/kit/test/fixtures/solana-clmm-capture.mjs <name> <coin mint> <pool> <lamports>... [--payer <wallet>]
 // Each amount is simulated with the pool's accounts read just before and just after on both providers; a run whose
-// pool moved between them is read again (at most 6 tries).
+// pool moved between them is read again (at most 6 tries). --payer names another public wallet, for a buy larger than
+// the default one holds (card clmm-floor-covers-the-whole-buy: a buy that crosses an initialized tick); a payer that
+// already has a coin account is refused, since the run reads that account's amount as the program's out.
 import "../../../../scripts/net-window.mjs";
 import { createHash } from "node:crypto";
 import { writeFileSync } from "node:fs";
@@ -17,10 +19,12 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const KIT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const kit = await import(pathToFileURL(path.join(KIT, "src/index.ts")).href);
-const [name, MINT, POOL, ...amounts] = process.argv.slice(2);
-if (!name || !MINT || !POOL || amounts.length === 0) throw new Error("usage: solana-clmm-capture.mjs <name> <coin mint> <pool> <lamports>...");
+const argv = process.argv.slice(2);
+const payerAt = argv.indexOf("--payer");
+const [name, MINT, POOL, ...amounts] = payerAt === -1 ? argv : [...argv.slice(0, payerAt), ...argv.slice(payerAt + 2)];
+if (!name || !MINT || !POOL || amounts.length === 0 || (payerAt !== -1 && !argv[payerAt + 1])) throw new Error("usage: solana-clmm-capture.mjs <name> <coin mint> <pool> <lamports>... [--payer <wallet>]");
 const RPCS = { A: "https://solana-rpc.publicnode.com", B: "https://api.mainnet-beta.solana.com" };
-const PAYER = "5tzFkiKscXHK5ZXCGbXZxdw7gTjjD1mBwuoFbhUvuAi9";
+const PAYER = payerAt === -1 ? "5tzFkiKscXHK5ZXCGbXZxdw7gTjjD1mBwuoFbhUvuAi9" : argv[payerAt + 1];
 const CLMM = kit.SOLANA_CLMM_PROGRAM;
 const WSOL = "So11111111111111111111111111111111111111112";
 const TOKEN = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
@@ -54,22 +58,31 @@ const head = await rpc(RPCS.B, "getAccountInfo", [POOL, { encoding: "base64" }])
 const pool = kit.solanaDecodeClmmPool({ owner: head.value.owner, data: Buffer.from(head.value.data[0], "base64") });
 const side = kit.solanaClmmSide(pool, MINT);
 if (!side || side.quote !== "sol") throw new Error("not the coin's wSOL pool");
-const list = kit.solanaClmmReadList(POOL, pool, MINT);
+const list = kit.solanaClmmReadList(POOL, pool, MINT, "buy");
 const observation = (() => { const d = Buffer.from(head.value.data[0], "base64"); let v = BigInt("0x" + d.subarray(201, 233).toString("hex")); let o = ""; while (v > 0n) { o = B58[Number(v % 58n)] + o; v /= 58n; } return o; })();
 const coinProgram = (await rpc(RPCS.B, "getAccountInfo", [MINT, { encoding: "base64", dataSlice: { offset: 0, length: 0 } }])).value.owner;
 const ata = (owner, mint, program) => kit.solanaAta(owner, mint, program);
 const wsolAta = ata(PAYER, WSOL, TOKEN);
 const coinAta = ata(PAYER, MINT, coinProgram);
+if ((await rpc(RPCS.B, "getAccountInfo", [coinAta, { encoding: "base64", dataSlice: { offset: 0, length: 0 } }])).value !== null) throw new Error(`the payer ${PAYER} has a coin account ${coinAta}: its amount would be read as the program's out`);
 // a buy puts wSOL in: zero_for_one when wSOL is token 0
 const zeroForOne = side.quoteIs0;
 const span = pool.tickSpacing * 60;
 const start = (t) => Math.floor(t / span) * span;
 const enc = new TextEncoder();
 const be32 = (n) => { const b = new Uint8Array(4); new DataView(b.buffer).setInt32(0, n, false); return b; };
-const arrays = [0, 1, 2].map((k) => kit.solanaProgramAddress([enc.encode("tick_array"), key32(POOL), be32(start(pool.tickCurrent) + (zeroForOne ? -k : k) * span)], CLMM));
+// the tick arrays the swap walks, as swap.rs takes them: the one that holds the pool's tick, then each later one in the
+// swap's direction that holds an initialized tick (the program jumps to the next initialized array by its bitmap, so an
+// empty array between would be taken for it and refused; none passed past the first is NotEnoughTickArrayAccount, as a
+// buy across MPLX's tick -2460 was on 24 Nov). Up to 99 arrays on are looked at, their initialized_tick_count
+// (tick_array.rs, the byte after the 60 TickStates: 44 + 60 × 168) read alone.
+const ARRAYS_SEEN = 99;
+const COUNT_AT = 44 + 60 * 168;
+const arrays = Array.from({ length: ARRAYS_SEEN }, (_, k) => kit.solanaProgramAddress([enc.encode("tick_array"), key32(POOL), be32(start(pool.tickCurrent) + (zeroForOne ? -k : k) * span)], CLMM));
 const bitmap = kit.solanaProgramAddress([enc.encode("pool_tick_array_bitmap_extension"), key32(POOL)], CLMM);
-const exists = (await rpc(RPCS.B, "getMultipleAccounts", [[...arrays, bitmap], { encoding: "base64", dataSlice: { offset: 0, length: 0 } }])).value.map((v) => v !== null);
-const remaining = [...(exists[3] ? [bitmap] : []), ...arrays.filter((_, i) => exists[i])];
+const seen = (await rpc(RPCS.B, "getMultipleAccounts", [[...arrays, bitmap], { encoding: "base64", dataSlice: { offset: COUNT_AT, length: 1 } }])).value;
+const walked = arrays.filter((_, i) => seen[i] !== null && (i === 0 || Buffer.from(seen[i].data[0], "base64")[0] > 0)).slice(0, 6);
+const remaining = [...(seen[ARRAYS_SEEN] !== null ? [bitmap] : []), ...walked];
 
 const u64 = (x) => { const b = new Uint8Array(8); new DataView(b.buffer).setBigUint64(0, BigInt(x), true); return b; };
 const disc = (n) => createHash("sha256").update(`global:${n}`).digest().subarray(0, 8);

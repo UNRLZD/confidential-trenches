@@ -185,42 +185,185 @@ export function solanaClmmFloorFeeRate(tradeFeeRate: bigint, p: Pick<SolanaClmmP
   return total > MAX_FEE_RATE ? MAX_FEE_RATE : total;
 }
 
-/**
- * What an exact input pays out of the pool's current tick-spacing cell, as the program's swap step computes it
- * (swap_math.rs compute_swap with exact input): in that cell liquidity is constant (ticks are initialized only at
- * multiples of the spacing), so a swap that stays in it is priced exactly. One that would leave it is priced only to the
- * cell's edge, the rest of its input given no out (`whole` false): a floor, never credit past what was read. The fee is
- * the floor's (solanaClmmFloorFeeRate), off the input or off the output by fee_on.
- */
-export function solanaClmmCellOut(p: Pick<SolanaClmmPool, "sqrtPriceX64" | "liquidity" | "tickCurrent" | "tickSpacing" | "feeOn">, feeRate: bigint, zeroForOne: boolean, amountIn: bigint): { out: bigint; whole: boolean } {
-  if (amountIn <= 0n || p.liquidity === 0n || p.sqrtPriceX64 === 0n) return { out: 0n, whole: false };
-  const cell = cellOf(p.tickCurrent, p.tickSpacing);
-  const edgeTick = Math.min(MAX_TICK, Math.max(MIN_TICK, (zeroForOne ? cell : cell + 1) * p.tickSpacing));
-  const edge = solanaClmmSqrtPriceAtTick(edgeTick);
-  // a price already at or past its cell's edge (one a read placed there) moves no further in this cell
-  if (zeroForOne ? edge >= p.sqrtPriceX64 : edge <= p.sqrtPriceX64) return { out: 0n, whole: false };
-  const feeOnInput = p.feeOn === 1 ? zeroForOne : p.feeOn === 2 ? !zeroForOne : true;
-  const forPrice = feeOnInput ? (amountIn * (FEE_DEN - feeRate)) / FEE_DEN : amountIn;
-  const atEdge = deltas(edge, p.sqrtPriceX64, p.liquidity, zeroForOne);
-  let out: bigint;
-  let whole: boolean;
-  if (atEdge !== null && forPrice >= atEdge[0]) {
-    out = atEdge[1];
-    whole = forPrice === atEdge[0];
-  } else {
-    const next = nextFromInput(p.sqrtPriceX64, p.liquidity, forPrice, zeroForOne);
-    const d = deltas(next, p.sqrtPriceX64, p.liquidity, zeroForOne);
-    if (d === null) return { out: 0n, whole: false };
-    out = d[1];
-    whole = true;
+// ------------------------------------------------------------------------------------------------- the swap, across ticks
+
+/** TickArrayState (tick_array.rs, Anchor zero_copy, repr(C, packed)): discriminator, pool_id 8, start_tick_index 40
+ *  (i32), 60 TickStates of 168 bytes from 44, initialized_tick_count, recent_epoch, padding: 10,240 bytes. A TickState:
+ *  tick 0 (i32), liquidity_net 4 (i128), liquidity_gross 20 (u128), fee and reward growths, order_phase 116,
+ *  orders_amount 124 (u64), part_filled_orders_remaining 132 (u64), unfilled_ratio_x64 140, padding (raydium-clmm
+ *  6d7a0f8). Read on mainnet 24 Nov 09:28Z (test/vectors/mplx-clmm-sim.json): MPLX's pool BxRhW4q1…, its arrays
+ *  -3000, -2400 and -1800, each 10,240 bytes with this discriminator, its pool and its start, each initialized tick at
+ *  its own slot. */
+export const SOLANA_CLMM_TICK_ARRAY_BYTES = 10_240;
+const TICK_ARRAY_DISC = [192, 155, 85, 205, 49, 249, 129, 42] as const; // sha256("account:TickArrayState")[..8]
+const TICK_ARRAY_SIZE = 60;
+const TICKS_AT = 44;
+const TICK_BYTES = 168;
+/** The tick arrays one read takes: the one that holds the pool's tick and the next two in the swap's direction, the
+ *  arrays a swap_v2 is passed (test/fixtures/solana-clmm-capture.mjs). [design: 3: 120 to 180 tick-spacing cells past
+ *  the price, a move of 12% to 20% at MPLX's spacing 10, where one cell held 6.4 to 9 SOL (24 Nov 09:12Z); a fourth
+ *  array adds 10,240 bytes to each provider's read of each market.] */
+export const SOLANA_CLMM_TICK_ARRAYS = 3;
+
+/** tick_array.rs get_array_start_index: the first tick of the array that holds `tick`. */
+export function solanaClmmTickArrayStart(tick: number, spacing: number): number {
+  const n = TICK_ARRAY_SIZE * spacing;
+  return (tick < 0 && tick % n !== 0 ? Math.trunc(tick / n) - 1 : Math.trunc(tick / n)) * n;
+}
+/** A tick array's address: ["tick_array", pool, its start as a big-endian i32] (tick_array.rs TickArrayState::key). */
+export function solanaClmmTickArray(pool: string, start: number): string {
+  const be = new Uint8Array(4);
+  new DataView(be.buffer).setInt32(0, start, false);
+  return solanaProgramAddress([new TextEncoder().encode("tick_array"), base58.decode(pool), be], SOLANA_CLMM_PROGRAM);
+}
+/** The starts of the arrays a swap in `side`'s direction walks from the pool's tick, at most SOLANA_CLMM_TICK_ARRAYS and
+ *  none wholly past the tick range; none for a pool that is not the coin's. */
+export function solanaClmmWalkStarts(p: Pick<SolanaClmmPool, "mint0" | "mint1" | "tickCurrent" | "tickSpacing">, token: string, side: "buy" | "sell"): number[] {
+  const s = solanaClmmSide(p, token);
+  if (s === null) return [];
+  // a buy puts the quote in; zero_for_one when the input is token 0
+  const zeroForOne = side === "buy" ? s.quoteIs0 : !s.quoteIs0;
+  const n = TICK_ARRAY_SIZE * p.tickSpacing;
+  const first = solanaClmmTickArrayStart(p.tickCurrent, p.tickSpacing);
+  const starts: number[] = [];
+  for (let i = 0; i < SOLANA_CLMM_TICK_ARRAYS; i++) {
+    const start = first + (zeroForOne ? -i : i) * n;
+    if (start + n <= MIN_TICK || start > MAX_TICK) break;
+    starts.push(start);
   }
-  if (!feeOnInput) out -= ceilDiv(out * feeRate, FEE_DEN);
-  return { out: out > 0n ? out : 0n, whole };
+  return starts;
 }
 
-/** The account list one CLMM read asks for: the pool, its AmmConfig, its two vaults, the coin's mint, the Clock. */
-export const solanaClmmReadList = (address: string, p: Pick<SolanaClmmPool, "ammConfig" | "vault0" | "vault1" | "mint0" | "mint1">, token: string): string[] =>
-  [address, p.ammConfig, p.vault0, p.vault1, token, SOLANA_CLOCK_SYSVAR];
+/** The ticks a swap may walk: the price may move from the pool's to the price of any tick in [lo, hi], and `at` holds
+ *  every initialized tick there (one with liquidity or a limit order) with its liquidity_net (0 for an order alone).
+ *  Past lo or hi nothing is known. */
+export type SolanaClmmTicks = { readonly lo: number; readonly hi: number; readonly at: ReadonlyMap<number, bigint> };
+
+const i128 = (d: Uint8Array, o: number): bigint => dv(d).getBigUint64(o, true) + (dv(d).getBigInt64(o + 8, true) << 64n);
+/** A tick array's initialized ticks with their liquidity_net, checked: owner, size, discriminator, its pool, its start,
+ *  each initialized tick at its own slot (TickState::initialize); null for any other account. */
+function arrayTicks(acc: SolanaPoolAccount, pool: string, start: number, spacing: number): Map<number, bigint> | null {
+  const d = acc.data;
+  if (acc.owner !== SOLANA_CLMM_PROGRAM || d.length !== SOLANA_CLMM_TICK_ARRAY_BYTES || TICK_ARRAY_DISC.some((b, i) => d[i] !== b)) return null;
+  if (key(d, 8) !== pool || dv(d).getInt32(40, true) !== start) return null;
+  const at = new Map<number, bigint>();
+  for (let k = 0; k < TICK_ARRAY_SIZE; k++) {
+    const o = TICKS_AT + k * TICK_BYTES;
+    const liquid = u128(d, o + 20) > 0n;
+    // tick_array.rs is_initialized: liquidity, or a limit order not yet filled
+    if (!liquid && dv(d).getBigUint64(o + 124, true) === 0n && dv(d).getBigUint64(o + 132, true) === 0n) continue;
+    const tick = dv(d).getInt32(o, true);
+    if (tick !== start + k * spacing) return null;
+    at.set(tick, liquid ? i128(d, o + 4) : 0n);
+  }
+  return at;
+}
+/**
+ * The ticks both providers read alike, from the array that holds the pool's tick on in the walk's direction
+ * (`starts`, solanaClmmWalkStarts): an array absent on both (the program makes one at its first initialized tick, so
+ * none is initialized), or the same initialized ticks with the same liquidity_net on both. The walk ends before the first
+ * array that is neither: never credit past what both read. Null when that is the first.
+ */
+export function solanaClmmAgreedTicks(a: readonly (SolanaPoolAccount | null)[], b: readonly (SolanaPoolAccount | null)[], starts: readonly number[], pool: string, spacing: number): SolanaClmmTicks | null {
+  const at = new Map<number, bigint>();
+  let k = 0;
+  for (const [i, start] of starts.entries()) {
+    const x = a[i] ?? null;
+    const y = b[i] ?? null;
+    if (x !== null || y !== null) {
+      const tx = x === null ? null : arrayTicks(x, pool, start, spacing);
+      const ty = y === null ? null : arrayTicks(y, pool, start, spacing);
+      if (tx === null || ty === null || tx.size !== ty.size || [...tx].some(([t, net]) => ty.get(t) !== net)) break;
+      for (const [t, net] of tx) at.set(t, net);
+    }
+    k++;
+  }
+  if (k === 0) return null;
+  const n = TICK_ARRAY_SIZE * spacing;
+  const ends = [starts[0]!, starts[k - 1]!];
+  return { lo: Math.max(MIN_TICK, Math.min(...ends)), hi: Math.min(MAX_TICK, Math.max(...ends) + n), at };
+}
+
+/** swap_math.rs compute_swap with exact input: one step's out, the input it spends (its fee too where the fee is on the
+ *  input) and whether it reached its target. */
+function step(sqrt: bigint, target: bigint, liquidity: bigint, remaining: bigint, feeRate: bigint, zeroForOne: boolean, feeOnInput: boolean): { out: bigint; spent: bigint; reached: boolean } {
+  const forPrice = feeOnInput ? (remaining * (FEE_DEN - feeRate)) / FEE_DEN : remaining;
+  const at = deltas(target, sqrt, liquidity, zeroForOne);
+  let out: bigint;
+  let spent: bigint;
+  const reached = at !== null && forPrice >= at[0];
+  if (reached) {
+    out = at[1];
+    spent = feeOnInput ? at[0] + ceilDiv(at[0] * feeRate, FEE_DEN - feeRate) : at[0];
+  } else {
+    // the price the input reaches short of the target: the whole input spent (the rest the fee, or dust to the pool)
+    const d = deltas(nextFromInput(sqrt, liquidity, forPrice, zeroForOne), sqrt, liquidity, zeroForOne);
+    out = d === null ? 0n : d[1];
+    spent = remaining;
+  }
+  if (!feeOnInput) out -= ceilDiv(out * feeRate, FEE_DEN);
+  return { out: out > 0n ? out : 0n, spent: spent < remaining ? spent : remaining, reached };
+}
+
+/**
+ * What an exact input pays out of the pool as the program's swap computes it (swap.rs swap_internal, swap_math.rs
+ * compute_swap, no price limit): from the pool's price to the next initialized tick, across it with its liquidity_net,
+ * on to the next; on a pool with a dynamic fee a step ends at each tick-spacing edge too, as the program's does. Only
+ * inside `ticks` (both providers' arrays agreed, solanaClmmAgreedTicks; null: the pool's current tick-spacing cell,
+ * where no tick is initialized): an input that would move the price past them is priced only to their edge, the rest
+ * given no out (`whole` false), a floor, never credit past what was read. A limit order is never counted: the program
+ * fills one at its tick's price, the best the swap meets there, before it crosses, so wherever one rests the floor is
+ * under the program's out, and elsewhere it is the program's to the unit. Every step's fee is the floor's
+ * (solanaClmmFloorFeeRate), off the input or off the output by fee_on.
+ */
+export function solanaClmmSwapOut(p: Pick<SolanaClmmPool, "sqrtPriceX64" | "liquidity" | "tickCurrent" | "tickSpacing" | "feeOn" | "dynamicFee">, feeRate: bigint, zeroForOne: boolean, amountIn: bigint, ticks: SolanaClmmTicks | null = null): { out: bigint; whole: boolean } {
+  if (amountIn <= 0n || p.sqrtPriceX64 === 0n) return { out: 0n, whole: false };
+  const spacing = p.tickSpacing;
+  const cell = cellOf(p.tickCurrent, spacing);
+  const own: SolanaClmmTicks = { lo: Math.max(MIN_TICK, cell * spacing), hi: Math.min(MAX_TICK, (cell + 1) * spacing), at: new Map() };
+  // ticks that do not hold this read's price (a read of another moment than the list's) leave it its own cell only
+  const held = ticks !== null && p.tickCurrent >= ticks.lo && p.tickCurrent < ticks.hi && p.sqrtPriceX64 >= solanaClmmSqrtPriceAtTick(ticks.lo) && p.sqrtPriceX64 <= solanaClmmSqrtPriceAtTick(ticks.hi);
+  const known = held ? ticks : own;
+  const end = zeroForOne ? known.lo : known.hi;
+  // the initialized ticks the walk meets, in its order: at or under its cell's lower edge going down, past its cell going up
+  const met = [...known.at.keys()].filter((t) => (zeroForOne ? t <= cell * spacing && t > end : t > cell * spacing && t < end)).sort((x, y) => (zeroForOne ? y - x : x - y));
+  const feeOnInput = p.feeOn === 1 ? zeroForOne : p.feeOn === 2 ? !zeroForOne : true;
+  let sqrt = p.sqrtPriceX64;
+  let liquidity = p.liquidity;
+  let remaining = amountIn;
+  let out = 0n;
+  let i = 0;
+  let edge = zeroForOne ? cell * spacing : (cell + 1) * spacing;
+  for (;;) {
+    let target = i < met.length ? met[i]! : end;
+    if (p.dynamicFee !== null) target = zeroForOne ? Math.max(target, edge) : Math.min(target, edge);
+    if (zeroForOne ? target < end : target > end) target = end;
+    const price = solanaClmmSqrtPriceAtTick(target);
+    // a price already past the step's target is a read no swap leaves: priced no further
+    if (zeroForOne ? price > sqrt : price < sqrt) return { out, whole: false };
+    const s = step(sqrt, price, liquidity, remaining, feeRate, zeroForOne, feeOnInput);
+    out += s.out;
+    remaining -= s.spent;
+    if (!s.reached || remaining === 0n) return { out, whole: true };
+    sqrt = price;
+    if (target === end) return { out, whole: false };
+    if (i < met.length && met[i] === target) {
+      // swap.rs: liquidity_net is added crossing up and taken off crossing down
+      const net = known.at.get(target)!;
+      liquidity = zeroForOne ? liquidity - net : liquidity + net;
+      if (liquidity < 0n) return { out, whole: false };
+      i++;
+    }
+    edge = zeroForOne ? target - spacing : target + spacing;
+  }
+}
+
+/** The account list one CLMM read asks for: the pool, its AmmConfig, its two vaults, the coin's mint, the Clock, and,
+ *  given a side, the tick arrays a swap of that side walks from the pool's tick (solanaClmmWalkStarts). */
+export function solanaClmmReadList(address: string, p: Pick<SolanaClmmPool, "ammConfig" | "vault0" | "vault1" | "mint0" | "mint1" | "tickCurrent" | "tickSpacing">, token: string, side?: "buy" | "sell"): string[] {
+  const head = [address, p.ammConfig, p.vault0, p.vault1, token, SOLANA_CLOCK_SYSVAR];
+  return side === undefined ? head : [...head, ...solanaClmmWalkStarts(p, token, side).map((s) => solanaClmmTickArray(address, s))];
+}
 
 /** A coin's transfer fee in `epoch` from its mint: the TransferFeeConfig extension's (dlmm.ts layout), and no other.
  *  For a market only read, every other Token-2022 extension leaves the base units a swap moves as they are. */
@@ -265,13 +408,15 @@ export function solanaUsdcAsLamports(usdc: bigint, u: SolanaClmmSolUsd): bigint 
 }
 
 /** One provider's read of a market: its depth in lamports (the quote vault, a USDC one through SOL/USD), and its floor
- *  out for the request's amount and each leg amount (solanaClmmCellOut, the coin's transfer fee taken off). */
+ *  out for the request's amount and each leg amount (solanaClmmSwapOut, the coin's transfer fee taken off). */
 export type SolanaClmmRead = { readonly depth: bigint; readonly out: bigint; readonly whole: boolean; readonly outs: readonly bigint[]; readonly spotOut: bigint };
 /** A CLMM market both providers agree on. Never a route: no CLMM account is ever signed (the module note). */
 export type SolanaClmmMarket = { readonly address: string; readonly quote: "sol" | "usdc"; readonly reads: readonly [SolanaClmmRead, SolanaClmmRead]; readonly slots: readonly [number, number] };
 export type SolanaClmmVerdict = { kind: "ok"; market: SolanaClmmMarket } | { kind: "none" } | { kind: "bad"; why: string };
 export type SolanaClmmRequest = { token: string; pool: string; side: "buy" | "sell"; amount: bigint; amounts?: readonly bigint[] };
 
+/** The accounts of a read before its tick arrays (solanaClmmReadList). */
+const LIST_HEAD = 6;
 type Read = ReturnType<typeof solanaParseAccountsAnswer>;
 type Got = { read: Read; fault: string | null };
 type One = { pool: SolanaClmmPool; side: { quoteIs0: boolean; quote: "sol" | "usdc" }; vaults: readonly [bigint, bigint]; fee: bigint; coinFee: SolanaTransferFee | null; open: boolean };
@@ -309,21 +454,23 @@ function one(acc: (SolanaPoolAccount | null)[], address: string, token: string):
   return { pool, side, vaults: [held[0]!, held[1]!], fee: solanaClmmFloorFeeRate(tradeFeeRate, pool), coinFee, open };
 }
 
-/** A provider's floor out for `amount` (lamports on a buy, the coin on a sell) on its own read. */
-function priced(o: One, side: "buy" | "sell", amount: bigint, solUsd: SolanaClmmSolUsd | null): { out: bigint; whole: boolean } {
+/** A provider's floor out for `amount` (lamports on a buy, the coin on a sell) on its own read, across the ticks both
+ *  providers agree on. */
+function priced(o: One, side: "buy" | "sell", amount: bigint, solUsd: SolanaClmmSolUsd | null, ticks: SolanaClmmTicks | null): { out: bigint; whole: boolean } {
   const usdc = o.side.quote === "usdc";
   // a buy puts the quote in; zero_for_one when the input is token 0
   const zeroForOne = side === "buy" ? o.side.quoteIs0 : !o.side.quoteIs0;
   if (side === "buy") {
     const into = usdc ? solanaLamportsAsUsdc(amount, solUsd!) : amount;
-    const r = solanaClmmCellOut(o.pool, o.fee, zeroForOne, into);
+    const r = solanaClmmSwapOut(o.pool, o.fee, zeroForOne, into, ticks);
     return { out: r.out - solanaTransferFeeOf(o.coinFee, r.out), whole: r.whole };
   }
-  const r = solanaClmmCellOut(o.pool, o.fee, zeroForOne, amount - solanaTransferFeeOf(o.coinFee, amount));
+  const r = solanaClmmSwapOut(o.pool, o.fee, zeroForOne, amount - solanaTransferFeeOf(o.coinFee, amount), ticks);
   return { out: usdc ? solanaUsdcAsLamports(r.out, solUsd!) : r.out, whole: r.whole };
 }
 
-function judge(req: SolanaClmmRequest, solUsd: SolanaClmmSolUsd | null, ga: Got, gb: Got): SolanaClmmVerdict | { kind: "usd" } {
+/** The verdict on both providers' reads of `list`, whose accounts past the first six are the tick arrays at `starts`. */
+function judge(req: SolanaClmmRequest, solUsd: SolanaClmmSolUsd | null, ga: Got, gb: Got, starts: readonly number[]): SolanaClmmVerdict | { kind: "usd" } {
   const a = ga.read;
   const b = gb.read;
   if (!a || !b) {
@@ -356,14 +503,15 @@ function judge(req: SolanaClmmRequest, solUsd: SolanaClmmSolUsd | null, ga: Got,
     if (!solanaReservesAgree(x.pool.sqrtPriceX64 ** 2n, y.pool.sqrtPriceX64 ** 2n)) return { kind: "bad", why: "the CLMM pool's price is outside the band" };
     if (!solanaReservesAgree(x.pool.liquidity, y.pool.liquidity)) return { kind: "bad", why: "the CLMM pool's liquidity is outside the band" };
     if (x.side.quote === "usdc" && solUsd === null) return { kind: "usd" };
+    const ticks = solanaClmmAgreedTicks(a.accounts.slice(LIST_HEAD), b.accounts.slice(LIST_HEAD), starts, address, x.pool.tickSpacing);
     const read = (o: One): SolanaClmmRead => {
-      const r = priced(o, req.side, req.amount, solUsd);
+      const r = priced(o, req.side, req.amount, solUsd, ticks);
       const usdc = o.side.quote === "usdc";
       const depth = usdc ? solanaUsdcAsLamports(o.vaults[q]!, solUsd!) : o.vaults[q]!;
       const spotIn = req.side === "buy" && usdc ? solanaLamportsAsUsdc(req.amount, solUsd!) : req.amount;
       const spot = solanaClmmSpotOut(o.pool.sqrtPriceX64, req.side, spotIn, o.side.quoteIs0);
       const spotOut = req.side === "sell" && usdc ? solanaUsdcAsLamports(spot, solUsd!) : spot;
-      return { depth, out: r.out, whole: r.whole, outs: (req.amounts ?? []).map((k) => priced(o, req.side, k, solUsd).out), spotOut };
+      return { depth, out: r.out, whole: r.whole, outs: (req.amounts ?? []).map((k) => priced(o, req.side, k, solUsd, ticks).out), spotOut };
     };
     return { kind: "ok", market: { address, quote: x.side.quote, reads: [read(x), read(y)], slots: [a.slot, b.slot] } };
   } catch (e) {
@@ -400,20 +548,25 @@ export async function readSolanaClmmMarket(providers: readonly [SolanaRpc, Solan
     const [ha, hb] = await readBoth([req.pool]);
     const head = [ha.read?.accounts[0], hb.read?.accounts[0]].find((x) => x != null) ?? null;
     let list: string[] | null = null;
+    let starts: number[] = [];
     try {
-      if (head !== null && head.owner === SOLANA_CLMM_PROGRAM) list = solanaClmmReadList(req.pool, solanaDecodeClmmPool(head), req.token);
+      if (head !== null && head.owner === SOLANA_CLMM_PROGRAM) {
+        const p = solanaDecodeClmmPool(head);
+        starts = solanaClmmWalkStarts(p, req.token, req.side);
+        list = solanaClmmReadList(req.pool, p, req.token, req.side);
+      }
     } catch (e) {
       last = { kind: "bad", why: String(e instanceof Error ? e.message : e).slice(0, 200) };
       continue;
     }
     if (list === null) {
-      const v = judge(req, usd, ha, hb);
+      const v = judge(req, usd, ha, hb, []);
       if (v.kind === "none") return v;
       last = v.kind === "bad" ? v : { kind: "bad", why: "no CLMM pool" };
       continue;
     }
     const [a, b] = await readBoth(list);
-    let v = judge(req, usd, a, b);
+    let v = judge(req, usd, a, b, starts);
     if (v.kind === "usd") {
       try {
         usd = await solUsd();
@@ -421,7 +574,7 @@ export async function readSolanaClmmMarket(providers: readonly [SolanaRpc, Solan
       } catch (e) {
         return { kind: "bad", why: `no SOL/USD price for a USDC market (${String(e instanceof Error ? e.message : e).slice(0, 120)})` };
       }
-      v = judge(req, usd, a, b);
+      v = judge(req, usd, a, b, starts);
     }
     if (v.kind === "usd") return { kind: "bad", why: "no SOL/USD price for a USDC market" };
     last = v;

@@ -1,11 +1,13 @@
-// node packages/kit/test/solana-clmm-mutants.mjs (card solana-buy-never-below-a-hidden-market): plants one weakening of
+// node packages/kit/test/solana-clmm-mutants.mjs (cards solana-buy-never-below-a-hidden-market and
+// clmm-floor-covers-the-whole-buy): plants one weakening of
 // the Raydium CLMM market read (src/trade/solana/clmm.ts) or of the set rule a market enters (src/trade/solana/pool.ts
 // solanaReferenceSet) at a time in a copy of the kit (test/mutant-copy.mjs), runs the named tests of
 // test/solana-clmm.test.ts there, and expects each to fail: a band, the identity bytes, the config, a vault's owner, mint
-// or program, the swap switch, the open time, the one read more, a provider's fault, the cell's edge, the fee in or out,
-// the dynamic fee, a USDC market priced with no SOL/USD; a market that does not raise E, one that lowers it, one under
-// the cutoff counted, a cutoff over the traded pools alone, a market in the set; the finder's scans in both mint orders
-// or in the order turned (src/trade/solana/dlmm.ts).
+// or program, the swap switch, the open time, the one read more, a provider's fault, the edge of the tick arrays read,
+// the fee in or out and the input's fee spent, a tick's liquidity_net, the ticks both providers agree on, an array's
+// pool and kind, ticks of another moment, the dynamic fee, a USDC market priced with no SOL/USD; a market that does not
+// raise E, one that lowers it, one under the cutoff counted, a cutoff over the traded pools alone, a market in the set;
+// the finder's scans in both mint orders or in the order turned (src/trade/solana/dlmm.ts).
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { refused, runMutant } from "../../../scripts/mutant-run.mjs";
@@ -27,9 +29,16 @@ const M = [
   ["a pool not yet open taken", CLMM, "BigInt.asUintN(64, clock.unixTimestamp) >= pool.openTime", "true", "CL9"],
   ["no read more after a disagreement", CLMM, "for (let round = 0; round < 2; round++)", "for (let round = 0; round < 1; round++)", "CL8"],
   ["a provider's fault not refused", CLMM, "if (!a || !b) {", "if (!a && !b) {", "CL10"],
-  ["credit past the cell's edge", CLMM, "if (atEdge !== null && forPrice >= atEdge[0]) {", "if (false) {", "CL2"],
-  ["the fee on input dropped", CLMM, "const forPrice = feeOnInput ? (amountIn * (FEE_DEN - feeRate)) / FEE_DEN : amountIn;", "const forPrice = amountIn;", "CL2"],
+  ["credit past the tick arrays read", CLMM, "const end = zeroForOne ? known.lo : known.hi;", "const end = zeroForOne ? MIN_TICK : MAX_TICK;", "CL15"],
+  ["the fee on input dropped", CLMM, "const forPrice = feeOnInput ? (remaining * (FEE_DEN - feeRate)) / FEE_DEN : remaining;", "const forPrice = remaining;", "CL2"],
   ["the fee on output dropped", CLMM, "if (!feeOnInput) out -= ceilDiv(out * feeRate, FEE_DEN);", "", "CL4"],
+  ["the input's fee not spent", CLMM, "spent = feeOnInput ? at[0] + ceilDiv(at[0] * feeRate, FEE_DEN - feeRate) : at[0];", "spent = at[0];", "CL17"],
+  ["a tick's liquidity_net not taken", CLMM, "liquidity = zeroForOne ? liquidity - net : liquidity + net;", "", "CL15"],
+  ["a tick's liquidity_net taken the wrong way", CLMM, "liquidity = zeroForOne ? liquidity - net : liquidity + net;", "liquidity = zeroForOne ? liquidity + net : liquidity - net;", "CL15"],
+  ["one provider's ticks taken", CLMM, "if (tx === null || ty === null || tx.size !== ty.size || [...tx].some(([t, net]) => ty.get(t) !== net)) break;", "if (tx === null || ty === null) break;", "CL16"],
+  ["an array of another pool taken", CLMM, "if (key(d, 8) !== pool || dv(d).getInt32(40, true) !== start) return null;", "", "CL16"],
+  ["an account of another kind taken as an array", CLMM, "TICK_ARRAY_DISC.some((b, i) => d[i] !== b)", "false", "CL16"],
+  ["ticks of another moment taken", CLMM, "const known = held ? ticks : own;", "const known = ticks ?? own;", "CL16"],
   ["the dynamic fee's cap not added", CLMM, "const total = tradeFeeRate + dynamic;", "const total = tradeFeeRate;", "CL4"],
   ["a USDC market priced with no SOL/USD", CLMM, "if (x.side.quote === \"usdc\" && solUsd === null) return { kind: \"usd\" };", "", "CL11"],
   ["a counted market never raises E", POOL, "if (counted && r.out > best.out) best = r;", "", "CL13"],
