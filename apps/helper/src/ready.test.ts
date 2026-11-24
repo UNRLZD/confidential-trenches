@@ -474,7 +474,7 @@ test("card helper-ready-without-gt: a new helper whose GeckoTerminal window is f
 
 // card evm-buy-hookdata-fee, review fold 4 MEDIUM-1: /v1/health says ready only once every pool's start check has
 // passed, so a start that refuses (exit 2) never turns ready and redeploy.sh keeps the old helper serving
-test("MEDIUM-1 poolsChecked: resolves once every Solana and EVM pool's start check has passed, asks a Solana pool again until its check settles, and a refusal calls refuse and rejects", async () => {
+test("MEDIUM-1 poolsChecked: resolves once every Solana and EVM pool's start check has passed, asks a Solana pool again until its check settles, and a refusal calls refuse and rejects", async (t) => {
   assert.equal(typeof S.poolsChecked, "function", "server.ts poolsChecked");
   const later = () => {
     let ok!: () => void, no!: (e: Error) => void;
@@ -482,7 +482,14 @@ test("MEDIUM-1 poolsChecked: resolves once every Solana and EVM pool's start che
     p.catch(() => {});
     return { p, ok, no };
   };
-  const tick = (ms = 0) => new Promise((r) => setTimeout(r, ms));
+  // the asks' interval on a mocked clock: on the machine's, a busy runner fired a 10 ms interval twice in 55 ms (README
+  // run 45342204618), though poolsChecked asked every time it fired
+  enableTimers(t.mock.timers, { apis: ["setTimeout", "setInterval"] });
+  t.after(() => resetTimers(t.mock.timers));
+  const tick = async (ms = 0) => {
+    t.mock.timers.tick(ms);
+    for (let i = 0; i < 4; i++) await new Promise((r) => setImmediate(r));
+  };
   const state = (p: Promise<void>) => {
     const s = { v: "pending" };
     p.then(() => (s.v = "ok"), () => (s.v = "rejected"));
