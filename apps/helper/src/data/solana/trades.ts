@@ -548,6 +548,13 @@ export function usdScaled(v: unknown): bigint | null {
   return n > 0n ? n : null;
 }
 
+/** Card sol-tape-every-quote: `q` smallest units of a coin of `from.decimals` at `from.usd` (USD per whole coin times
+ *  10^18) in the smallest units of a coin of `to.decimals` at `to.usd`, rounded down: a trade in a quote its book is not
+ *  priced in, turned into the book's. */
+export function requote(q: bigint, from: { decimals: number; usd: bigint }, to: { decimals: number; usd: bigint }): bigint {
+  return (q * from.usd * 10n ** BigInt(to.decimals)) / (10n ** BigInt(from.decimals) * to.usd);
+}
+
 /** Card sol-vendor-tape-refresh-from-our-reads: a tape the vendor names a pool for (poolTape) is renewed from our own
  *  reads of that pool once its rows are this old, at a page's read [design: half TAPE_FRESH_MS, so a page reading every
  *  2 s is served rows under SOL_VENDOR_REACH_MS with room for a round's calls]. */
@@ -987,6 +994,26 @@ export function createSolanaTrades(deps: {
   }
   /** A quote the book can price: SOL, USDC, or another coin with its decimals and a USD price read. */
   const priced = (q: string | null): boolean => q === WSOL || q === USDC || (q !== null && quotes.get(q)?.decimals != null && quotes.get(q)?.usd != null);
+  /** A quote's decimals and USD price in force (SOL's Pyth price, USDC one dollar, another coin's row), or null; read
+   *  nothing (usdOf below reads a stale one again). */
+  const quoteInForce = (q: string): { decimals: number; usd: bigint } | null => {
+    if (q === USDC) return { decimals: 6, usd: 10n ** 18n };
+    if (q === WSOL) return solUsd === null ? null : { decimals: 9, usd: solUsd.v };
+    const k = quotes.get(q);
+    return k?.decimals == null || k.usd == null ? null : { decimals: k.decimals, usd: k.usd };
+  };
+  /** Card sol-tape-every-quote: a trade in the book's quote, a trade in another quote turned into it at both quotes' USD
+   *  prices in force (as a read back prices its book, backBook), or null while either has none. A book is priced in one
+   *  quote, its first trade's; before this card a coin's trades in any other quote were dropped from its tape and bars
+   *  (live run 45414685788: KMNo3nJs's book in USDC lacked its SOL, JitoSOL and jupSOL pools' trades, about 8,900 of its
+   *  37,000 a day, its DLMM SOL sell ab7svd3QgKRu among them). */
+  function inBookQuote(e: Entry, t: RawTrade): RawTrade | null {
+    if (t.quoteMint === e.quoteMint) return t;
+    if (e.book === null || e.quoteMint === null || t.quoteMint === null) return null;
+    const from = quoteInForce(t.quoteMint);
+    const to = quoteInForce(e.quoteMint);
+    return from === null || to === null ? null : { ...t, quoteMint: e.quoteMint, quote: requote(t.quote, from, to) };
+  }
 
   /** The trades of one transaction for `mint`, with the token named and the quote checked; pools read. A pair venue's
    *  trade (told as the pool's first mint sees it) is turned round when the token is the second; an event with no clock
@@ -1094,7 +1121,6 @@ export function createSolanaTrades(deps: {
   function hold(e: Entry, sig: string, slot: number, order: number, trades: RawTrade[]): void {
     if (e.held.has(sig) || (e.book !== null && slot <= e.book.settledTo)) return;
     if (e.held.size >= HELD_MAX) return;
-    e.held.set(sig, { slot, seq: order, t: trades });
     if (trades.length > 0) e.traded++;
     if (e.book === null) {
       const q = (trades.find((t) => t.quoteMint === WSOL || t.quoteMint === USDC) ?? trades.find((t) => priced(t.quoteMint)))?.quoteMint;
@@ -1110,6 +1136,10 @@ export function createSolanaTrades(deps: {
         }
       } else if (e.quoteMint === null) e.quoteMint = trades.find((t) => t.quoteMint !== null)?.quoteMint ?? null;
     }
+    // card sol-tape-every-quote: each trade in the book's quote once the book has one (one with no price in force is left
+    // out, as every trade of a quote with none was before); before the book, as they came (fold takes the book's only)
+    const mine = e.book === null ? trades : trades.flatMap((t) => inBookQuote(e, t) ?? []);
+    e.held.set(sig, { slot, seq: order, t: mine });
   }
 
   // the folds asked by the stream's notes and the tick, at most one a token, run a turn's slice at a time (limits/turn.ts
@@ -1877,8 +1907,10 @@ export function createSolanaTrades(deps: {
         const got = await dated(await forMint(e.mint, f.truncated || eventsInInner(((r.meta ?? {}) as Record<string, unknown>).logMessages) ? cutTrades(f, r) : f.trades), x.slot, blockTime(r) ?? x.t);
         if (got === null) return false;
         let i = 0;
-        for (const t of got) {
-          if (t.quoteMint !== e.quoteMint) continue;
+        // card sol-tape-every-quote: a trade in another quote turned into the book's, as the stream's are (hold)
+        for (const raw of got) {
+          const t = inBookQuote(e, raw);
+          if (t === null) continue;
           b.events.push({ kind: "swap", block: x.slot, index: BACK_INDEX - x.n * 8 + Math.min(i++, 7), tx: x.signature, t: t.ts, side: t.side, amt: t.amt, quote: t.quote });
         }
         return true;
