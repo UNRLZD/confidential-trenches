@@ -99,6 +99,20 @@ test("card evm-tape-rows-exact: a Base trade on a Uniswap v2 pair (0x448a311f's 
   assert.ok(r.lines.some((l) => /\d+ of \d+ sampled trades carry a Transfer of the token for exactly their amt/.test(l)));
 });
 
+test("card evm-swaps-check-reads-swap-logs: a v2 pair's logs are read by its Swap event, never its Sync, which a pair also logs when liquidity is added or taken out (red at 67e3a6ef0: the recorded pair 0xa1c7fdff logs Sync before Swap, and live run 45414685788 counted 0x9811f745's liquidity removal 0x42831bc7, a Sync and a Burn with no Swap, as a swap missing from the tape)", async () => {
+  const asked = [];
+  const base = replay(A.base_univ2);
+  const fetchFn = async (url, init) => {
+    const req = typeof init?.body === "string" ? JSON.parse(init.body) : null;
+    if (req?.method === "eth_getLogs") asked.push(req.params[0].topics);
+    return base(url, init);
+  };
+  await read("https://ct-api.unrealized.trade", A.base_univ2.coin, fetchFn);
+  assert.ok(asked.length > 0, "the pool's logs read");
+  // Uniswap v2's Swap(address,uint256,uint256,uint256,uint256,address), the event the recorded pair logged
+  assert.ok(asked.every((t) => t[0] === TOPIC.swapUni2), `every read asks the pair's Swap: ${JSON.stringify([...new Set(asked.map((t) => t[0]))])}`);
+});
+
 test("card evm-tape-rows-exact: the same v2 tape with every amt one unit off its Transfer fails", () => {
   const rec = structuredClone(A.base_univ2);
   body(rec, "trades", (b) => b.trades.forEach((t) => (t.amt = t.amt.replace(/\d$/, (d) => String((Number(d) + 1) % 10)))));
