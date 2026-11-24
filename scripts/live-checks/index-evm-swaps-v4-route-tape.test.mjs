@@ -6,13 +6,17 @@
 // 65 against 53 over 12,000, read 21 Nov 23:4xZ), or with none at all, judges no coin (INCONCLUSIVE); a run that judged
 // another coin than the scan picks, a tape from the vendor, or a tape short of one of the pool's swaps: each FAIL. The scan's reads go through provider-answer.mjs: a provider's 429 is left out while
 // two others answer alike, and a scan every provider throttles judges nothing (INCONCLUSIVE), never FAIL.
+// burst_run_45360090006: live run 45360090006's scan of Base WBTC, its WBTC/NVDAc v4 pool the busiest over 5 minutes
+// of one bot's arbitrages, with burst_day, GeckoTerminal's 24 h list of WBTC's pools read 51 minutes later by the check's
+// dayOf: that pool not its clear main pool, so WBTC is not judged (INCONCLUSIVE by name); as recorded, before the day was
+// read, it was judged and failed. Made from it: the same scan whose pool leads the day is judged, its missing swaps FAIL.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { TOPIC, VENUES } from "../../apps/helper/src/data/evm/swaps.ts";
-import { candidates, DOMINANCE, judge, pick, read, scan, unpriced } from "./index-evm-swaps-v4-route-tape.mjs";
+import { candidates, DOMINANCE, GT, judge, leadsDay, pick, read, scan, unpriced } from "./index-evm-swaps-v4-route-tape.mjs";
 import { RETRY } from "./provider-answer.mjs";
 
 RETRY.ms = 0;
@@ -159,4 +163,76 @@ test("the scan reads a quote's market by its Transfers: a counterparty whose fac
   assert.deepEqual(s.markets[QUOTE], { pool: PARTY, venue: V3 });
   const none = await scan(chain([]), RPCS);
   assert.equal(none.markets[QUOTE], null);
+});
+
+const BURST = A.burst_run_45360090006;
+const WBTC = "0x0555e30da8f98308edb960aa94c0db47230d2b9c";
+const NVDA_POOL = "0xc6406d4628b7a4657f28fad1bb4ac04d618766e3ace0080f8cf86cd1f9f32d5e";
+const withDay = (run, day) => ({ ...copy(run), scan: { ...copy(run.scan), day: copy(day) } });
+
+test("burst_run_45360090006: as recorded (no day read) it judged WBTC's WBTC/NVDAc pool and failed; with GeckoTerminal's day the pool is not WBTC's clear main pool: not judged, INCONCLUSIVE by name", () => {
+  assert.deepEqual(pick(BURST.scan), { coin: WBTC, pool: NVDA_POOL });
+  const was = judge(BURST);
+  assert.equal(was.verdict, "FAIL", was.lines.join("\n"));
+  assert.ok(was.lines.some((l) => /^BAD 4 of 13 swap transactions of the coin's busiest pool 0xc6406d46/.test(l)), was.lines.join("\n"));
+  const r = withDay(BURST, A.burst_day.day);
+  assert.equal(pick(r.scan), null);
+  const v = judge(r);
+  assert.equal(v.verdict, "INCONCLUSIVE", v.lines.join("\n"));
+  assert.ok(v.lines.some((l) => l === `-- ${WBTC}: its pool 0xc6406d46 (13 swaps in the scan) is not its clear main pool over the day on GeckoTerminal: 663 transactions in 24 h, 0xd960b78f 1215: not judged`), v.lines.join("\n"));
+});
+
+test("the day never hides a miss: the burst scan whose pool leads the day by DOMINANCE is judged, its 4 missing swaps FAIL; a day not read judges no coin", () => {
+  const day = copy(A.burst_day.day);
+  const top = Math.max(...Object.entries(day[WBTC]).filter(([id]) => id !== NVDA_POOL).map(([, n]) => n));
+  day[WBTC][NVDA_POOL] = top * DOMINANCE;
+  const r = withDay(BURST, day);
+  assert.deepEqual(pick(r.scan), { coin: WBTC, pool: NVDA_POOL });
+  const v = judge(r);
+  assert.equal(v.verdict, "FAIL", v.lines.join("\n"));
+  assert.ok(v.lines.some((l) => /^ok  the coin .*; 2430 transactions in 24 h on GeckoTerminal/.test(l)), v.lines.join("\n"));
+  const unread = withDay(BURST, { [WBTC]: null });
+  const u = judge(unread);
+  assert.equal(u.verdict, "INCONCLUSIVE", u.lines.join("\n"));
+  assert.ok(u.lines.includes(`-- ${WBTC}: GeckoTerminal's list of its pools not read: not judged`), u.lines.join("\n"));
+});
+
+test("leadsDay: the pool at DOMINANCE times every other pool's 24 h transactions leads; under it, unlisted, none, or a list not read does not", () => {
+  const P = "0xaa", Q = "0xbb";
+  assert.equal(leadsDay({ [P]: 2 * DOMINANCE, [Q]: 2 }, P), true);
+  assert.equal(leadsDay({ [P]: 2 * DOMINANCE - 1, [Q]: 2 }, P), false);
+  assert.equal(leadsDay({ [P]: 5 }, P), true);
+  assert.equal(leadsDay({ [Q]: 5 }, P), false);
+  assert.equal(leadsDay({ [P]: 0 }, P), false);
+  assert.equal(leadsDay(null, P), false);
+});
+
+test("the scan reads the day of each coin it would judge, by GeckoTerminal's pool ids (a v4 pool's 32 bytes); a 429 there is no day, and no coin is judged", async () => {
+  const PARTY = `0x${"33".repeat(20)}`;
+  const V3 = VENUES.base.v3[0];
+  const asked = [];
+  const rig = (gt) => async (url, o) => {
+    if (url.startsWith(GT)) return asked.push(url), gt();
+    const b = JSON.parse(o.body);
+    const one = (q) => {
+      const p = q.params[0];
+      if (q.method === "eth_getLogs" && p.address === QUOTE) return { jsonrpc: "2.0", id: q.id, result: [{ topics: [TOPIC.transfer, `0x${w(PARTY)}`, `0x${w(`0x${"44".repeat(20)}`)}`] }] };
+      if (q.method === "eth_call" && p.to === PARTY) return { jsonrpc: "2.0", id: q.id, result: `0x${w({ "0xc45a0155": V3, "0x0dfe1681": VENUES.base.usd, "0xd21220a7": QUOTE }[p.data])}` };
+      return null;
+    };
+    const mine = [b].flat().map(one);
+    if (mine.every((x) => x === null)) return chain([])(url, o);
+    const rest = mine.some((x) => x === null) ? JSON.parse(await (await chain([])(url, { ...o, body: JSON.stringify([b].flat()) })).text()) : [];
+    const out = mine.map((x, i) => x ?? rest[i]);
+    return new Response(JSON.stringify(Array.isArray(b) ? out : out[0]), { status: 200 });
+  };
+  const list = { data: [{ attributes: { address: POOL.toUpperCase().replace("0X", "0x"), transactions: { h24: { buys: 30, sells: 12 } } } }, { attributes: { address: PARTY, transactions: { h24: { buys: 4, sells: 1 } } } }] };
+  const s = await scan(rig(() => new Response(JSON.stringify(list), { status: 200 })), RPCS);
+  assert.equal(s.unread, undefined, s.unread);
+  assert.deepEqual(asked, [`${GT}/tokens/${COIN}/pools?page=1`]);
+  assert.deepEqual(s.day, { [COIN]: { [POOL]: 42, [PARTY]: 5 } });
+  assert.deepEqual(pick(s), { coin: COIN, pool: POOL });
+  const t = await scan(rig(() => new Response("Too Many Requests", { status: 429 })), RPCS);
+  assert.deepEqual(t.day, { [COIN]: null });
+  assert.equal(pick(t), null);
 });
