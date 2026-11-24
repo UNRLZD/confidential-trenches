@@ -13,6 +13,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { verdictOf } from "../ci/live-rerun.mjs";
+import { nothingToJudge } from "./provider-answer.mjs";
 import { judge, read, REOPEN_AFTER_MS, spanOf, SPREAD_MS } from "./robinhood-spread-tapes-fill-inside-45s.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -48,11 +50,44 @@ test("the recorded bad answer (the deployed helper before this card) fails: the 
   assert.ok(bad(r).some((l) => /0 spread coin\(s\) filled/.test(l)));
 });
 
-test("a run of busy coins alone proves nothing: a tape that fills fast but whose 50 trades span under 2 h is no spread coin, FAIL", () => {
+test("a run of busy coins alone proves nothing: a tape that fills fast but whose 50 trades span under 2 h is no spread coin, so no spread line passes; this run FAILs on its missing reopen", () => {
   const r = judge(A.bad_busy_only);
   assert.equal(r.ok, false);
-  assert.deepEqual(bad(r), ["BAD 0 spread coin(s) filled inside 45000 ms (50 trades over 2 h or more)", "BAD no reopen read past 75000 ms"]);
+  assert.equal(r.quiet, false);
+  assert.deepEqual(bad(r), ["BAD no reopen read past 75000 ms"]);
+  assert.ok(r.lines.includes("--  no spread coin listed: all 1 tape(s) settled inside 45000 ms, none with 50 trades over 2 h or more (a busy market): nothing to judge"), r.lines.join("\n"));
   assert.match(r.lines[1], /^ok {2}trades .*: filled 4479 ms .*, 50 trades over 0\.2 h$/);
+});
+
+// card spread-check-quiet-market-inconclusive: the helper live run 45401968651 (24 Nov 13:3xZ) read Robinhood's 12 listed
+// coins, each filled inside 18.4 s (eleven inside 7.8 s) and each reopened whole at once with its newest trade held, all
+// busy (50 trades over 0.0 to 0.8 h), and FAILed on "0 spread coin(s) filled": a busy market says nothing of the deploy.
+// Every tape settled and none spread is now INCONCLUSIVE, nothing to judge; a tape that did not settle keeps the old FAIL.
+test("every listed tape settled and reopened whole, none spread (the live run 45401968651's busy market): INCONCLUSIVE nothing to judge, the live run's inconclusive; a tape still filling, a reopen read from nothing, or a spread coin among them is judged as before (red at ece05a0b9: FAIL)", () => {
+  const busy = (f = () => {}) => {
+    const run = structuredClone(A.good);
+    const a0 = run.answers[0];
+    delete run.address;
+    run.lists = { status: 200, ms: 10, tokens: 2 };
+    run.answers = [0, 1].map((i) => ({ ...structuredClone(a0), address: `0x${String(i + 1).repeat(40)}`, span_ms: 0.4 * 3_600_000 }));
+    run.reopen = run.answers.map((a) => ({ ...structuredClone(A.good.reopen[0]), address: a.address }));
+    f(run);
+    return judge(run);
+  };
+  const quiet = busy();
+  assert.equal(quiet.ok, false, quiet.lines.join("\n"));
+  assert.equal(quiet.quiet, true, quiet.lines.join("\n"));
+  assert.deepEqual(bad(quiet), []);
+  const v = nothingToJudge("robinhood-spread-tapes-fill-inside-45s", A.good.base);
+  assert.equal(verdictOf("robinhood-spread-tapes-fill-inside-45s", v.code, v.line), "inconclusive");
+  // judged as before: a tape still filling past 45 s (its span not known), a reopen read from nothing, a spread coin
+  const filling = busy((r) => (r.answers[1].filled = { ...r.answers[1].filled, filling: true, ms: 45_100 }));
+  assert.equal(filling.quiet, false);
+  assert.ok(bad(filling).includes("BAD 0 spread coin(s) filled inside 45000 ms (50 trades over 2 h or more)"), filling.lines.join("\n"));
+  const reread = busy((r) => Object.assign(r.reopen[0], { filling: true, filled: { status: 200, filling: false, shape: "tape", ms: 3_000, reads: 2 } }));
+  assert.deepEqual([reread.ok, reread.quiet], [false, false], reread.lines.join("\n"));
+  const spread = busy((r) => (r.answers[0].span_ms = SPREAD_MS));
+  assert.deepEqual([spread.ok, spread.quiet], [true, false], spread.lines.join("\n"));
 });
 
 test("planted faults fail: a list not read, a tape 503, a spread coin short of 50 trades, a fill past 45 s", () => {

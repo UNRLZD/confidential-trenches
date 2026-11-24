@@ -19,10 +19,14 @@
 // After: helper
 // Serial: evm-keyed 135 (after a Solana check: the listed Robinhood tapes it opens at once draw the keyed Robinhood providers)
 //   node scripts/live-checks/robinhood-spread-tapes-fill-inside-45s.mjs [--base <url>] [--address <a>] [--record <file>]
-//   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
+// When every tape read settles inside FILLED_MS and passes its reopen but none is a spread coin (a busy market), the run
+// is INCONCLUSIVE, nothing to judge (provider-answer.mjs nothingToJudge), never a FAIL: no spread coin was there to time.
+//   PASS exit 0, FAIL exit 1, error exit 2 (and nothing to judge). --record writes what the run read, so the check's test
+//   can replay it.
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
 import { tokensOf } from "./helper-robinhood-capacity.mjs";
+import { nothingToJudge } from "./provider-answer.mjs";
 import { FILLED_MS, fillingOf, filledVerdict, readFilled } from "./tape-read.mjs";
 
 const KEY = "robinhood-spread-tapes-fill-inside-45s";
@@ -154,6 +158,7 @@ export function judge(run) {
   if (run.address === undefined) say(run.lists?.status === 200 && n >= 1 && n === run.lists.tokens, `GET /v1/market/lists?chain=robinhood answers ${run.lists?.status}, ${n} listed tokens read`);
   else say(n === 1 && run.answers[0].address === run.address, `${run.address} read alone`);
   let spread = 0;
+  let settled = 0;
   for (const a of run.answers ?? []) {
     const ok = a.status === 200 && a.shape === "tape";
     const hours = a.span_ms == null ? "" : `, ${a.n} trades over ${(a.span_ms / 3_600_000).toFixed(1)} h`;
@@ -163,9 +168,14 @@ export function judge(run) {
     }
     const v = a.filling === true ? filledVerdict(a.filled) : { ok: true, text: `answered whole in ${a.ms} ms` };
     say(v.ok, `trades ${a.address}: ${v.text}${hours}`);
+    if (v.ok) settled++;
     if (v.ok && a.n === TRADES && a.span_ms >= SPREAD_MS) spread++;
   }
-  say(spread > 0, `${spread} spread coin(s) filled inside ${FILLED_MS} ms (${TRADES} trades over ${SPREAD_MS / 3_600_000} h or more)`);
+  // every tape read settled inside FILLED_MS and none is a spread coin: a busy market, which says nothing of a spread
+  // coin's fill (card spread-check-quiet-market-inconclusive, live run 45401968651: 12 busy coins, each settled, FAIL)
+  const busy = spread === 0 && n >= 1 && settled === n;
+  if (busy) lines.push(`--  no spread coin listed: all ${n} tape(s) settled inside ${FILLED_MS} ms, none with ${TRADES} trades over ${SPREAD_MS / 3_600_000} h or more (a busy market): nothing to judge`);
+  else say(spread > 0, `${spread} spread coin(s) filled inside ${FILLED_MS} ms (${TRADES} trades over ${SPREAD_MS / 3_600_000} h or more)`);
   // every tape that settled is read again past the helper's IDLE_MS: it fills inside FILLED_MS and still holds its newest
   // trade of before (a run with no second pass proves nothing of a reopen)
   const whole = (run.answers ?? []).filter((a) => a.status === 200 && a.shape === "tape" && (a.filling !== true || a.filled?.filling === false) && a.n > 0);
@@ -182,7 +192,8 @@ export function judge(run) {
       say(r.filling !== true && r.kept === true, `reopen ${r.address}: ${text}, ${r.n ?? 0} trades${r.kept === true ? ", its newest of before held" : ", its newest of before NOT held"}`);
     }
   }
-  return { ok: lines.every((l) => l.startsWith("ok ")), lines };
+  // quiet: nothing failed, and the one thing the check is for had no coin to judge
+  return { ok: lines.every((l) => l.startsWith("ok ")), quiet: busy && !lines.some((l) => l.startsWith("BAD")), lines };
 }
 
 if (import.meta.main) {
@@ -191,8 +202,13 @@ if (import.meta.main) {
   try {
     const run = await read(opt("--base", BASE), fetch, { address: opt("--address") });
     if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify(run, null, 1)}\n`);
-    const { ok, lines } = judge(run);
+    const { ok, quiet, lines } = judge(run);
     for (const l of lines) console.log(l);
+    if (quiet) {
+      const v = nothingToJudge(KEY, run.base);
+      console.log(v.line);
+      process.exit(v.code);
+    }
     console.log(`live-check ${KEY}: ${ok ? "PASS" : "FAIL"} (${run.base})`);
     process.exit(ok ? 0 : 1);
   } catch (e) {
