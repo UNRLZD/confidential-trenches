@@ -125,11 +125,24 @@ test("red control: the same files under the package's flags with node's own repo
 
 test("a file's count short of its own summary is refused; a whole report passes; a run with no summary is refused", () => {
   const ev = (type, file, extra = {}) => ({ type, data: { file, ...extra } });
-  const whole = [ev("test:pass", "/a", { details: { type: "test" } }), ev("test:pass", "/a", { details: { type: "test" } }), ev("test:pass", "/a", { details: { type: "suite" } }), ev("test:summary", "/a", { counts: { tests: 2 } }), ev("test:summary", undefined, { counts: { tests: 2 } })];
+  const whole = [ev("test:pass", "/a", { entry: true, details: { type: "test" } }), ev("test:pass", "/a", { entry: true, details: { type: "test" } }), ev("test:pass", "/a", { entry: true, details: { type: "suite" } }), ev("test:summary", "/a", { counts: { tests: 2 } }), ev("test:summary", undefined, { counts: { tests: 2 } })];
   assert.deepEqual(shortFiles(["/a"], whole), []);
   assert.deepEqual(shortFiles(["/a"], whole.slice(1)), ["/a: 1 of its 2 tests reported"]);
   assert.deepEqual(shortFiles(["/a", "/b"], whole), ["/b: reported no result (its process sent no summary)"]);
   assert.deepEqual(shortFiles(["/a"], whole.slice(0, -1)), ["the run sent no summary"]);
+});
+
+test("a Node whose test events name no entryFile (v24.12.0): a file that runs another's tests passes, a lost test or summary is still refused", () => {
+  const ev = (type, file, extra = {}) => ({ type, data: { file, ...extra } });
+  // /uses runs /a's two tests: each names /a, where it is written; each file's summary counts its own run
+  const run = [...[1, 2, 3, 4].map(() => ev("test:pass", "/a", { entry: false, details: { type: "test" } })), ev("test:summary", "/a", { counts: { tests: 2 } }), ev("test:summary", "/uses", { counts: { tests: 2 } }), ev("test:summary", undefined, { counts: { tests: 4 } })];
+  assert.deepEqual(shortFiles(["/a", "/uses"], run), []);
+  assert.deepEqual(shortFiles(["/a", "/uses"], run.slice(1)), ["3 of the files' 4 tests reported (this Node names no entryFile, so the files are counted together)"]);
+  assert.deepEqual(shortFiles(["/a", "/uses"], run.filter((e) => e.data.file !== "/uses" || e.type !== "test:summary")), ["/uses: reported no result (its process sent no summary)", "4 of the files' 2 tests reported (this Node names no entryFile, so the files are counted together)"]);
+  // the same run on a Node with entryFile counts each file by itself
+  const named = run.map((e, i) => (e.type === "test:pass" ? ev("test:pass", i < 2 ? "/a" : "/uses", { entry: true, details: { type: "test" } }) : e));
+  assert.deepEqual(shortFiles(["/a", "/uses"], named), []);
+  assert.deepEqual(shortFiles(["/a", "/uses"], named.slice(1)), ["/a: 1 of its 2 tests reported"]);
 });
 
 test("the files named are the runner's arguments, globs expanded, flags and node_modules left out", () => {

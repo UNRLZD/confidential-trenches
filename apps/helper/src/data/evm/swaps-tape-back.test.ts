@@ -45,7 +45,17 @@ function rig(p: Fx & { fee?: number }, getPool: string, head: number, at: number
   const asked: number[] = [];
   // every eth_getLogs asked of any provider: its filter's address, second topic (a v4 pool's id) and first block
   const reads: { address: string; id: string | null; from: number }[] = [];
+  const live = { out: 0, sent: 0 };
   const fetch = async (url: string, init: RequestInit): Promise<Response> => {
+    live.out++;
+    live.sent++;
+    try {
+      return await answer(url, init);
+    } finally {
+      live.out--;
+    }
+  };
+  const answer = async (url: string, init: RequestInit): Promise<Response> => {
     const reqs = JSON.parse(String(init.body)) as { id: number; method: string; params: unknown[] }[];
     const mine = reqs.map((r): object | undefined => {
       if (r.method === "eth_call") {
@@ -73,13 +83,29 @@ function rig(p: Fx & { fee?: number }, getPool: string, head: number, at: number
     return new Response(JSON.stringify(out), { status: 200, headers: { "content-type": "application/json" } });
   };
   const s = B.open(chain, clock, { fetch: fetch as never, pools: new Map(), hint: async () => p.pool });
+  posts.set(s, live);
   return { s, asked, reads };
 }
-/** Ticks, each followed by the read back it starts settling (its own background read, never the tick's wait). */
+/** Each rig's posts to its providers: `out` sent and unanswered, `sent` ever sent. */
+const posts = new WeakMap<object, { out: number; sent: number }>();
+/** A read back is settled once no post is out and none is sent for this many 5 ms looks in a row. */
+const QUIET_LOOKS = 20;
+/** Ticks, each followed by the read back it starts settling (its own background read, never the tick's wait): 200 ms,
+ *  then until no post is out and none is sent for QUIET_LOOKS looks, so its end is the read back's own, not a time. A
+ *  fixed 200 ms alone ended before it on a loaded machine: each answer 60 ms late failed this file (card
+ *  readme-run-fits-an-agent-timeout: the README's fresh run on GitHub's 4-core runner, 23 Nov 21:39Z). The bound is a
+ *  hang bound only: a read back that never settles fails the test's own assert. */
 const ticks = async (s: ReturnType<typeof B.open>, n: number) => {
+  const live = posts.get(s)!;
+  const look = () => new Promise((ok) => setTimeout(ok, 5));
   for (let i = 0; i < n; i++) {
     await s.tick();
-    for (let k = 0; k < 40; k++) await new Promise((ok) => setTimeout(ok, 5));
+    for (let k = 0; k < 40; k++) await look();
+    let [quiet, seen] = [0, live.sent];
+    for (const end = performance.now() + 60_000; quiet < QUIET_LOOKS && performance.now() < end; ) {
+      await look();
+      [quiet, seen] = live.out === 0 && live.sent === seen ? [quiet + 1, seen] : [0, live.sent];
+    }
   }
 };
 /** The tape's reach (whole_ms, card token-stats-count-every-trade), or undefined when it claims none. */
