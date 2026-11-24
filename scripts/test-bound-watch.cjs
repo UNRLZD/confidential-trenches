@@ -7,6 +7,17 @@
 const { isMainThread, Worker } = require("node:worker_threads");
 const { DEADLINE_GRACE_MS, FILE_MS, RUN_MS } = require("./test-bound.mjs");
 
+// Card readme-run-fits-an-agent-timeout: node's own compile cache, in the run's process, each file's and every node
+// process a test starts (they inherit NODE_COMPILE_CACHE). A run is about 700 file processes, each compiling and
+// type-stripping the modules the others did (read on node 24.22.3: a small helper file 0.46 CPU-s without the cache, 0.20
+// with it warm). Node keys each entry by the module's source and its own version, so a changed file is compiled again. A
+// cache the caller names is kept, and NODE_DISABLE_COMPILE_CACHE turns it off, as node documents
+// (scripts/ci/test-compile-cache.test.mjs).
+if (process.env.NODE_COMPILE_CACHE === undefined && process.env.NODE_DISABLE_COMPILE_CACHE === undefined) {
+  process.env.NODE_COMPILE_CACHE = require("node:path").join(__dirname, "..", "node_modules", ".cache", "node-compile-cache");
+  require("node:module").enableCompileCache?.(process.env.NODE_COMPILE_CACHE);
+}
+
 // TEST_BOUND_FILE_MS and TEST_BOUND_RUN_MS may only lower a bound, so the planted hangs of scripts/ci/test-bound.test.mjs
 // end in seconds; a value that is not a lower whole number of ms is ignored
 const lower = (name, ms) => {
