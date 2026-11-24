@@ -1857,8 +1857,9 @@ function keyInto(k: string, b: Buffer, o: number): void {
 const TO = JSON.parse(readFileSync(path.join(HERE, "fixtures/sol-tape-order.json"), "utf8")) as { txs: Record<string, { signature: string; result: Record<string, unknown> & { slot: number; blockTime: number; meta: { logMessages: string[] } } }>; pools: Record<string, { owner: string; data: string }> };
 const TO_SLOT = 471007315;
 const TO_BLOCK = 1795020581;
-function orderChain(opts: { sigs?: (p: Record<string, unknown>) => unknown[]; txs?: Record<string, unknown>; blockTimes?: Record<number, number>; noHistory?: boolean } = {}) {
+function orderChain(opts: { sigs?: (p: Record<string, unknown>) => unknown[]; txs?: Record<string, unknown>; blockTimes?: Record<number, number>; noHistory?: boolean; pools?: Record<string, { owner: string; data: string }> } = {}) {
   const txs = { ...Object.fromEntries(Object.values(TO.txs).map((x) => [x.signature, x.result])), ...opts.txs };
+  const pools = { ...TO.pools, ...opts.pools };
   const reads: string[] = [];
   let nowMs = (TO_BLOCK + 2) * 1000; // the stream's note arrives 2 s after its block, as measured from the helper
   const inner = rpcFetch({ sigs: opts.sigs ?? (() => []), txs, price: 9_342_267_796n, pub: TO_BLOCK, slot: 100 }, { [TTW_MINT]: 6 });
@@ -1869,7 +1870,7 @@ function orderChain(opts: { sigs?: (p: Record<string, unknown>) => unknown[]; tx
       const t = opts.blockTimes?.[req.params[0] as number];
       return new Response(JSON.stringify(t === undefined ? { jsonrpc: "2.0", id: 1, error: { code: -32009, message: "slot skipped" } } : { jsonrpc: "2.0", id: 1, result: t }));
     }
-    const p = TO.pools[req.params[0] as string];
+    const p = pools[req.params[0] as string];
     if (req.method === "getAccountInfo" && p !== undefined) return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { context: { slot: 100 }, value: { owner: p.owner, data: [p.data, "base64"] } } }));
     // any other account: no such account (the routes' PumpSwap pools are recorded: a pool answered with none leaves its
     // transaction unread, card sol-tape-pool-unread-never-kept)
@@ -1956,6 +1957,64 @@ test("card sol-tape-in-order: a read back's transaction answered with no block t
   // (1.158187 USD, the stream test's rows); misdated by the read's minute, the read back's bar fell after ours and was
   // not joined: 1.010003 alone
   assert.deepEqual(bars.candles.map((b) => [b[0], b[5]]), [[TO_BLOCK - (TO_BLOCK % 60), "2.16819"]], "both trades in their block's minute");
+});
+
+// card sol-tape-every-quote: one coin traded in two quotes, both recorded mainnet: TTW's DLMM pool against SOL
+// (E8NTyKJz, sol-meteora-txs.json) and its Orca and DLMM pools against USDC (sol-tape-order.json). A book is priced in one
+// quote, its first trade's; before this card a trade in any other quote was dropped from the tape and the bars, on the
+// stream and on the read back alike (live run 45414685788, 24 Nov 14:34Z: KMNo3nJs's book in USDC, its four SOL pools,
+// its JitoSOL and its jupSOL pools about 8,900 of its 37,000 trades a day, and the run's DLMM sell ab7svd3QgKRu of its
+// SOL pool not in its 50 rows). A trade in another quote is turned into the book's at each quote's USD price in force.
+// Every recorded Meteora pool is served (the DLMM buy's route also holds a PumpSwap hop, Drh3ZH4K: answered with no
+// account, its transaction would be unread).
+
+test("card sol-tape-every-quote: a stream trade in a quote its book is not priced in (TTW's book in SOL from its DLMM SOL pool, then its Orca USDC buy) reaches the tape at its own USD value, never dropped (red at dc876a2c2: the Orca row missing)", async () => {
+  const buy = MT.txs["dlmm-buy"]!;
+  const orca = TO.txs["orca-older"]!;
+  const c = orderChain({ txs: { [buy.signature]: buy.result }, pools: MT.pools });
+  await c.t.trades(TTW_MINT, 50);
+  // 0.8 SOL for 0.276952 TTW: the book's first trade, so the book is priced in SOL
+  c.on().note(TTW_MINT, { sig: buy.signature, slot: buy.result.slot, err: false, logs: buy.result.meta.logMessages });
+  await settle();
+  c.on().clock?.(TO_SLOT, TO_BLOCK);
+  c.stream("orca-older");
+  await settle();
+  const rows = (JSON.parse((await c.t.trades(TTW_MINT, 50)).body) as { trades: { usd: string; amt: string; tx: string }[] }).trades;
+  c.t.stop();
+  assert.deepEqual(rows.map((r) => r.tx), [orca.signature, buy.signature], "both trades on the tape, newest first");
+  assert.equal(rows[1]!.usd, "74.738142368", "the SOL trade as before");
+  // the Orca buy: 1.158187 USDC (the stream test's row), turned into SOL at 93.42267796 USD and priced back at it
+  const q = fromLogs(orca.result.meta.logMessages).trades[0]!.quote;
+  assert.equal(q, 1_158_187n, "the recorded Orca buy paid 1.158187 USDC");
+  assert.ok(Math.abs(Number(rows[0]!.usd) - 1.158187) < 1e-6, `the Orca row at its USD value: ${rows[0]!.usd}`);
+});
+
+test("card sol-tape-every-quote: a read back's trade in a quote its book is not priced in joins the bars at its USD value, never dropped (red at dc876a2c2: the bar held the walk's USDC trade alone, 1.010003)", async () => {
+  const dlmm = TO.txs["dlmm-newer"]!;
+  const buy = MT.txs["dlmm-buy"]!;
+  // the walk holds the DLMM USDC sell (the book in USDC); the read back before its quiet page finds the DLMM SOL buy, in
+  // the same block as the walk's for one bar
+  const older = noTrades(COLD_SIGS - 1, TO_SLOT + 1, "quiet");
+  const oldest = older.list.at(-1)!.signature;
+  const c = orderChain({
+    sigs: (p) => (p.before === undefined ? [{ signature: dlmm.signature, slot: TO_SLOT, err: null, blockTime: TO_BLOCK }, ...older.list.map((x) => ({ ...x, slot: TO_SLOT, blockTime: TO_BLOCK }))] : p.before === oldest ? [{ signature: buy.signature, slot: TO_SLOT, err: null, blockTime: TO_BLOCK }] : []),
+    txs: { [buy.signature]: { ...buy.result, slot: TO_SLOT, blockTime: TO_BLOCK }, ...Object.fromEntries(Object.entries(older.txs).map(([k, v]) => [k, { ...v, slot: TO_SLOT }])) },
+    blockTimes: { [TO_SLOT]: TO_BLOCK },
+    pools: MT.pools,
+    noHistory: true,
+  });
+  c.at((TO_BLOCK + 90) * 1000);
+  c.on().clock?.(TO_SLOT + 300, TO_BLOCK + 90);
+  let bars = JSON.parse((await c.t.candles(TTW_MINT, "1m", null, 500)).body) as { candles: [number, ...string[]][]; filling?: boolean };
+  for (let i = 0; i < 100 && bars.filling === true; i++) {
+    await settle();
+    bars = JSON.parse((await c.t.candles(TTW_MINT, "1m", null, 500)).body);
+  }
+  c.t.stop();
+  assert.equal(bars.filling, undefined, "read back");
+  // one bar: the walk's DLMM sell (1.010003 USD) and the read back's 0.8 SOL buy at 93.42267796 USD, turned into
+  // 74.738142 USDC (the book's 6 decimals)
+  assert.deepEqual(bars.candles.map((b) => [b[0], b[5]]), [[TO_BLOCK - (TO_BLOCK % 60), "75.748145"]], "both trades in the block's bar");
 });
 
 test("card sol-tape-in-order: the stream subscribes the Clock sysvar at confirmed and passes on each slot's clock, taken only whole: the sysvar program as owner, 40 bytes, the slot its context's", () => {
