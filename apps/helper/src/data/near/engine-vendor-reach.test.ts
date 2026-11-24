@@ -115,3 +115,51 @@ test("a NEAR engine tape keeps its claim through a normal renewal: the held rows
   assert.equal(during.as_of_ms, read0, "the held rows serve while the renewal runs");
   assert.notEqual(during.whole_ms, undefined, "a renewal running is no reason to drop the claim");
 });
+
+test("card near-token-page-never-older-than-the-bound: a token page, its holders and its bars held past NEAR_VENDOR_REACH_MS never answer while the engine answers; inside it they serve while the renewal runs; with the engine down the held ones serve, dated by their read (red at 4ab96833b: served at any age)", async () => {
+  // live run 45366477087 (helper 30d3b63e0, 24 Nov 09:35:22Z): helper-near-lists-and-token read the token page of
+  // aaaaaa20….factory.bridge.near with X-Fetched-At 09:14:40.271Z, 21 min old, while its holders and trades came read
+  // that second: the page's token read served its held answer at any age while the renewal ran, as holders and bars did
+  const clock = { t: Date.UTC(2026, 10, 14, 3, 53) };
+  const engine = { up: true, asked: 0 };
+  const fetch = async (url: string): Promise<Response> => {
+    const path = url.slice(ENGINE.length);
+    engine.asked++;
+    if (!engine.up) return new Response("bad gateway", { status: 502 });
+    if (path === `/token/${T}`) return new Response(fx("token"), { status: 200 });
+    if (path === `/token/${T}/holders`) return new Response(fx("holders"), { status: 200 });
+    if (path.startsWith(`/token/${T}/candles?`)) return new Response(fx("candles"), { status: 200 });
+    return new Response('{"error":"not found"}', { status: 404 });
+  };
+  const near = engineFirst(rhea, createEngineNear({ fetch: fetch as never, now: () => clock.t }));
+  // X-Fetched-At is each answer's asOfMs (server.ts)
+  const fetchedAt = async (): Promise<number[]> => {
+    const all = [await near.token.page(T), await near.token.holders(T), await near.trades.candles(T, "1m", null, 4)];
+    await new Promise((r) => setImmediate(r)); // a renewal started by these asks lands before the next
+    return all.map((a, i) => {
+      assert.equal(a.status, 200, `${["page", "holders", "candles"][i]}: ${a.body}`);
+      return (a as { asOfMs?: number }).asOfMs ?? -1;
+    });
+  };
+  const read0 = clock.t;
+  assert.deepEqual(await fetchedAt(), [read0, read0, read0]);
+  // inside the bound the held answers serve while their renewal runs
+  clock.t = read0 + NEAR_VENDOR_REACH_MS;
+  assert.deepEqual(await fetchedAt(), [read0, read0, read0], "at NEAR_VENDOR_REACH_MS the held answers still serve");
+  const read1 = clock.t;
+  // 21 minutes on, as live: each ask waits for its renewal and is answered it
+  clock.t = read1 + 21 * 60_000;
+  const read2 = clock.t;
+  assert.deepEqual(await fetchedAt(), [read2, read2, read2], "past NEAR_VENDOR_REACH_MS a held answer never serves while the engine answers");
+  for (const gap of [NEAR_VENDOR_REACH_MS + 1, 57_000]) {
+    clock.t += gap;
+    assert.deepEqual(await fetchedAt(), [clock.t, clock.t, clock.t], `${gap} ms on: renewed`);
+  }
+  // the engine down: the held answers serve, their age named by their read, never refused
+  const held = clock.t;
+  engine.up = false;
+  clock.t = held + 21 * 60_000;
+  const asked = engine.asked;
+  assert.deepEqual(await fetchedAt(), [held, held, held]);
+  assert.ok(engine.asked > asked, "each was asked again first");
+});
