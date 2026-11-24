@@ -16,7 +16,7 @@ import {
   e2ePart, e2eParts, listedSeconds, mutantCommands, mutantParts, mutantsPart, packageItems, packageKey, packageParts, packagesPart, runPart, selectedPackages, staleWarning,
   testFilters, typecheckArgs, unnamedMutantFiles, MAX_SWEEP_SECONDS, MUTANT_SECONDS, NEW_PACKAGE_SECONDS, NEW_SWEEP_SECONDS, PACKAGE_PART_BUDGET_SECONDS,
   PACKAGE_SECONDS, PART_BUDGET_SECONDS, STALE_FACTOR, E2E_DIR, E2E_FIXED_SECONDS, E2E_PROVER_SECONDS, E2E_SECONDS, NEW_E2E_SECONDS,
-  E2E_RERUN_BUDGET_S, helperLiveKey, ownHelperRoutes, runE2ePart, runBounded, boundOf, stoppedCode, E2E_BOUND, E2E_BUILD_BOUND_S,
+  E2E_RERUN_BUDGET_S, helperLiveKey, ownHelperRoutes, runE2ePart, runBounded, boundOf, stoppedCode, E2E_BOUND, E2E_BUILD_BOUND_S, sweepKey,
 } from "./test-shards.mjs";
 import { RERUN, pauseMs } from "./live-rerun.mjs";
 
@@ -962,7 +962,8 @@ test("the reruns and one bounded stall stay inside test-browser's timeout", () =
   const minutes = Number(/\n {2}test-browser:\n(?:.*\n)*? {4}timeout-minutes:\s*(\d+)\s*\n/.exec(CI)?.[1]);
   const helperBound = Math.max(...e2eCommands().filter((c) => helperLiveKey(c.command)).map((c) => boundOf(c)));
   const lastPause = Math.min(RERUN.capMs, RERUN.baseMs * 2 ** (RERUN.runs - 2)) / 1000;
-  // a rerun starts only inside the budget, and runs at most its bound after its last pause
+  // a rerun starts only while the part's clock and the commands listed after it fit the budget, and runs at most its
+  // bound after its last pause: the part ends inside this sum, whichever command the rerun is
   assert.ok(E2E_RERUN_BUDGET_S + lastPause + helperBound + E2E_FIXED_SECONDS + E2E_PROVER_SECONDS <= minutes * 60, `${E2E_RERUN_BUDGET_S} + ${lastPause} + ${helperBound} + ${E2E_FIXED_SECONDS} + ${E2E_PROVER_SECONDS} > ${minutes * 60}`);
   for (const [i, p] of e2eParts(E2E, 4).entries()) {
     // every part's plan fits inside the budget, so a first run is never cut by it
@@ -1015,6 +1016,28 @@ test("an INCONCLUSIVE past the part's budget is not run again; three INCONCLUSIV
   await runE2ePart([TRADE_BOX], ROOT, (l) => all.push(l), { run: async () => (m++, { code: 3, output: "" }), sleep: async () => {}, read: readLive, seconds: E2E_SECONDS });
   assert.equal(m, RERUN.runs);
   assert.ok(all.some((l) => l.startsWith("::notice title=inconclusive app-trade-box-mount::")));
+});
+
+// card ci-browser-reruns-leave-room-for-the-rest: merge queue group 45414570078 (PR 1260), test-browser (2) job
+// 138517282883 started app-chart-live 164 s into its part at 14:32:52Z; each of its three runs ended INCONCLUSIVE after
+// about 192 s (its 140 s watch, no bar moved), the third starting 621 s in, inside the 720 s budget, and the commands
+// listed after it were cut at the job's 20 minutes at 14:49:26Z. A pass of it takes 41-69 s (52 listed): the listing
+// was right; the budget counted the part's clock alone, never what was still to run after the rerun.
+test("card ci-browser-reruns-leave-room-for-the-rest: a rerun starts only while the part's clock and the listed seconds of the commands after it fit the budget (red at dc876a2c2: three runs, the command after them past the budget)", async () => {
+  const AFTER = { dir: E2E_DIR, name: "terminal", command: "node test/after-x/run.mjs" };
+  const seconds = { [sweepKey(TRADE_BOX)]: 50, [sweepKey(AFTER)]: 400 };
+  let t = 0;
+  const runs = [];
+  const out = [];
+  // each run of the live check takes 200 s and ends INCONCLUSIVE; the command after it takes its listed 400 s
+  const run = async (c) => (runs.push(c.command), (t += (c === AFTER ? 400 : 200) * 1000), { code: c === AFTER ? 0 : 3, output: "" });
+  const ran = await runE2ePart([TRADE_BOX, AFTER], ROOT, (l) => out.push(l), { clock: () => t, run, sleep: async () => {}, read: readLive, seconds });
+  // after the first run, 200 s in: 200 + 400 to run after it fits 720, so a second run; at 400 s, 400 + 400 does not
+  assert.deepEqual(runs, [TRADE_BOX.command, TRADE_BOX.command, AFTER.command]);
+  assert.ok(out.some((l) => l.startsWith("::notice title=inconclusive app-trade-box-mount::") && l.includes("no rerun past the part's budget, with 400 s listed after it")), out.join("\n"));
+  assert.deepEqual(ran.map((r) => r.ok), [true, true]);
+  // the part ends inside the budget it planned: its clock at the end is the two runs and the command after them
+  assert.ok(t / 1000 <= E2E_RERUN_BUDGET_S + 200, `${t / 1000} s`);
 });
 
 // ---- round 2: merge queue group 44559433373 (PR 1086), test-browser (4) job 135684403606: app-chart-fills-in-its-history

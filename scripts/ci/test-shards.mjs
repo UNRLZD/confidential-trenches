@@ -397,8 +397,11 @@ export function runPart(commands, root, log = console.log, { clock = () => perfo
 // such check imports scripts/live-checks/helper-misses.mjs (liveHelper routes and watches the helper, its verdictOf makes a
 // FAIL with a helper miss INCONCLUSIVE, exit 3), and e2e-run runs it through scripts/ci/live-rerun.mjs's rerun rule, as the
 // live runs do: an INCONCLUSIVE runs again within RERUN's bound, a FAIL or an ERROR fails at once, and one still
-// INCONCLUSIVE after the last run prints a notice and is no FAIL (live-rerun.mjs's header). No rerun starts past
-// E2E_RERUN_BUDGET_S of the part's own clock, so the reruns stay inside test-browser's timeout-minutes.
+// INCONCLUSIVE after the last run prints a notice and is no FAIL (live-rerun.mjs's header). A rerun starts only while
+// the part's own clock and the listed seconds of the commands after it fit E2E_RERUN_BUDGET_S, so the reruns and the
+// rest of the part stay inside test-browser's timeout-minutes (card ci-browser-reruns-leave-room-for-the-rest: merge
+// queue group 45414570078's app-chart-live ran three INCONCLUSIVE runs of about 192 s each, the third 621 s in, and the
+// commands after it were cut at the job's 20 minutes).
 export const HELPER_MISSES = /from\s+["']\.\/helper-misses\.mjs["']/;
 export const E2E_RERUN_BUDGET_S = 12 * 60;
 /** The live check's key when `command` runs one that reads the live helper (its file imports helper-misses.mjs), else
@@ -492,7 +495,7 @@ export async function runE2ePart(commands, root, log = console.log, { clock = ()
   const boundFor = bound ?? ((c) => boundOf(c, names.seconds ?? E2E_SECONDS, names.fallback ?? NEW_E2E_SECONDS));
   const t0 = clock();
   const ran = [];
-  for (const c of commands) {
+  for (const [i, c] of commands.entries()) {
     const key = helperLiveKey(c.command, read);
     const boundS = boundFor(c);
     const start = clock();
@@ -506,10 +509,12 @@ export async function runE2ePart(commands, root, log = console.log, { clock = ()
       failed = r.stopped ? `stopped at its bound of ${boundS} s` : `exit ${r.code}`;
     } else {
       const { rerun, noticeLine } = await import("./live-rerun.mjs");
+      // the listed seconds of the commands after this one: a rerun leaves them room inside the budget
+      const after = commands.slice(i + 1).reduce((s, d) => s + listedSeconds(d, names.seconds ?? E2E_SECONDS, names.fallback ?? NEW_E2E_SECONDS), 0);
       log(`\n== ${sweepKey(c)} (reads the live helper: an INCONCLUSIVE runs again)`);
-      const r = await rerun(key, [], { run: () => runOne(c, boundS, true), say: log, ...(sleep ? { sleep } : {}), before: async (n) => n === 1 || (clock() - t0) / 1000 < budgetS });
+      const r = await rerun(key, [], { run: () => runOne(c, boundS, true), say: log, ...(sleep ? { sleep } : {}), before: async (n) => n === 1 || (clock() - t0) / 1000 + after < budgetS });
       ok = r.exit === 0;
-      if (r.verdict === "inconclusive") log(noticeLine(key, `${r.reason}${r.stopped ? " (no rerun past the part's budget)" : ""}`));
+      if (r.verdict === "inconclusive") log(noticeLine(key, `${r.reason}${r.stopped ? ` (no rerun past the part's budget, with ${after} s listed after it)` : ""}`));
       failed = `${r.verdict}, exit ${r.code}`;
       runs = r.runs;
     }
