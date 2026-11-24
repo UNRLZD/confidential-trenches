@@ -2453,6 +2453,90 @@ test("card rh-cold-quote: one provider that answers SafeCastOverflow for a curre
   assert.deepEqual(await verdict(c.run()), { accepted: false, code: "rpc_disagree" });
 });
 
+// Card evm-warm-tap-skips-pools-it-pruned: NVDAc on Base (0xb20000000000000000000078ee7ce2fe4908108c, read only from this
+// Mac on release 201's kit, 2026-11-24 15:5xZ): its route one v3 pool, yet every warm tap re-ran the X prune on about 98
+// pools that cannot give Q, 197 of a warm tap's 533 calls V4Quoter.quoteExactOutputSingle, the taps 3.2 to 15.2 s; GOOGLc,
+// with no such pools, 0.95 s. A pool's NotEnoughLiquidity for an amount out stands while its liquidity and price stand,
+// which only a Swap or a ModifyLiquidity of it changes (a fee moves only the amount in), so the quote after one that
+// dropped it asks it again only where the PoolManager logged one of those for it since, on both providers
+const CUT_SWAP = "0x40e9cecb9f5f1f1c5b9c97dec2917b7ee92e57ba5563708daca94dd84ad7112f"; // Swap(bytes32,address,int128,int128,uint160,uint128,int24,uint24)
+const CUT_MODIFY = "0xf208f4912782fd25c7f114ca3723a2d5dd6f3bcc3ac8db5af63baa85f711d5ec"; // ModifyLiquidity(bytes32,address,int24,int24,int256,bytes32)
+type CutLog = { id: string; at: number; topic?: string };
+/** chain(), counting its exact-output reads and its reads of the PoolManager's Swap and ModifyLiquidity logs, which it
+ *  answers from `logs`; a block asked by its number is that block, its hash `hashAt`'s (by default the model's own:
+ *  every block NEW). */
+function cutChain(pools: ModelPool[], who: 0 | 1, headNo: number, logs: CutLog[], seen: { exactOut: number; logs: number; widest?: number }, hashAt?: (n: number) => string): EvmRpc {
+  const inner = chain(pools, who, headNo);
+  return (async (calls: readonly EvmRpcCall[], ...rest: unknown[]) => {
+    const out = [...((await (inner as (...a: unknown[]) => Promise<readonly unknown[]>)(calls, ...rest)) as unknown[])];
+    calls.forEach((c, i) => {
+      const id = (out[i] as { id?: number } | null)?.id ?? i;
+      const p = (c.params as unknown[] | undefined)?.[0] as { data?: string; address?: string; topics?: unknown[]; fromBlock?: string; toBlock?: string } | string | undefined;
+      if (c.method === "eth_call" && typeof p === "object") seen.exactOut += String(p.data ?? "").split("58733073").length - 1;
+      if (c.method === "eth_getLogs" && typeof p === "object" && p.address?.toLowerCase() === RH_PM && Array.isArray(p.topics?.[0]) && (p.topics[0] as string[]).includes(CUT_MODIFY)) {
+        seen.logs++;
+        const [lo, hi] = [Number(BigInt(p.fromBlock!)), Number(BigInt(p.toBlock!))];
+        seen.widest = Math.max(seen.widest ?? 0, hi - lo + 1);
+        const ids = (p.topics[1] as string[]).map((x) => x.toLowerCase());
+        const result = logs.filter((l) => l.at >= lo && l.at <= hi && ids.includes("0x" + l.id)).map((l, n) => ({ address: RH_PM, topics: [l.topic ?? CUT_MODIFY, "0x" + l.id, "0x" + "0".repeat(64)], data: "0x", blockNumber: "0x" + l.at.toString(16), blockHash: NEW, logIndex: "0x" + n.toString(16), transactionHash: "0x" + "ab".repeat(32), transactionIndex: "0x0", removed: false }));
+        out[i] = { jsonrpc: "2.0", id, result };
+      }
+      if (c.method === "eth_getBlockByNumber" && typeof p === "string" && p.startsWith("0x")) out[i] = { jsonrpc: "2.0", id, result: head(p, hashAt?.(Number(BigInt(p))) ?? NEW) };
+    });
+    return out;
+  }) as EvmRpc;
+}
+
+test("card evm-warm-tap-skips-pools-it-pruned: the quote after one whose X prune dropped 30 pools that cannot give Q asks none again while neither provider logged a Swap or ModifyLiquidity of them; one that logged one is asked again, and logs the providers answer differently, or a pruned block they no longer hold, ask all 30 (red at b456b9b2c: every quote asks all 30)", async () => {
+  // its own token and currencies (rcSeeded's 0x300 on): a token's plan and a currency's scan are kept for the module's life
+  const coin = "0x000050e18ffa3f8f7ad170eb9cef160eb3ed11e1";
+  const eth: ModelPool = { ...rcEth, key: keyOf(coin, NATIVE, 3000, 60, NATIVE) };
+  const seeded = Array.from({ length: 30 }, (_, i) => rcSeeded(0x200 + i, AMOUNT / 100n, coin));
+  const pools = [eth, ...seeded];
+  const route: EvmRoute = { ...rcRoute, hops: [{ ...rcRoute.hops[0]!, currency: coin }] };
+  const at = async (d: number, logs: [CutLog[], CutLog[]] = [[], []], hashAt?: (n: number) => string) => {
+    const seen: { exactOut: number; logs: number; widest?: number } = { exactOut: 0, logs: 0 };
+    const rpcs = [cutChain(pools, 0, RC_HEAD + d, logs[0], seen, hashAt), cutChain(pools, 1, RC_HEAD + d, logs[1], seen, hashAt)];
+    // on a still clock (quoteOnStill's): the test counts reads, never the machine's time
+    const v = await verdict(evmPoolBuyQuoteWith({ chain: "robinhood", token: coin, amountIn: AMOUNT, slippageBps: 100, route }, rpcs, NOW, scanner(RC_HEAD + d, rcLogs(seeded), [], 100_000), undefined, () => 0));
+    return { v, seen };
+  };
+  const first = await at(0);
+  // a verdict apart from its block, which each quote reads anew
+  const same = (v: unknown) => ({ ...(v as object), block: undefined });
+  assert.equal(first.v.accepted, true, String((first.v as { code?: string }).code));
+  assert.ok(first.seen.exactOut >= 30, `the cold quote's prune: ${first.seen.exactOut} exact-output reads`);
+  // 5 blocks on, no log of any of them: none asked again, the same verdict
+  const quiet = await at(5);
+  assert.deepEqual(same(quiet.v), same(first.v));
+  assert.equal(quiet.seen.exactOut, 0, "no pool the last prune dropped is asked again");
+  assert.ok(quiet.seen.logs >= 2, "their logs read on both providers");
+  // a ModifyLiquidity of one of them at block +7, on both providers: that one alone is asked again
+  const moved: CutLog[] = [{ id: pidOf(seeded[3]!.key), at: RC_HEAD + 7 }];
+  const one = await at(10, [moved, moved]);
+  assert.deepEqual(same(one.v), same(first.v));
+  assert.ok(one.seen.exactOut >= 1 && one.seen.exactOut <= 3, `${one.seen.exactOut} exact-output reads: the one pool that moved`);
+  // one provider names a Swap of one of them, the other none: no log read is used, so all 30 are asked
+  const split = await at(15, [[{ id: pidOf(seeded[5]!.key), at: RC_HEAD + 12, topic: CUT_SWAP }], []]);
+  assert.deepEqual(same(split.v), same(first.v));
+  assert.ok(split.seen.exactOut >= 30, `${split.seen.exactOut} exact-output reads after logs that differ`);
+  // the block the last prune read at is another on both providers now (a reorg): all 30 are asked
+  const reorg = await at(20, [[], []], (n) => (n === RC_HEAD + 15 ? "0x" + "77".repeat(32) : NEW));
+  assert.deepEqual(same(reorg.v), same(first.v));
+  assert.ok(reorg.seen.exactOut >= 30, `${reorg.seen.exactOut} exact-output reads after the pruned block changed`);
+  // 250 blocks on: three reads of at most 100 blocks a provider (robinhood.drpc.org's free plan refuses wider), none
+  // asked again, and a log in the third piece still found
+  const far = await at(270);
+  assert.equal(far.seen.exactOut, 0, "250 blocks on, none asked again");
+  assert.ok(far.seen.logs >= 2 * 3 && far.seen.widest! <= 100, `${far.seen.logs} log reads, the widest ${far.seen.widest} blocks`);
+  const late = await at(500, [[{ id: pidOf(seeded[7]!.key), at: RC_HEAD + 495 }], [{ id: pidOf(seeded[7]!.key), at: RC_HEAD + 495 }]]);
+  assert.ok(late.seen.exactOut >= 1 && late.seen.exactOut <= 3, `${late.seen.exactOut} exact-output reads: the one pool that moved in the third piece`);
+  // past 600 blocks (six pieces) no proof is read: all 30 asked
+  const past = await at(1_200);
+  assert.ok(past.seen.exactOut >= 30, `${past.seen.exactOut} exact-output reads 700 blocks on`);
+  assert.equal(past.seen.logs, 0, "no log read past six pieces");
+});
+
 test("card rh-cold-quote: the prune reads the token out of a currency's pool: one deep in the token and shallow in its other currency is kept, the token as currency1 or as currency0", async () => {
   // each pool holds less than Q of X, so a read that named X as the output would prune it and let the seeded route pass
   const x1 = rcAt(0x200);

@@ -13,7 +13,8 @@ import { test } from "node:test";
 import { evmPoolBuyQuote, EvmQuoteError } from "../src/index.ts";
 import { REQUEST } from "./evm-quote-gas-used-record.ts";
 
-const F = JSON.parse(readFileSync(new URL("./fixtures/evm-quote-gas-used.json", import.meta.url), "utf8")) as { at: string; quotes: { now: number; outcome: string }[]; exchanges: { q: number; body: string; answer: string }[] };
+type Log = { blockNumber: string; topics: string[] };
+const F = JSON.parse(readFileSync(new URL("./fixtures/evm-quote-gas-used.json", import.meta.url), "utf8")) as { at: string; quotes: { now: number; outcome: string }[]; exchanges: { q: number; body: string; answer: string }[]; poolLogs: { address: string; from: number; to: number; logs: Log[] } };
 const MC3 = "0xca11bde05977b3631167028862be2a173976ca11";
 type Call = { method: string; params: [{ to?: string; data?: string }, ...unknown[]]; id: number };
 const callsOf = (body: string): Call[] => {
@@ -91,6 +92,20 @@ test("a real Robinhood quote whose call of 64 starves reads behind honest heavy 
       if (c.method === "eth_getBlockByNumber" && typeof h?.number === "string" && /^0x[0-9a-f]+$/i.test(h.number)) headers.set(BigInt(h.number), h);
     }
   }
+  // A PoolManager log read (a warm quote's proof that the pools its last prune dropped are unmoved, card
+  // evm-warm-tap-skips-pools-it-pruned, which the recording predates): answered with the PoolManager's real logs of those
+  // blocks (F.poolLogs, read after the recording on two providers that agreed) of its events and pool ids; one reaching
+  // past them is left unanswered, named
+  const pmLogs = (c: Call): Log[] | undefined => {
+    const f = c.params[0] as unknown as { address?: string; fromBlock: string; toBlock: string; topics?: unknown[] };
+    const t0 = f.topics?.[0];
+    if (String(f.address).toLowerCase() !== F.poolLogs.address || !Array.isArray(t0)) return undefined;
+    const [a, b] = [BigInt(f.fromBlock), BigInt(f.toBlock)];
+    if (a < BigInt(F.poolLogs.from) || b > BigInt(F.poolLogs.to)) return undefined;
+    const ids = Array.isArray(f.topics?.[1]) ? (f.topics[1] as string[]).map((x) => x.toLowerCase()) : null;
+    const events = (t0 as string[]).map((x) => x.toLowerCase());
+    return F.poolLogs.logs.filter((l) => a <= BigInt(l.blockNumber) && BigInt(l.blockNumber) <= b && events.includes(l.topics[0]!.toLowerCase()) && (ids === null || ids.includes(l.topics[1]!.toLowerCase())));
+  };
   const within = (calls: Call[]): string | undefined => {
     if (!calls.some((c) => c.method === "eth_getLogs") || calls.some((c) => c.method !== "eth_getLogs" && c.method !== "eth_getBlockByNumber")) return undefined;
     const out: unknown[] = [];
@@ -99,6 +114,11 @@ test("a real Robinhood quote whose call of 64 starves reads behind honest heavy 
         const h = /^0x[0-9a-f]+$/i.test(String(c.params[0])) ? headers.get(BigInt(String(c.params[0]))) : undefined;
         if (h === undefined) return undefined;
         out.push({ jsonrpc: "2.0", id: c.id, result: h });
+        continue;
+      }
+      const pm = pmLogs(c);
+      if (pm !== undefined) {
+        out.push({ jsonrpc: "2.0", id: c.id, result: pm });
         continue;
       }
       const { fromBlock, toBlock, ...f } = c.params[0] as unknown as { fromBlock: string; toBlock: string };
@@ -114,6 +134,53 @@ test("a real Robinhood quote whose call of 64 starves reads behind honest heavy 
         return a <= n && n <= b && !seen.has(k) && (seen.add(k), true);
       });
       out.push({ jsonrpc: "2.0", id: c.id, result: logs });
+    }
+    return JSON.stringify(out);
+  };
+  // An aggregate3 of reads the quote's recording sent in a larger aggregate3 (card evm-warm-tap-skips-pools-it-pruned: a
+  // warm quote asks again only the pools the last prune dropped that the proof above does not show unmoved, where the
+  // recording's warm quotes asked all 58 in one call): each read answered with its own recorded answer in that quote.
+  // A read keeps at least the gas it had in the larger call (fewer reads before it share the call's gas), so its
+  // recorded answer stands only where it was not starved: one recorded 2 is left unanswered, named
+  const at3 = (h: string, o: number) => Number(BigInt("0x" + h.slice(2 * o, 2 * o + 64)));
+  const innerOf = (data: string): string[] => {
+    const h = data.slice(10);
+    const base = at3(h, 0);
+    return Array.from({ length: at3(h, base) }, (_, k) => {
+      const t = base + 32 + at3(h, base + 32 + 32 * k);
+      const d = t + at3(h, t + 64);
+      return h.slice(2 * t, 2 * t + 64) + h.slice(2 * (d + 32), 2 * (d + 32 + at3(h, d)));
+    });
+  };
+  const entriesOf = (result: string): string[] => {
+    const h = result.slice(2);
+    const n = at3(h, 32);
+    const offs = Array.from({ length: n }, (_, k) => 64 + at3(h, 64 + 32 * k));
+    return offs.map((o, k) => h.slice(2 * o, k + 1 < n ? 2 * offs[k + 1]! : h.length));
+  };
+  const asked = new Map<number, Map<string, string>>();
+  for (const x of F.exchanges) {
+    const as = [JSON.parse(x.answer)].flat() as { id: number; result?: unknown }[];
+    for (const c of callsOf(x.body)) {
+      const r = as.find((y) => y.id === c.id)?.result;
+      if (readsOf(c) === undefined || typeof r !== "string") continue;
+      const es = entriesOf(r);
+      const m = asked.get(x.q) ?? new Map<string, string>();
+      innerOf(c.params[0].data!).forEach((k, i) => es[i] !== undefined && at3(es[i]!, 0) !== 2 && m.set(k, es[i]!));
+      asked.set(x.q, m);
+    }
+  }
+  const regrouped = (calls: Call[]): string | undefined => {
+    if (calls.some((c) => readsOf(c) === undefined)) return undefined;
+    const m = asked.get(atQ);
+    const out: unknown[] = [];
+    for (const c of calls) {
+      const es = innerOf(c.params[0].data!).map((k) => m?.get(k));
+      if (es.some((e) => e === undefined)) return undefined;
+      const w = (n: number) => n.toString(16).padStart(64, "0");
+      let off = 32 * es.length;
+      const heads = es.map((e) => { const o = off; off += e!.length / 2; return w(o); });
+      out.push({ jsonrpc: "2.0", id: c.id, result: "0x" + w(0x20) + w(es.length) + heads.join("") + es.join("") });
     }
     return JSON.stringify(out);
   };
@@ -137,7 +204,7 @@ test("a real Robinhood quote whose call of 64 starves reads behind honest heavy 
     const calls = callsOf(body);
     const k = key(body);
     const q = queue.get(k);
-    const answer = q !== undefined && q.length > 0 ? q.shift()! : (last.get(k) ?? any.get(k) ?? scanAnswer(atQ, calls) ?? within(calls));
+    const answer = q !== undefined && q.length > 0 ? q.shift()! : (last.get(k) ?? any.get(k) ?? scanAnswer(atQ, calls) ?? within(calls) ?? regrouped(calls));
     if (answer === undefined) {
       missed.push(calls.map((c) => (readsOf(c) !== undefined ? `aggregate3 of ${readsOf(c)}` : c.method)).join(", "));
       return new Response("upstream unavailable", { status: 503 });

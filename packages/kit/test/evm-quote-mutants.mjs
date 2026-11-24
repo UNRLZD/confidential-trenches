@@ -54,7 +54,12 @@ export const MUTANTS = [
   // and one request a currency where fewer than the OR
   [QUOTE, " && a.partial === b.partial && a.overflow === b.overflow);", " && a.partial === b.partial);", R, "card rh-cold-quote: one provider that answers SafeCastOverflow"],
   [QUOTE, 'return r.kind === "revert" && (r.partial || r.overflow === true);', "return false;", R, "card rh-cold-quote: a cold Robinhood quote"],
-  [QUOTE, "for (const f of fs) if (f.key.hooks === NATIVE || replaced(f.key)) asks.push(", "for (const f of fs) if (true) asks.push(", R, "card rh-cold-quote: a currency's pool behind a pinned hook"],
+  [QUOTE, "if (f.key.hooks !== NATIVE && !replaced(f.key)) continue;", "if (false) continue;", R, "card rh-cold-quote: a currency's pool behind a pinned hook"],
+  // card evm-warm-tap-skips-pools-it-pruned: a pruned block another now (a reorg) proves nothing; a pool a log names is
+  // asked again; each log read spans at most the chain's least provider's blocks
+  [QUOTE, "if (a.pruned !== cut.hash || a.at !== lower(block.hash)) return new Set();", "if (false) return new Set();", R, "card evm-warm-tap-skips-pools-it-pruned"],
+  [QUOTE, "if (same.has(f.id)) cutNow.set(f.id, cutBefore!.floors.get(f.id)!);", "if (true) cutNow.set(f.id, cutBefore!.floors.get(f.id)!);", R, "card evm-warm-tap-skips-pools-it-pruned"],
+  [QUOTE, "const span = CUT_LOG_SPAN[chain];", "const span = 1_000n;", R, "card evm-warm-tap-skips-pools-it-pruned"],
   // card evm-spare-list-green: the prune skips only an X the token's last quote kept (main skipped any X whose markets
   // were ever scanned)
   [QUOTE, "const unsure = (x: string) => !keptBefore.has(x);", "const unsure = (x: string) => !SCANS.has(`${chain}:markets:${x}`);", R, "card evm-spare-list-green: a quote prunes a currency the quote before scanned"],
