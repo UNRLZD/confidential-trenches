@@ -29,6 +29,7 @@
 // Each gap answer's time (Server-Timing total) is printed beside it, so a red run shows whether the helper waited for a
 // refresh or answered at once.
 // After: helper
+// Record: what the run read (the helper's public answers and their times); a live run that fails keeps it beside its log
 //   node scripts/live-checks/sol-vendor-tape-refresh-lands.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error or INCONCLUSIVE (nothing to judge) exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";

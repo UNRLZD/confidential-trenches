@@ -15,6 +15,8 @@
 //     the coin's real price: within PRICE_BAND_BPS of DexScreener's priceNative for the same pool, a source the device
 //     never uses, read at the same minute.
 // After: helper
+// Record: the helper's list, both public providers' raw answers and DexScreener's price; a live run that fails keeps it
+// beside its log
 //   node scripts/live-checks/solana-buy-never-below-a-hidden-market.mjs [--record <file>] [--plant-lie] [--helper <url>]
 //   PASS exit 0, FAIL 1, error 2. --record writes the run (the helper's list and both providers' raw answers), which the
 //   .test.mjs replays; --plant-lie makes provider B's answer hold a SOL vault 5% over the chain's, as a provider that
