@@ -109,8 +109,10 @@ test("withdraw.open with the from_id of a held op holding a move: the recorded a
   a!.then();
   await until("the held page drawn", () => root.dataset.signin === "held");
   await until("the page's resume", () => moveOuts.length > 0);
-  await new Promise((r) => setTimeout(r, 50));
   const page = gl.__ctHeldPage as El;
+  // the resume's outcome is drawn once its answer lands (the hook reads the store first): waited on, never a fixed pause,
+  // which ran out on GitHub's busy 4-core runner (README run 45337552393: outcome still undefined after 50 ms)
+  await until("the resume's outcome drawn", () => page.dataset.outcome !== undefined);
   const input = page.find((e) => e.dataset.input === "to")!;
   assert.deepEqual(moveOuts, [null], "resumed once, no account handed over");
   assert.equal(input.value, "alice.testnet", "the recorded account is drawn");
