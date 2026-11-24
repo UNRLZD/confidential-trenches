@@ -2537,6 +2537,44 @@ test("card evm-warm-tap-skips-pools-it-pruned: the quote after one whose X prune
   assert.equal(past.seen.logs, 0, "no log read past six pieces");
 });
 
+test("card evm-cut-logs-only-where-served: a quote provider the venue does not list as answering logs (Robinhood's publicnode, -32602 to any getLogs of the newest blocks) is never asked the pruned pools' logs; the two that are listed or planted prove them", async () => {
+  // release 202's sign run 45482874085: a fresh account's walk met robinhood.rpc.blxrbdn.com's -32601 to this read
+  const coin = "0x000050e18ffa3f8f7ad170eb9cef160eb3ed11e2";
+  const eth: ModelPool = { ...rcEth, key: keyOf(coin, NATIVE, 3000, 60, NATIVE) };
+  const seeded = Array.from({ length: 30 }, (_, i) => rcSeeded(0x240 + i, AMOUNT / 100n, coin));
+  const pools = [eth, ...seeded];
+  const route: EvmRoute = { ...rcRoute, hops: [{ ...rcRoute.hops[0]!, currency: coin }] };
+  let refused = 0;
+  const at = async (d: number) => {
+    const seen: { exactOut: number; logs: number } = { exactOut: 0, logs: 0 };
+    const inner = cutChain(pools, 0, RC_HEAD + d, [], seen);
+    // its own answers, save a getLogs of the PoolManager's Swap and ModifyLiquidity: the archive refusal it gives (read
+    // 2026-11-24 20:46Z)
+    const noLogs: EvmRpc = async (calls, s) => {
+      const out = await inner(calls, s);
+      return out.map((o, i) => {
+        const p = calls[i]!.params[0] as { topics?: unknown[] } | undefined;
+        if (calls[i]!.method !== "eth_getLogs" || !Array.isArray(p?.topics?.[0]) || !(p.topics[0] as string[]).includes(CUT_MODIFY)) return o;
+        refused++;
+        return { jsonrpc: "2.0", id: i, error: { code: -32602, message: "Archive requests require a personal token." } };
+      });
+    };
+    // built as the kit builds its providers (evmProviders), so the gate keeps its URL as a quote's does
+    const listedNot = quoteMod.evmProviders(["https://robinhood-rpc.publicnode.com", "https://robinhood.rpc.blxrbdn.com"], rcFetch(noLogs, () => null))[0]!;
+    const rpcs = [listedNot, cutChain(pools, 1, RC_HEAD + d, [], seen), cutChain(pools, 0, RC_HEAD + d, [], seen)];
+    const v = await verdict(evmPoolBuyQuoteWith({ chain: "robinhood", token: coin, amountIn: AMOUNT, slippageBps: 100, route }, rpcs, NOW, scanner(RC_HEAD + d, rcLogs(seeded), [], 100_000), undefined, () => 0));
+    return { v, seen };
+  };
+  const first = await at(0);
+  assert.equal(first.v.accepted, true, String((first.v as { code?: string }).code));
+  refused = 0;
+  const quiet = await at(5);
+  assert.equal(quiet.v.accepted, true, String((quiet.v as { code?: string }).code));
+  assert.equal(refused, 0, "the unlisted provider is asked no log of the pruned pools");
+  assert.equal(quiet.seen.exactOut, 0, "no pool the last prune dropped is asked again: the two others proved them unmoved");
+  assert.ok(quiet.seen.logs >= 2, "their logs read on the two others");
+});
+
 test("card rh-cold-quote: the prune reads the token out of a currency's pool: one deep in the token and shallow in its other currency is kept, the token as currency1 or as currency0", async () => {
   // each pool holds less than Q of X, so a read that named X as the output would prune it and let the seeded route pass
   const x1 = rcAt(0x200);
