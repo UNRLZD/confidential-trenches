@@ -11,7 +11,12 @@
 // it did, at the same ms. 1 ms at a time, swaps-back-resume.test.ts's 120 s runs were 960,000 turns each, and the file
 // alone took 332 s on this Mac (23 Nov 19:4xZ); the README's test line ran past its 8 minutes on GitHub's runner every
 // night from 15 to 23 Nov (run 45216461207: the helper's suite last, this file unfinished at the limit).
+//
+// The helper's shared turn slicer (src/limits/turn.ts) is restarted on the run's clock at its start, and on the machine's
+// after it: its slice's start was otherwise the machine's time at load, so how slowly a busy runner loaded a file moved
+// where a run's first slices fell (README run 45337579406: swaps-back-resume's Robinhood tapes, one past 45 s).
 import { mock } from "node:test";
+import { restartTurns } from "../../src/limits/turn.ts";
 import { enableTimers, resetTimers } from "../mock-timers.ts";
 
 /** The event loop turns a run is given between two ticks of the clock: every fake answer here is settled in a few. */
@@ -38,6 +43,7 @@ export async function onVirtualTime<T>(start: number, work: () => Promise<T>, tu
   const perf = Object.getOwnPropertyDescriptor(performance, "now");
   enableTimers(mock.timers, { apis: ["setTimeout", "Date"], now: start });
   Object.defineProperty(performance, "now", { configurable: true, value: () => Date.now() - start });
+  restartTurns();
   // every timer the run sets, kept until it fires or is cleared, and each immediate it waits on
   const [set, clear] = [g.setTimeout!, g.clearTimeout!];
   const timers = new Map<Mocked, number>();
@@ -111,6 +117,7 @@ export async function onVirtualTime<T>(start: number, work: () => Promise<T>, tu
     resetTimers(mock.timers);
     if (perf === undefined) delete (performance as { now?: unknown }).now;
     else Object.defineProperty(performance, "now", perf);
+    restartTurns();
   }
   if (failed) throw error;
   return { value: value as T, ms };

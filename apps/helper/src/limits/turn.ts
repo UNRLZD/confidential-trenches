@@ -36,6 +36,10 @@ export function turnSlicer(now: () => number = () => performance.now(), turnMs =
         if (waiting.length === 1) next();
       });
     },
+    /** The current slice starts again at now(): for a clock that moved under the slicer, a test's own. */
+    restart(): void {
+      since = now();
+    },
   };
 }
 
@@ -43,3 +47,8 @@ export function turnSlicer(now: () => number = () => performance.now(), turnMs =
 const shared = turnSlicer();
 /** null while this turn has room, else a promise that resumes the caller on a later turn (shared's pass). */
 export const pass = (): Promise<void> | null => shared.pass();
+/** For a test's own clock (test/evm-swaps/virtual-time.ts; not in the index): the shared slice starts again now, on the
+ *  clock performance.now reads at the call. A run on virtual time measured its first slices from the machine's time at
+ *  the module's load, so how slowly a busy runner loaded the file moved where they fell, and with them the order of the
+ *  run's reads (README run 45337579406: swaps-back-resume's Robinhood tapes at other times than on a quick machine). */
+export const restartTurns = (): void => shared.restart();
