@@ -1,5 +1,5 @@
 {
- "_note": "good: the branch helper at 61bf856cb (card robinhood-spread-tapes-fill-inside-45s, the idle book rests) run on the Mac (port 8797, keyless vendor plans), read by robinhood-spread-tapes-fill-inside-45s.mjs --base http://127.0.0.1:8797 --address 0x000de658... --record at 2026-11-18 09:5xZ: FOBO, 50 trades over 6.7 h, filled 11.7 s after its first read, and read again 75 s on answered whole at once in 959 ms, its newest trade held; good_long: the same helper at 10:0xZ, AUTONOMO, 50 trades over 9.6 h, filled 30.9 s after its first read, read again 75 s on whole at once in 1,222 ms. bad_listed_deployed: the deployed helper (main before the rest, deployed 07:56Z) at 09:5xZ, the 12 listed coins at once from the Mac: 10 still filling 45.1 to 47.2 s after their first read, and 0x18e67423 (whole in 512 ms) read again 75 s on answered filling, read from nothing, filled 44.4 s on. bad_no_reopen: the first slice's good run (c8b2708fa), recorded before the reopen pass existed. Earlier records: good: the branch helper at c8b2708fa (card robinhood-spread-tapes-fill-inside-45s) run on the Mac (port 8797, keyless vendor plans), read by robinhood-spread-tapes-fill-inside-45s.mjs --base http://127.0.0.1:8797 --address 0x000de658... --record at 2026-11-18 04:48Z: FOBO, its 50 trades over 5.5 h, filled 10.4 s after its first read; good_long: the same helper at 04:49Z, AUTONOMO, 50 trades over 12.1 h, filled 18.6 s after its first read. bad_deployed: the deployed helper (bf32abde9) at 04:44Z, FOBO read alone from the Mac: still filling 45.2 s after its first read (20 reads). bad_busy_only: the deployed helper at 04:43Z, PONS read alone: filled 4.5 s after its first read, but its 50 trades span 0.2 h, so no spread coin was judged. Each tape names its token as \"address\", never \"token\" (gitleaks generic-api-key reads a 40-hex value beside that key).",
+ "_note": "good: the branch helper at 61bf856cb (card robinhood-spread-tapes-fill-inside-45s, the idle book rests) run on the Mac (port 8797, keyless vendor plans), read by robinhood-spread-tapes-fill-inside-45s.mjs --base http://127.0.0.1:8797 --address 0x000de658... --record at 2026-11-18 09:5xZ: FOBO, 50 trades over 6.7 h, filled 11.7 s after its first read, and read again 75 s on answered whole at once in 959 ms, its newest trade held; good_long: the same helper at 10:0xZ, AUTONOMO, 50 trades over 9.6 h, filled 30.9 s after its first read, read again 75 s on whole at once in 1,222 ms. bad_listed_deployed: the deployed helper (main before the rest, deployed 07:56Z) at 09:5xZ, the 12 listed coins at once from the Mac: 10 still filling 45.1 to 47.2 s after their first read, and 0x18e67423 (whole in 512 ms) read again 75 s on answered filling, read from nothing, filled 44.4 s on. bad_no_reopen: the first slice's good run (c8b2708fa), recorded before the reopen pass existed. Earlier records: good: the branch helper at c8b2708fa (card robinhood-spread-tapes-fill-inside-45s) run on the Mac (port 8797, keyless vendor plans), read by robinhood-spread-tapes-fill-inside-45s.mjs --base http://127.0.0.1:8797 --address 0x000de658... --record at 2026-11-18 04:48Z: FOBO, its 50 trades over 5.5 h, filled 10.4 s after its first read; good_long: the same helper at 04:49Z, AUTONOMO, 50 trades over 12.1 h, filled 18.6 s after its first read. bad_deployed: the deployed helper (bf32abde9) at 04:44Z, FOBO read alone from the Mac: still filling 45.2 s after its first read (20 reads). bad_busy_only: the deployed helper at 04:43Z, PONS read alone: filled 4.5 s after its first read, but its 50 trades span 0.2 h, so no spread coin was judged. Each tape names its token as \"address\", never \"token\" (gitleaks generic-api-key reads a 40-hex value beside that key). good_busy_reopen: the deployed helper at 8816ec782 read by robinhood-spread-tapes-fill-inside-45s.mjs --record from macOS at 2026-11-24 16:5xZ (card spread-reopen-judges-a-busy-coin): the 12 listed coins, one spread; 0x39dbed3a reopened filling from its kept book (49 trades, its newest of before held) and filled 2.2 s on, and one busy coin reopened whole with 50 trades every one newer than its newest of before.",
  "good": {
   "base": "http://127.0.0.1:8797",
   "at": "2026-11-18T09:56:54.265Z",
@@ -334,6 +334,237 @@
     },
     "n": 50,
     "span_ms": 656000
+   }
+  ]
+ },
+ "good_busy_reopen": {
+  "base": "https://ct-api.unrealized.trade",
+  "at": "2026-11-24T16:51:32.571Z",
+  "lists": {
+   "status": 200,
+   "ms": 638,
+   "tokens": 12
+  },
+  "answers": [
+   {
+    "address": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+    "status": 200,
+    "ms": 368,
+    "shape": "tape",
+    "n": 50,
+    "span_ms": 4472000
+   },
+   {
+    "address": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+    "status": 200,
+    "ms": 1609,
+    "shape": "tape",
+    "n": 50,
+    "span_ms": 4103000
+   },
+   {
+    "address": "0xbbb6c29bcc3a1028a2b54310df73f4f7a3bcb373",
+    "status": 200,
+    "ms": 788,
+    "shape": "tape",
+    "n": 50,
+    "span_ms": 42000
+   },
+   {
+    "address": "0x18e674231a58c239dc7daedcffe15ec3a24cff5c",
+    "status": 200,
+    "ms": 915,
+    "shape": "tape",
+    "n": 50,
+    "span_ms": 2261000
+   },
+   {
+    "address": "0xedbf91223639800bcd5756815caf908df3b890be",
+    "status": 200,
+    "ms": 1248,
+    "shape": "tape",
+    "n": 50,
+    "span_ms": 2312000
+   },
+   {
+    "address": "0xaa07a0e9209e16ac99708c3ec70159c6ef3128a3",
+    "status": 200,
+    "ms": 1720,
+    "shape": "tape",
+    "n": 50,
+    "span_ms": 13670000
+   },
+   {
+    "address": "0x98096d17e191b3da1d5f99a6d7b3584351b11e18",
+    "status": 200,
+    "ms": 2669,
+    "shape": "tape",
+    "n": 50,
+    "span_ms": 2504000
+   },
+   {
+    "address": "0xcec185eb182c47d1ba1efc84e6959e18cd620be4",
+    "status": 200,
+    "ms": 2342,
+    "shape": "tape",
+    "n": 50,
+    "span_ms": 645000
+   },
+   {
+    "address": "0x0ddcab9ae04bda0c87ecc1640636fa11e8e613e8",
+    "status": 200,
+    "ms": 1526,
+    "shape": "tape",
+    "n": 50,
+    "span_ms": 1294000
+   },
+   {
+    "address": "0x2e8c31162b855a2ffa90f6f8634643ad6f111e18",
+    "status": 200,
+    "ms": 1937,
+    "shape": "tape",
+    "n": 50,
+    "span_ms": 3686000
+   },
+   {
+    "address": "0x4088298c842a363e1373d479b6ae2a3cbbe01dbf",
+    "status": 200,
+    "ms": 4359,
+    "shape": "tape",
+    "n": 50,
+    "span_ms": 150000
+   },
+   {
+    "address": "0xce24439f2d9c6a2289f741120fe202248b666666",
+    "status": 200,
+    "ms": 1912,
+    "shape": "tape",
+    "n": 50,
+    "span_ms": 3441000
+   }
+  ],
+  "reopen_after_ms": 75000,
+  "reopen": [
+   {
+    "address": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+    "status": 200,
+    "ms": 880,
+    "shape": "tape",
+    "filling": true,
+    "first": {
+     "n": 49,
+     "kept": true,
+     "past": false
+    },
+    "filled": {
+     "status": 200,
+     "filling": false,
+     "shape": "tape",
+     "ms": 2210,
+     "reads": 1
+    },
+    "n": 50,
+    "kept": true,
+    "past": false
+   },
+   {
+    "address": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+    "status": 200,
+    "ms": 603,
+    "shape": "tape",
+    "n": 50,
+    "kept": true,
+    "past": false
+   },
+   {
+    "address": "0xbbb6c29bcc3a1028a2b54310df73f4f7a3bcb373",
+    "status": 200,
+    "ms": 1162,
+    "shape": "tape",
+    "n": 50,
+    "kept": false,
+    "past": true
+   },
+   {
+    "address": "0x18e674231a58c239dc7daedcffe15ec3a24cff5c",
+    "status": 200,
+    "ms": 1023,
+    "shape": "tape",
+    "n": 50,
+    "kept": true,
+    "past": false
+   },
+   {
+    "address": "0xedbf91223639800bcd5756815caf908df3b890be",
+    "status": 200,
+    "ms": 992,
+    "shape": "tape",
+    "n": 50,
+    "kept": true,
+    "past": false
+   },
+   {
+    "address": "0xaa07a0e9209e16ac99708c3ec70159c6ef3128a3",
+    "status": 200,
+    "ms": 838,
+    "shape": "tape",
+    "n": 50,
+    "kept": true,
+    "past": false
+   },
+   {
+    "address": "0x98096d17e191b3da1d5f99a6d7b3584351b11e18",
+    "status": 200,
+    "ms": 2744,
+    "shape": "tape",
+    "n": 50,
+    "kept": true,
+    "past": false
+   },
+   {
+    "address": "0xcec185eb182c47d1ba1efc84e6959e18cd620be4",
+    "status": 200,
+    "ms": 2237,
+    "shape": "tape",
+    "n": 50,
+    "kept": true,
+    "past": false
+   },
+   {
+    "address": "0x0ddcab9ae04bda0c87ecc1640636fa11e8e613e8",
+    "status": 200,
+    "ms": 2595,
+    "shape": "tape",
+    "n": 50,
+    "kept": true,
+    "past": false
+   },
+   {
+    "address": "0x2e8c31162b855a2ffa90f6f8634643ad6f111e18",
+    "status": 200,
+    "ms": 2403,
+    "shape": "tape",
+    "n": 50,
+    "kept": true,
+    "past": false
+   },
+   {
+    "address": "0x4088298c842a363e1373d479b6ae2a3cbbe01dbf",
+    "status": 200,
+    "ms": 2789,
+    "shape": "tape",
+    "n": 50,
+    "kept": true,
+    "past": false
+   },
+   {
+    "address": "0xce24439f2d9c6a2289f741120fe202248b666666",
+    "status": 200,
+    "ms": 2402,
+    "shape": "tape",
+    "n": 50,
+    "kept": true,
+    "past": false
    }
   ]
  }

@@ -115,6 +115,85 @@ test("planted faults fail: a list not read, a tape 503, a spread coin short of 5
   assert.equal(judge(listed).ok, true, judge(listed).lines.join("\n"));
 });
 
+// Card spread-reopen-judges-a-busy-coin: live run 45428643869 (helper 8816ec782, 24 Nov 16:0xZ) failed the reopen of
+// 0xbbb6c29b, and a local run at 16:4xZ that of 0x89cc584b: each coin's 50 newest trades spanned 86 and 95 s (read
+// 16:5xZ), so 75 s and more after the first read the 50 newest were all newer than the newest of before
+test("card spread-reopen-judges-a-busy-coin: a reopen without its newest trade of before passes only where it answers 50 trades, every one newer than that one; fewer, or one as old, fails as before", () => {
+  const edit = (f) => {
+    const run = structuredClone(A.good);
+    f(run.reopen[0]);
+    return judge(run);
+  };
+  const moved = edit((r) => Object.assign(r, { kept: false, past: true }));
+  assert.equal(moved.ok, true, moved.lines.join("\n"));
+  assert.match(moved.lines.at(-1), /^ok {2}reopen 0x[0-9a-f]{40}: answered whole at once in \d+ ms, 50 trades, every one newer than its newest of before$/);
+  assert.equal(edit((r) => Object.assign(r, { kept: false, past: false })).ok, false);
+  assert.equal(edit((r) => Object.assign(r, { kept: false })).ok, false);
+  assert.equal(edit((r) => Object.assign(r, { kept: false, past: true, n: 49 })).ok, false);
+  assert.equal(edit((r) => Object.assign(r, { kept: false, past: true, filling: true, filled: { status: 200, filling: false, shape: "tape", ms: 3_000, reads: 2 } })).ok, false);
+});
+
+// A kept book behind the chain answers its kept trades filling while it reads the blocks since, a new trade out of the
+// answer till its trader is read (apps/helper/src/data/evm/swaps.ts behind, unread): a local run at 16:4xZ, 12 coins
+// reopened at once, had 0xbbb6c29b's reopen answer filling in 4,659 ms and fill 2,286 ms on, its newest of before
+// held (read alone 80 s idle at 16:5xZ, it answered whole in 777 ms); one at 16:5xZ had 0x39dbed3a's answer 49 trades
+// filling, its newest of before held, and fill 2,210 ms on
+test("card spread-reopen-judges-a-busy-coin: a reopen that answers filling passes only where its first answer is its kept book (the newest of before held, or 50 trades every one newer) and it fills inside 45 s; a first answer without them was read from nothing", () => {
+  const edit = (f) => {
+    const run = structuredClone(A.good);
+    Object.assign(run.reopen[0], { filling: true, filled: { status: 200, filling: false, shape: "tape", ms: 2_286, reads: 1 } });
+    f(run.reopen[0]);
+    return judge(run);
+  };
+  const caught = edit((r) => (r.first = { n: 49, kept: true, past: false }));
+  assert.equal(caught.ok, true, caught.lines.join("\n"));
+  assert.match(caught.lines.at(-1), /^ok {2}reopen 0x[0-9a-f]{40}: answered filling in \d+ ms from its kept book \(49 trades\), the blocks since read \(filled 2286 ms after its first read \(1 reads\)\), 50 trades, its newest of before held$/);
+  assert.equal(edit((r) => (r.first = { n: 50, kept: false, past: true })).ok, true);
+  // none (an open with no book), every one newer but fewer than 50, neither held nor passed, or none recorded
+  assert.equal(edit((r) => (r.first = { n: 0, kept: false, past: false })).ok, false);
+  assert.equal(edit((r) => (r.first = { n: 12, kept: false, past: true })).ok, false);
+  assert.equal(edit((r) => (r.first = { n: 50, kept: false, past: false })).ok, false);
+  assert.equal(edit(() => {}).ok, false);
+  // its kept trades at once, yet it fills past 45 s, or its settled list lost the newest of before
+  assert.equal(edit((r) => Object.assign(r, { first: { n: 50, kept: true, past: false }, filled: { status: 200, filling: false, shape: "tape", ms: 45_001, reads: 30 } })).ok, false);
+  assert.equal(edit((r) => Object.assign(r, { first: { n: 50, kept: true, past: false }, kept: false, past: false })).ok, false);
+});
+
+test("card spread-reopen-judges-a-busy-coin: the recorded run of the deployed helper (24 Nov 16:5xZ) passes: one coin reopened filling from its kept book, one busy coin traded past its 50 newest", () => {
+  const r = judge(A.good_busy_reopen);
+  assert.deepEqual([r.ok, r.quiet], [true, false], r.lines.join("\n"));
+  assert.ok(r.lines.some((l) => /^ok {2}reopen 0x39dbed3a2bd333467115de45665cc57f813c4571: answered filling in 880 ms from its kept book \(49 trades\)/.test(l)), r.lines.join("\n"));
+  assert.ok(r.lines.includes("ok  reopen 0xbbb6c29bcc3a1028a2b54310df73f4f7a3bcb373: answered whole at once in 1162 ms, 50 trades, every one newer than its newest of before"), r.lines.join("\n"));
+  // the same run before the card's reading: a reopen without the newest of before, and one filling, each a FAIL
+  const before = structuredClone(A.good_busy_reopen);
+  for (const x of before.reopen) delete x.past, delete x.first;
+  assert.equal(judge(before).ok, false);
+});
+
+test("card spread-reopen-judges-a-busy-coin: read marks a reopen past only where every trade it answers is newer than the newest of before", async () => {
+  const t = "0x" + "cd".repeat(20);
+  const tx = (i) => `0x${i.toString(16).padStart(64, "0")}`;
+  // newest first, 2 s apart: the first read's newest at 1,000,000 ms; the reopen's 50 begin `from` ms on, tx 1000 on
+  const tape = (newest, txFrom) => JSON.stringify({ trades: Array.from({ length: 50 }, (_, i) => ({ t_ms: newest - i * 2_000, tx: tx(txFrom - i) })), src: "chain", as_of_ms: 1 });
+  const runWith = async (reopenBody) => {
+    let n = 0;
+    const fetchFn = async (url) => {
+      if (url.includes("/v1/market/lists")) return new Response(JSON.stringify({ lists: { trending_1h: [{ token: t }] } }), { status: 200 });
+      return new Response(n++ === 0 ? tape(1_000_000, 900) : reopenBody, { status: 200 });
+    };
+    return (await read("http://h", fetchFn, { sleep: async () => {}, pollMs: 0 })).reopen[0];
+  };
+  // 50 newer trades: the oldest of them 2 ms past the newest of before
+  const past = await runWith(tape(1_000_000 + 98_002, 1_000));
+  assert.deepEqual([past.kept, past.past], [false, true]);
+  // its oldest as old as the newest of before, a trade of the same time: the newest of before should be there
+  const same = await runWith(tape(1_000_000 + 98_000, 1_000));
+  assert.deepEqual([same.kept, same.past], [false, false]);
+  // the newest of before held
+  const held = await runWith(tape(1_000_000 + 20_000, 910));
+  assert.deepEqual([held.kept, held.past], [true, false]);
+});
+
 test("spanOf reads a settled tape's trade count and the ms its trades span; a body with no times gives null", () => {
   assert.deepEqual(spanOf(JSON.stringify({ trades: [{ t_ms: 5_000 }, { t_ms: 1_000 }, { t_ms: 3_000 }] })), { n: 3, span_ms: 4_000 });
   assert.deepEqual(spanOf(JSON.stringify({ trades: [{ t_ms: "x" }] })), { n: 0, span_ms: null });

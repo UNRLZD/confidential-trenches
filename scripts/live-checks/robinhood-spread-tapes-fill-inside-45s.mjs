@@ -15,7 +15,9 @@
 // with its read back, so a coin opened again a minute on was read from nothing; live run 44263447481, 8 coins still
 // filling past 45 s when helper-robinhood-capacity opened them after this check). It passes only when each reopened
 // tape answers whole at once (not filling: a reopen read from nothing answers filling first) and still holds the newest
-// trade it held before; a reopen that answers filling is read on and its fill time printed.
+// trade it held before, or answers 50 trades every one newer than that one: a coin that traded past its newest 50 since
+// (card spread-reopen-judges-a-busy-coin: 0xbbb6c29b's 50 trades spanned 86 s, live run 45428643869); a reopen that
+// answers filling is read on and its fill time printed.
 // After: helper
 // Serial: evm-keyed 135 (after a Solana check: the listed Robinhood tapes it opens at once draw the keyed Robinhood providers)
 //   node scripts/live-checks/robinhood-spread-tapes-fill-inside-45s.mjs [--base <url>] [--address <a>] [--record <file>]
@@ -75,11 +77,24 @@ export function spanOf(body) {
   }
 }
 
-/** A tape's newest trade's tx, or null. */
+/** What a reopened tape's answer holds of the newest trade of before (`newest`, newestOf's): its trade count (spanOf),
+ *  whether it holds that trade, and `past`: every trade it answers is newer, so a coin that traded past its newest 50
+ *  since holds that one no more (card spread-reopen-judges-a-busy-coin); one as old means it should be there. */
+export function heldOf(body, newest) {
+  let rows = [];
+  try {
+    rows = JSON.parse(body).trades;
+  } catch {}
+  if (!Array.isArray(rows)) rows = [];
+  const was = newest?.t_ms ?? null;
+  return { n: spanOf(body).n, kept: rows.some((x) => x?.tx === newest?.tx), past: was !== null && rows.length > 0 && rows.every((x) => Number.isSafeInteger(x?.t_ms) && x.t_ms > was) };
+}
+
+/** A tape's newest trade's tx and t_ms (null where it holds no time), or null. */
 const newestOf = (body) => {
   try {
-    const tx = JSON.parse(body).trades[0]?.tx;
-    return typeof tx === "string" ? tx : null;
+    const r = JSON.parse(body).trades[0];
+    return typeof r?.tx === "string" ? { tx: r.tx, t_ms: Number.isSafeInteger(r.t_ms) ? r.t_ms : null } : null;
   } catch {
     return null;
   }
@@ -124,9 +139,11 @@ export async function read(base = BASE, fetchFn = fetch, o = {}) {
       const a = await get(base, path, fetchFn);
       const r = { address: d.address, status: a.status, ms: a.ms, shape: a.status === 200 ? shapeOf(a.body) : null, ...(a.error ? { error: a.error } : {}), ...(a.status !== 200 ? { body: a.body.slice(0, 120) } : {}) };
       let last = a.body;
+      // a first answer filling: what it holds, which tells a kept book behind the chain from one read from nothing
       if (a.status === 200 && fillingOf(a.body))
         Object.assign(r, {
           filling: true,
+          first: heldOf(a.body, d.newest),
           filled: await readFilled(
             async () => {
               const b = await get(base, path, fetchFn);
@@ -137,13 +154,7 @@ export async function read(base = BASE, fetchFn = fetch, o = {}) {
             o,
           ),
         });
-      if (a.status === 200 && !fillingOf(last)) {
-        let txs = [];
-        try {
-          txs = JSON.parse(last).trades.map((x) => x?.tx);
-        } catch {}
-        Object.assign(r, { n: spanOf(last).n, kept: txs.includes(d.newest) });
-      }
+      if (a.status === 200 && !fillingOf(last)) Object.assign(r, heldOf(last, d.newest));
       return r;
     }),
   );
@@ -187,9 +198,18 @@ export function judge(run) {
         say(false, `reopen ${r.address}: ${r.status}${r.status === 200 ? ` ${r.shape}` : ` ${r.body ?? ""}`}${r.error ? ` ${r.error}` : ""} in ${r.ms} ms`);
         continue;
       }
-      // the kept list answers whole at once: a reopen that answers filling read the coin again from nothing
-      const text = r.filling === true ? `answered filling in ${r.ms} ms, read again from nothing (${filledVerdict(r.filled).text})` : `answered whole at once in ${r.ms} ms`;
-      say(r.filling !== true && r.kept === true, `reopen ${r.address}: ${text}, ${r.n ?? 0} trades${r.kept === true ? ", its newest of before held" : ", its newest of before NOT held"}`);
+      // its newest of before is held, or the coin traded past it: a full list of 50, every one newer (a shorter list
+      // holds every trade the coin has, so a missing one was lost)
+      const holds = (h) => h?.kept === true || (h?.past === true && h.n === TRADES);
+      // the kept list answers at once: whole, or filling from its kept book, filled inside FILLED_MS: a book behind the
+      // chain reads the blocks since, and a new trade waits for its trader, out of the answer till then (swaps.ts behind,
+      // unread), so its first answer holds the newest of before (or 50 trades every one newer) and fewer trades than 50
+      // at times. One read from nothing answers none of it first (an open with no book answers [] filling), and a first
+      // answer not recorded proves no kept book (card spread-reopen-judges-a-busy-coin)
+      const caught = r.filling === true && holds(r.first);
+      const f = filledVerdict(r.filled);
+      const text = r.filling !== true ? `answered whole at once in ${r.ms} ms` : caught ? `answered filling in ${r.ms} ms from its kept book (${r.first.n} trades), the blocks since read (${f.text})` : `answered filling in ${r.ms} ms, read again from nothing (${f.text})`;
+      say((r.filling !== true || (caught && f.ok)) && holds(r), `reopen ${r.address}: ${text}, ${r.n ?? 0} trades${r.kept === true ? ", its newest of before held" : holds(r) ? ", every one newer than its newest of before" : ", its newest of before NOT held"}`);
     }
   }
   // quiet: nothing failed, and the one thing the check is for had no coin to judge
