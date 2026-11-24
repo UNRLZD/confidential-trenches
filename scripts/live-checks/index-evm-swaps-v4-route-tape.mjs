@@ -27,7 +27,10 @@
 // every other pool of the coin. Five minutes of one bot can make a thin side pool the scan's busiest (live run
 // 45360090006, 24 Nov 09:06Z: Base WBTC's WBTC/NVDAc pool 0xc6406d46, $10,081 deep, 13 swaps in the scan, 9 of them
 // flash-loan arbitrages that sold into the v3 WBTC/USDC pool 0x49e30c the helper's tape is; over the day 663
-// transactions against WBTC/cbBTC 0xd960b78f's 1,215). A list not read, or one without the pool, judges no coin.
+// transactions against WBTC/cbBTC 0xd960b78f's 1,215). A list not read, or one without the pool, judges no coin. The
+// same list's reserves (`deep`) must also make the pool the coin's deepest: a day of bots can lead the count too (live
+// run 45401968651, 24 Nov 13:18Z: Base CHEWY's LSTEAK/CHEWY pool 0xa9e660ca, 149 transactions in 24 h and $339 deep,
+// beside CHEWY/PLAZM's $46,703; card v4-route-check-judges-the-deepest-pool).
 // After: helper
 // Serial: evm-keyed 101 (the helper's tape read of the coin draws the keyed Base providers)
 //   node scripts/live-checks/index-evm-swaps-v4-route-tape.mjs [--base <url>] [--record <file>]
@@ -101,17 +104,29 @@ export function candidates(scan) {
 export function pick(scan) {
   // a scan recorded before the quotes' markets or the vendor's day were read (bad_run_44942886709) names none: its pick
   // stands as it was read
-  const c = candidates(scan).find((x) => clear(scan, x) && (scan.day === undefined || leadsDay(scan.day[x.coin], x.pool)));
+  const c = candidates(scan).find((x) => clear(scan, x) && (scan.day === undefined || leadsDay(scan.day[x.coin], x.pool, scan.deep?.[x.coin])));
   return c === undefined ? null : { coin: c.coin, pool: c.pool };
 }
 /** Whether the scan's own reads let candidate `x` be judged: no busier pool elsewhere, the coin's other transactions at
  *  most 1/DOMINANCE of the pool's swaps, its quote's market read (pick, the vendor's day aside). */
 const clear = (scan, x) => scan.elsewhere?.[x.coin] === null && typeof scan.others?.[x.coin] === "number" && scan.others[x.coin] * DOMINANCE <= x.n && (scan.markets === undefined || scan.markets[x.quote] != null);
 /** Whether a coin's day on GeckoTerminal ({ pool id: transactions in 24 h }, null when not read) names `pool` its clear
- *  main pool: at least DOMINANCE times every other pool's transactions. */
-export function leadsDay(day, pool) {
+ *  main pool: at least DOMINANCE times every other pool's transactions, and, where the same list gives the pools' depths
+ *  (`deep`, { pool id: reserve in USD }), the deepest of them. A count alone can be a thin pool's bots: live run
+ *  45401968651's Base CHEWY pool LSTEAK/CHEWY 0xa9e660ca, 149 transactions in 24 h and $339 deep, beside CHEWY/PLAZM's
+ *  $46,703 (card v4-route-check-judges-the-deepest-pool). A depth not given for the pool (a record before the card)
+ *  leaves the count to judge alone. */
+export function leadsDay(day, pool, deep) {
   const n = day?.[pool];
-  return typeof n === "number" && n > 0 && Object.entries(day).every(([id, m]) => id === pool || m * DOMINANCE <= n);
+  if (!(typeof n === "number" && n > 0 && Object.entries(day).every(([id, m]) => id === pool || m * DOMINANCE <= n))) return false;
+  return deepBelow(deep, pool) === undefined;
+}
+/** The deepest other pool of `deep` when it holds more than `pool`, else undefined (also for a depth not given). */
+function deepBelow(deep, pool) {
+  const d = deep?.[pool];
+  if (typeof d !== "number") return undefined;
+  const top = Object.entries(deep).filter(([id, v]) => id !== pool && typeof v === "number" && v > d).sort((a, b) => b[1] - a[1])[0];
+  return top === undefined ? undefined : { id: top[0], usd: top[1], mine: d };
 }
 /** The busiest candidate whose quote traded against no USDC, WETH or ETH pool on Base in the scan (`markets[quote]`
  *  null): no pool the helper's tape can price, so the coin is judged on its answer's status alone. */
@@ -138,10 +153,13 @@ export function judge(run) {
   // the coins the scan's own reads would judge that the vendor's day did not name their clear main pool
   const day = run.scan.day;
   const cands = candidates(run.scan);
-  const notMain = day === undefined ? [] : cands.filter((x) => clear(run.scan, x) && !leadsDay(day[x.coin], x.pool));
+  const deep = run.scan.deep;
+  const notMain = day === undefined ? [] : cands.filter((x) => clear(run.scan, x) && !leadsDay(day[x.coin], x.pool, deep?.[x.coin]));
   const dayLine = (x) => {
     const d = day[x.coin];
     if (d == null) return `-- ${x.coin}: GeckoTerminal's list of its pools not read: not judged`;
+    const below = leadsDay(d, x.pool) ? deepBelow(deep?.[x.coin], x.pool) : undefined;
+    if (below !== undefined) return `-- ${x.coin}: its pool ${x.pool.slice(0, 10)} (${x.n} swaps in the scan) is not its clear main pool over the day on GeckoTerminal: ${d[x.pool]} transactions in 24 h, $${below.mine} deep, ${below.id.slice(0, 10)} $${below.usd} deep: not judged`;
     const next = Object.entries(d).filter(([id]) => id !== x.pool).sort((a, b) => b[1] - a[1])[0];
     return `-- ${x.coin}: its pool ${x.pool.slice(0, 10)} (${x.n} swaps in the scan) is not its clear main pool over the day on GeckoTerminal: ${d[x.pool] ?? "not listed"} transactions in 24 h${next === undefined ? "" : `, ${next[0].slice(0, 10)} ${next[1]}`}: not judged`;
   };
@@ -158,7 +176,7 @@ export function judge(run) {
     else good = bad(`the coin ${un.coin}, whose quote ${un.quote} has no market on Base the tape can price it by: trades ${status} ${u.trades?.body?.slice(0, 80)}, not 200: a listed coin's tape is never a 5xx`);
   }
   if (chosen === null) return { ok: good, verdict: good ? "PASS" : "FAIL", lines: [...lines, `-- no third-quoted coin whose quote has a market on Base in ${run.scan.pools.length} pools: no tape judged`] };
-  good = (chosen.coin === run.coin && chosen.pool === run.pool ? ok(`the coin ${run.coin}: its busiest pool ${run.pool} is quoted in a third token (${run.scan.pools.find((p) => p.id === run.pool).n} swaps in the scan, ${run.scan.others[run.coin]} other transactions of the coin; no v2 or v3 pool of it busier${day === undefined ? "" : `; ${day[run.coin][run.pool]} transactions in 24 h on GeckoTerminal, each other pool of the coin at most 1/${DOMINANCE} of it`})`) : bad(`the run judged ${run.coin} ${run.pool}, the scan picks ${chosen.coin} ${chosen.pool}`)) && good;
+  good = (chosen.coin === run.coin && chosen.pool === run.pool ? ok(`the coin ${run.coin}: its busiest pool ${run.pool} is quoted in a third token (${run.scan.pools.find((p) => p.id === run.pool).n} swaps in the scan, ${run.scan.others[run.coin]} other transactions of the coin; no v2 or v3 pool of it busier${day === undefined ? "" : `; ${day[run.coin][run.pool]} transactions in 24 h on GeckoTerminal, each other pool of the coin at most 1/${DOMINANCE} of it${typeof deep?.[run.coin]?.[run.pool] === "number" ? `, and its deepest ($${deep[run.coin][run.pool]})` : ""}`})`) : bad(`the run judged ${run.coin} ${run.pool}, the scan picks ${chosen.coin} ${chosen.pool}`)) && good;
   const t = run.trades;
   let rows = [];
   try {
@@ -311,30 +329,38 @@ export async function scan(fetchFn = fetch, rpcs = SWAP_RPCS.base.filter((u) => 
       }
     }
   }
-  // each coin the reads above would judge: its pools' transactions over the day on GeckoTerminal, null when not read
+  // each coin the reads above would judge: its pools' transactions over the day and their depths on GeckoTerminal, null
+  // when not read
   const day = {};
+  const deep = {};
   const found = { head, pools: top, elsewhere, others, markets };
   for (const c of candidates(found).filter((x) => clear(found, x))) {
     if (Object.keys(day).length > 0) await sleep(GT_EVERY_MS);
-    day[c.coin] = await dayOf(c.coin, fetchFn);
+    const d = await dayOf(c.coin, fetchFn);
+    day[c.coin] = d?.n ?? null;
+    deep[c.coin] = d?.usd ?? null;
   }
-  return { ...found, day };
+  return { ...found, day, deep };
 }
 
-/** A coin's pools on GeckoTerminal, { pool id: transactions in 24 h } (a v4 pool by its 32-byte id), null when the read
- *  gave no list. */
+/** A coin's pools on GeckoTerminal (a v4 pool by its 32-byte id): `n`, { pool id: transactions in 24 h }, and `usd`,
+ *  { pool id: reserve in USD, rounded; null when not given }; null when the read gave no list. */
 export async function dayOf(coin, fetchFn = fetch) {
   try {
     const r = await fetchFn(`${GT}/tokens/${coin}/pools?page=1`, { headers: { accept: "application/json", "cache-control": "no-cache" }, signal: AbortSignal.timeout(READ_MS) });
     const j = r.status === 200 ? await r.json() : null;
     if (!Array.isArray(j?.data)) return null;
-    const out = {};
+    const n = {};
+    const usd = {};
     for (const p of j.data) {
       const id = String(p?.attributes?.address ?? "").toLowerCase();
       const h = p?.attributes?.transactions?.h24;
-      if (/^0x([0-9a-f]{40}|[0-9a-f]{64})$/.test(id)) out[id] = (Number(h?.buys) || 0) + (Number(h?.sells) || 0);
+      const reserve = p?.attributes?.reserve_in_usd;
+      if (!/^0x([0-9a-f]{40}|[0-9a-f]{64})$/.test(id)) continue;
+      n[id] = (Number(h?.buys) || 0) + (Number(h?.sells) || 0);
+      usd[id] = reserve != null && Number.isFinite(Number(reserve)) ? Math.round(Number(reserve)) : null;
     }
-    return out;
+    return { n, usd };
   } catch {
     return null;
   }

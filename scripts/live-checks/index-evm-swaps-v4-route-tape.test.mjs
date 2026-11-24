@@ -197,6 +197,42 @@ test("the day never hides a miss: the burst scan whose pool leads the day by DOM
   assert.ok(u.lines.includes(`-- ${WBTC}: GeckoTerminal's list of its pools not read: not judged`), u.lines.join("\n"));
 });
 
+// card v4-route-check-judges-the-deepest-pool: live run 45401968651 (24 Nov 13:18Z) judged Base CHEWY on its LSTEAK/CHEWY
+// pool 0xa9e660ca, the busiest by count (149 transactions in 24 h, each other pool at most 68), which holds $339, while
+// CHEWY/PLAZM holds $46,703 and the helper's tape follows CHEWY/ETH 0xdb6d9113 ($1,906): a pool of bots' arbitrages is
+// no coin's main market. GeckoTerminal's same list gives each pool's reserve (`deep`): the judged pool must be the
+// coin's deepest too.
+const CHEWY_RUN = A.chewy_run_45401968651;
+const CHEWY = "0xe1ea7991432d1b7a1cb478fe433587a9dca51e2e";
+const LSTEAK_POOL = "0xa9e660ca1488d6dbbcb645a1a6d3a49fa1ae77166b36a3d830af11fac077e7db";
+const withDeep = (run, deep) => ({ ...copy(run), scan: { ...copy(run.scan), deep: copy(deep) } });
+test("chewy_run_45401968651: as recorded (no depth read) it judged CHEWY's $339 LSTEAK/CHEWY pool and failed; with GeckoTerminal's depths that pool is not CHEWY's deepest: no tape judged, CHEWY named, and the run passes on its unpriced coin's 200 alone (red at 342cf293b: FAIL)", () => {
+  assert.deepEqual(pick(CHEWY_RUN.scan), { coin: CHEWY, pool: LSTEAK_POOL });
+  const was = judge(CHEWY_RUN);
+  assert.equal(was.verdict, "FAIL", was.lines.join("\n"));
+  assert.ok(was.lines.some((l) => /^BAD 1 of 2 swap transactions of the coin's busiest pool 0xa9e660ca/.test(l)), was.lines.join("\n"));
+  const r = withDeep(CHEWY_RUN, A.chewy_deep.deep);
+  assert.equal(pick(r.scan), null);
+  const v = judge(r);
+  assert.equal(v.verdict, "PASS", v.lines.join("\n"));
+  assert.ok(v.lines.includes(`-- ${CHEWY}: its pool 0xa9e660ca (5 swaps in the scan) is not its clear main pool over the day on GeckoTerminal: 149 transactions in 24 h, $339 deep, 0x95c46679 $46703 deep: not judged`), v.lines.join("\n"));
+  assert.ok(v.lines.some((l) => /^ok  the coin 0x39cd7417.*: trades 200, never a 5xx$/.test(l)), v.lines.join("\n"));
+  assert.equal(v.lines.at(-1), `-- no third-quoted coin whose quote has a market on Base in ${CHEWY_RUN.scan.pools.length} pools: no tape judged`);
+});
+
+test("the depth never hides a miss: the CHEWY scan whose pool is also the deepest is judged, its missing swap FAILs; a depth not given for the pool, or a record with none, is judged on transactions alone", () => {
+  const deep = copy(A.chewy_deep.deep);
+  deep[CHEWY][LSTEAK_POOL] = 50_000;
+  const v = judge(withDeep(CHEWY_RUN, deep));
+  assert.equal(v.verdict, "FAIL", v.lines.join("\n"));
+  assert.ok(v.lines.some((l) => /^ok  the coin .*; 149 transactions in 24 h on GeckoTerminal, each other pool of the coin at most 1\/2 of it, and its deepest \(\$50000\)\)$/.test(l)), v.lines.join("\n"));
+  deep[CHEWY][LSTEAK_POOL] = null;
+  assert.deepEqual(pick(withDeep(CHEWY_RUN, deep).scan), { coin: CHEWY, pool: LSTEAK_POOL });
+  assert.equal(leadsDay({ "0xaa": 9, "0xbb": 1 }, "0xaa", { "0xaa": 5, "0xbb": 6 }), false);
+  assert.equal(leadsDay({ "0xaa": 9, "0xbb": 1 }, "0xaa", { "0xaa": 6, "0xbb": 6 }), true);
+  assert.equal(leadsDay({ "0xaa": 9, "0xbb": 1 }, "0xaa", undefined), true);
+});
+
 test("leadsDay: the pool at DOMINANCE times every other pool's 24 h transactions leads; under it, unlisted, none, or a list not read does not", () => {
   const P = "0xaa", Q = "0xbb";
   assert.equal(leadsDay({ [P]: 2 * DOMINANCE, [Q]: 2 }, P), true);
@@ -226,13 +262,15 @@ test("the scan reads the day of each coin it would judge, by GeckoTerminal's poo
     const out = mine.map((x, i) => x ?? rest[i]);
     return new Response(JSON.stringify(Array.isArray(b) ? out : out[0]), { status: 200 });
   };
-  const list = { data: [{ attributes: { address: POOL.toUpperCase().replace("0X", "0x"), transactions: { h24: { buys: 30, sells: 12 } } } }, { attributes: { address: PARTY, transactions: { h24: { buys: 4, sells: 1 } } } }] };
+  const list = { data: [{ attributes: { address: POOL.toUpperCase().replace("0X", "0x"), reserve_in_usd: "1234.56", transactions: { h24: { buys: 30, sells: 12 } } } }, { attributes: { address: PARTY, reserve_in_usd: "99.4", transactions: { h24: { buys: 4, sells: 1 } } } }] };
   const s = await scan(rig(() => new Response(JSON.stringify(list), { status: 200 })), RPCS);
   assert.equal(s.unread, undefined, s.unread);
   assert.deepEqual(asked, [`${GT}/tokens/${COIN}/pools?page=1`]);
   assert.deepEqual(s.day, { [COIN]: { [POOL]: 42, [PARTY]: 5 } });
+  assert.deepEqual(s.deep, { [COIN]: { [POOL]: 1235, [PARTY]: 99 } });
   assert.deepEqual(pick(s), { coin: COIN, pool: POOL });
   const t = await scan(rig(() => new Response("Too Many Requests", { status: 429 })), RPCS);
   assert.deepEqual(t.day, { [COIN]: null });
+  assert.deepEqual(t.deep, { [COIN]: null });
   assert.equal(pick(t), null);
 });
