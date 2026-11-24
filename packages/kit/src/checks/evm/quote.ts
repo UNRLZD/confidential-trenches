@@ -1721,8 +1721,18 @@ const POOLS_SLOT = 6n; // v4-core StateLibrary.POOLS_SLOT
 const U24 = 0xffffff;
 const keccak = (h: string) => hex(keccak_256(hexToBytes(h)));
 /** v4's PoolId: keccak256(abi.encode(PoolKey)). */
-const poolId = (k: EvmPoolKey) =>
+const poolIdOf = (k: EvmPoolKey) =>
   keccak(word(BigInt(k.currency0)) + word(BigInt(k.currency1)) + word(BigInt(k.fee)) + word(BigInt.asUintN(256, BigInt(k.tickSpacing))) + word(BigInt(k.hooks)));
+/** Each frozen key's PoolId, hashed once: a quote names one pool by its id many times over (its maps, its reads, its
+ *  bans), and at EVM_QUOTE_MAX_KEYS pools the hashing was most of its time (card readme-run-fits-an-agent-timeout: 57%
+ *  of the KB2 test's CPU). A key that is not frozen could change after it is read, so it is hashed at each ask. */
+const poolIds = new WeakMap<EvmPoolKey, string>();
+const poolId = (k: EvmPoolKey): string => {
+  if (!Object.isFrozen(k)) return poolIdOf(k);
+  let id = poolIds.get(k);
+  if (id === undefined) poolIds.set(k, (id = poolIdOf(k)));
+  return id;
+};
 /** The pool's state slot in the PoolManager (StateLibrary._getPoolStateSlot): slot0 there, liquidity 3 words on. */
 const stateSlot = (id: string) => keccak(id + word(POOLS_SLOT));
 /** `p` as a pool key of the token paired with any other currency, or null when it is malformed or not the token's. */
