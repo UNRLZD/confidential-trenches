@@ -41,6 +41,7 @@ import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
 import {
   SOLANA_BUILD_TIMEOUT_MS,
+  SOLANA_RPC_WINDOW_RETRY,
   assembleSolanaSwap,
   checkSolanaQuote,
   fetchSolanaJupiterBuildThatFits,
@@ -164,7 +165,9 @@ async function get(base, path) {
 
 export async function read({ base = BASE, token, burn, rounds = ROUNDS, burnUntil = Infinity, released = () => {} } = {}) {
   base = base.replace(/\/$/, "");
-  const live = RPCS.map((u) => solanaJsonRpc(u));
+  // card live-checks-ride-out-a-public-rpc-stall: a public RPC's timeout, throttle or 5xx is asked again within the kit's
+  // window (helper live run 45526898423: one read's 5 s timeout ended the check in an error, nothing judged)
+  const live = RPCS.map((u) => solanaJsonRpc(u, { retry: SOLANA_RPC_WINDOW_RETRY }));
   const mintPair = async (m) => {
     const got = await Promise.all(live.map((rpc) => rpc("getMultipleAccounts", [[m], { encoding: "base64", commitment: "processed" }])));
     return { slots: got.map((g) => g?.context?.slot), mint: got.map((g) => (g?.value?.[0] ? { owner: g.value[0].owner, data: g.value[0].data[0] } : null)) };

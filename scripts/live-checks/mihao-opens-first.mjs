@@ -21,7 +21,7 @@ import "../net-window.mjs";
 import { createHash } from "node:crypto";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { readSolanaPoolBuyVenue, solanaJsonRpc, SolanaRpcTransportError } from "../../packages/kit/src/index.ts";
+import { readSolanaPoolBuyVenue, SOLANA_RPC_WINDOW_RETRY, solanaJsonRpc, SolanaRpcTransportError } from "../../packages/kit/src/index.ts";
 
 const KEY = "mihao-opens-first";
 export const APP = "https://ct-app.unrealized.trade";
@@ -54,7 +54,9 @@ export function facts(app) {
 
 /** The coin's venue as the signing page's buy reads it (readCoinVenue): { mint, kind, at } or, when neither venue is one
  *  the buy fills, { mint, error }. A read that does not land throws. */
-export async function readVenue(mint, rpcs = RPCS.map((u) => solanaJsonRpc(u))) {
+// card live-checks-ride-out-a-public-rpc-stall: a stall is asked again within the kit's window, and one that outlasts it
+// is the SolanaRpcTransportError thrown below, never a venue's refusal
+export async function readVenue(mint, rpcs = RPCS.map((u) => solanaJsonRpc(u, { retry: SOLANA_RPC_WINDOW_RETRY }))) {
   let error;
   for (const kind of ["pump-curve", "pumpswap"]) {
     try {

@@ -25,7 +25,7 @@
 import "../net-window.mjs";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { readSolanaClmmMarket, solanaJsonRpc } from "../../packages/kit/src/index.ts";
+import { SOLANA_RPC_WINDOW_RETRY, readSolanaClmmMarket, solanaJsonRpc } from "../../packages/kit/src/index.ts";
 import { COIN, POOL, PROVIDERS } from "./solana-buy-never-below-a-hidden-market.mjs";
 
 export const KEY = "clmm-floor-covers-the-whole-buy";
@@ -86,7 +86,8 @@ export async function judge(run) {
 export async function read({ plantLie = false, appJs } = {}) {
   const providers = {};
   const rpcs = PROVIDERS.map((u, i) => {
-    const rpc = solanaJsonRpc(u, { timeoutMs: 8_000 });
+    // card live-checks-ride-out-a-public-rpc-stall: a stall is asked again within the kit's window
+    const rpc = solanaJsonRpc(u, { timeoutMs: 8_000, retry: SOLANA_RPC_WINDOW_RETRY });
     providers[u] = {};
     return Object.assign(async (method, params, signal) => {
       let ans = await rpc(method, params, signal);
