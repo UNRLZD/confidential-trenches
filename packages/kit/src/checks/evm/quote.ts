@@ -3400,8 +3400,43 @@ export const EVM_HOLD_MS = 30_000;
  *  (pace.ts evmThrottleHoldMs, card evm-helper-429-waits-its-retry-after), every other provider EVM_HOLD_MS. */
 const throttleHoldMs = (url: string | undefined, afterMs: number | null): number =>
   url !== undefined && evmHelperRoute(url) ? evmThrottleHoldMs(url, afterMs) : EVM_HOLD_MS;
-/** Forgets every provider's measured time and hold: for the tests, which share this module's state (not in the index). */
-export const evmSpeedReset = (): void => SPEED.clear();
+/** How long after a block's first read a state-cut answer (stateless) to a read at it is still the provider's own cut:
+ *  past it, the answer is the read's age, and holds no provider (card evm-state-cut-holds-only-fresh-reads). Read from
+ *  the Mac 25 Nov 17:1xZ with the kit's holds logged: Robinhood's publicnode (-32602 "Archive requests require a personal
+ *  token") and bloXroute (-32000 "historical state ... is not available") each answered a 13.4 s cold quote's late reads
+ *  at its own block, about 128 blocks back at Robinhood's 104.7 ms a block (read over 10.4 s, 17:2xZ), and each was held
+ *  30 s, so the taps after it ran on the paced providers left. publicnode refuses state 100 blocks back (10.5 s on
+ *  Robinhood, 20 s on Base's 200 ms); 4 s is inside every cut read, so a provider whose cut fails a quote's first rounds
+ *  is still held by them. */
+export const EVM_STATE_FRESH_MS = 4_000;
+/** When each block hash a read names was first sent to any quote provider (timed): a block's age to this device. */
+const HASH_SENT = new Map<string, number>();
+const HASH_SENT_KEPT = 256;
+/** The time the oldest block a post's eth_calls name by hash was first sent, each one not seen before taken as sent at
+ *  `now`; null where none names one by hash (a read by number or "latest" is judged fresh, as before). */
+const firstSentOf = (calls: readonly EvmRpcCall[], now: number): number | null => {
+  let first: number | null = null;
+  for (const c of calls) {
+    if (c.method !== "eth_call") continue;
+    const at = (c.params[1] as { blockHash?: unknown } | null | undefined)?.blockHash;
+    if (typeof at !== "string") continue;
+    const h = lower(at);
+    let sent = HASH_SENT.get(h);
+    if (sent === undefined) {
+      sent = now;
+      HASH_SENT.set(h, now);
+      if (HASH_SENT.size > HASH_SENT_KEPT) HASH_SENT.delete(HASH_SENT.keys().next().value!);
+    }
+    first = first === null ? sent : Math.min(first, sent);
+  }
+  return first;
+};
+/** Forgets every provider's measured time and hold, and each block's first read: for the tests, which share this
+ *  module's state (not in the index). */
+export const evmSpeedReset = (): void => {
+  SPEED.clear();
+  HASH_SENT.clear();
+};
 const speedOf = (url: string) => {
   const s = SPEED.get(url) ?? { ms: null, held: 0, out: [], last: 0, failed: -Infinity, times: new Map<string, number[]>() };
   SPEED.set(url, s);
@@ -3431,6 +3466,8 @@ const timed = (url: string, rpc: EvmRpc): EvmRpc => {
     // the half-open provider's probe (rankClass): its first post since its hold ended
     const till = heldTill(url, s);
     const probe = till > 0 && till <= t && s.last < till;
+    // when the oldest block this post reads at was first read (EVM_STATE_FRESH_MS)
+    const firstSent = firstSentOf(calls, t);
     s.out.push(t);
     // the post's own time on the wire: from its send, past the device's gate and pace (card
     // evm-warm-tap-ends-inside-two-seconds, round F)
@@ -3448,8 +3485,12 @@ const timed = (url: string, rpc: EvmRpc): EvmRpc => {
       s.last = performance.now();
       // an answer that names a rate limit or a state the provider does not hold is held, never measured: such an error
       // comes back fast, and a provider past its state cut kept first by it failed every quote's reads (card
-      // evm-quote-lag-held)
-      if (out.some(limited) || out.some(stateless)) s.held = performance.now() + (out.some(stateless) ? EVM_HOLD_MS : throttleHoldMs(url, null));
+      // evm-quote-lag-held). A state-cut answer alone to a read at a block first read past EVM_STATE_FRESH_MS before is
+      // the read's age, not the provider's cut: never measured, never held (card evm-state-cut-holds-only-fresh-reads)
+      if (out.some(limited) || out.some(stateless)) {
+        const late = !out.some(limited) && firstSent !== null && t - firstSent > EVM_STATE_FRESH_MS;
+        if (!late) s.held = performance.now() + (out.some(stateless) ? EVM_HOLD_MS : throttleHoldMs(url, null));
+      }
       // an answer for a block the provider does not hold yet is no measure of its speed (re-review INFO 4)
       else if (!out.some(notYet)) {
         const ms = performance.now() - (wire ?? t);
