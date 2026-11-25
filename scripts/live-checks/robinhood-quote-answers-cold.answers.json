@@ -1,30 +1,30 @@
 {
  "want": {
-  "base": "c894b72ab0804c06b323efc21f3fb626f55133a359f54aae9b13fd9c627d5fd0",
-  "robinhood": "e32f5cb52846a9fb60a2657b32b9da22eff1dd7ce81321fa80aa5ccc86a07769"
+  "base": "3eff897c384f0daf1af702174c8728ec311a13cd4bfdbb051c089a0b99619102",
+  "robinhood": "d38a773cd87545f085f882bed235ce57589a56432a22c85f95d3c358d6a943cc"
  },
  "good": {
-  "note": "card signpage-release-206, 2026-11-25T00:04Z: both snapshots refreshed at the release-204 cut (Base through 61,872,584, Robinhood through 122,617,255), read from a folder holding the committed data/evm-index files byte for byte (--site): PASS",
+  "note": "card signpage-release-207, 2026-11-25T11:36Z: both snapshots refreshed at the release-205 cut (Base through 62,073,130, Robinhood through 122,989,103), read from a folder holding the committed data/evm-index files byte for byte (--site): PASS",
   "run": {
    "sign": "https://confidential.unrealized.trade",
    "site": "a build folder at SIGN_HOST's name",
-   "at": "2026-11-25T00:04:45.140Z",
+   "at": "2026-11-25T11:36:17.162Z",
    "snapshots": {
     "base": {
      "status": 200,
-     "bytes": 1383875,
-     "sha": "c894b72ab0804c06b323efc21f3fb626f55133a359f54aae9b13fd9c627d5fd0",
-     "through": 61872584,
-     "pools": 8876,
-     "head": 61873549
+     "bytes": 1400174,
+     "sha": "3eff897c384f0daf1af702174c8728ec311a13cd4bfdbb051c089a0b99619102",
+     "through": 62073130,
+     "pools": 8987,
+     "head": 62081008
     },
     "robinhood": {
      "status": 200,
-     "bytes": 4324043,
-     "sha": "e32f5cb52846a9fb60a2657b32b9da22eff1dd7ce81321fa80aa5ccc86a07769",
-     "through": 122617255,
-     "pools": 27666,
-     "head": 122624826
+     "bytes": 4182301,
+     "sha": "d38a773cd87545f085f882bed235ce57589a56432a22c85f95d3c358d6a943cc",
+     "through": 122989103,
+     "pools": 26762,
+     "head": 123009511
     }
    }
   }
