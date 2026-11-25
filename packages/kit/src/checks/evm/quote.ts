@@ -2406,7 +2406,7 @@ const SCAN_BACKOFF_MAX_MS = 8_000;
  *  - Nothing is sent once the quote's bound has passed, and no request runs past it (re-review of 59a69e2, MEDIUM-1: a
  *    provider that timed out every request was asked one at a time, about 10.8 hours at the 10 s deadline).
  *  One gate per quote, so a request that never returns holds up that quote alone. */
-type ScanGate = { ask: (rpc: EvmRpc, calls: readonly EvmRpcCall[], tries: number, fast?: boolean, hedge?: ScanHedge, force?: boolean) => Promise<readonly unknown[]> };
+type ScanGate = { ask: (rpc: EvmRpc, calls: readonly EvmRpcCall[], tries: number, fast?: boolean, hedge?: ScanHedge, force?: boolean, cut?: AbortSignal) => Promise<readonly unknown[]> };
 /** A warm scan request that a stand-in races (scanPools' `run`, round F): `sent` when it leaves the device, past the
  *  gate and the provider's pace, and `lost`, which ends it once the stand-in's answer won. Such a request is not cut at
  *  EVM_SCAN_HOLD_MS: the stand-in, asked at the provider's own time for its getLogs, is what ends its wait. */
@@ -2587,7 +2587,7 @@ function scanGateOf(parallel: number, untilMs: number, spareNext = false, deadli
     }
   };
   return {
-    async ask(rpc, calls, tries, fast = false, hedge, force = false) {
+    async ask(rpc, calls, tries, fast = false, hedge, force = false, cut) {
       scanAsks++;
       fast &&= spareNext;
       // a request the next reads in one round of its own requests (`spareBlocks`, its span x its parallel): a warm one,
@@ -2628,6 +2628,11 @@ function scanGateOf(parallel: number, untilMs: number, spareNext = false, deadli
       let refused = 0;
       for (let i = 0; ; ) {
         await take(fast);
+        // a request of a race already over (scanPools raced's `cut`) is sent no more, at none of its tries
+        if (cut?.aborted) {
+          done();
+          throw cut.reason;
+        }
         const now = away();
         if (now !== null) {
           done();
@@ -2894,7 +2899,7 @@ async function scanPools(
   // `hedge`: the race's hooks of a warm request a stand-in races
   type Got = { part: Each[]; a: number; b: number; logs: unknown[]; spare: boolean };
   // `force`: asked of a provider that passed it over unsent once the providers after it failed it (ScanPassed)
-  type Job = { part: Each[]; a: number; b: number; on: ScanOn; into?: Got[] | undefined; hedge?: ScanHedge | undefined; force?: boolean | undefined };
+  type Job = { part: Each[]; a: number; b: number; on: ScanOn; into?: Got[] | undefined; hedge?: ScanHedge | undefined; force?: boolean | undefined; cut?: AbortSignal | undefined };
   const jobs: Job[] = [];
   // the halving requests asked for answers short of the logs, and the most an honest chain needs (SCAN_SHORT_LEVEL)
   let shorts = 0;
@@ -2948,7 +2953,7 @@ async function scanPools(
   const got: Got[] = [];
   // the tail answered a flood (TailFlood): no request of this scan is sent after it, its halves included
   let flooded = false;
-  const one = async ({ part, a, b, on, into, hedge, force }: Job, splits = SCAN_SPLITS): Promise<void> => {
+  const one = async ({ part, a, b, on, into, hedge, force, cut }: Job, splits = SCAN_SPLITS): Promise<void> => {
     if (flooded) throw new TailFlood("rpc_error", "the chain's tail answered a flood of pools");
     const f = (topics: (string | string[] | null)[]) => ({ method: "eth_getLogs", params: [{ address: pm, fromBlock: "0x" + a.toString(16), toBlock: "0x" + b.toString(16), topics }] });
     const t = part.length === 1 ? w(part[0]!.c) : part.map((e) => w(e.c));
@@ -2985,6 +2990,8 @@ async function scanPools(
           }
           return out;
         };
+    // each ask of the request at its provider's gate, with the cut of the race it stands in for (raced)
+    const gateAsk = (tries: number, h?: ScanHedge, f = false) => on.gate.ask(rpc, calls, tries, fast, h, f, cut);
     // the logs' answers, and where pinned, a refusal unless the batch's provider holds the agreed block; null where the
     // request is the newest and its provider answered no block for it: a lag, as a null is (NotHeldYet)
     const logsOf = (out: readonly unknown[]): unknown[] | null => {
@@ -2995,9 +3002,11 @@ async function scanPools(
       return out.slice(0, filters.length).map((x) => (x as { result?: unknown } | null)?.result);
     };
     const keep = (rs: unknown[]) => (into ?? got).push(...rs.map((r) => ({ part, a, b, logs: r as unknown[], spare: on !== first })));
+    // the request's own follow-ups on its provider (its halves, its span up to the provider's own head), with its cut
+    const sub = (from: number, to: number, left: number) => one({ part, a: from, b: to, on, into, force, cut }, left);
     const halves = (left: number) => {
       const mid = a + Math.floor((b - a) / 2);
-      return settle([one({ part, a, b: mid, on, into, force }, left), one({ part, a: mid + 1, b, on, into, force }, left)]);
+      return settle([sub(a, mid, left), sub(mid + 1, b, left)]);
     };
     // The provider's own answer short of every log (an error in any words, or in its data alone; an HTTP status other
     // than 429 or 5xx; a body that is not a batch or past its size; SCAN_MAX_LOGS logs) is asked as its halves on that
@@ -3026,8 +3035,7 @@ async function scanPools(
         if (++shorts > shortMax) throw new ScanStop("rpc_error", "the scan provider answered errors past an honest split");
         await new Promise((r) => setTimeout(r, SCAN_AGAIN_MS * t));
         let said = false;
-        const again = await on.gate
-          .ask(rpc, calls, 1, fast)
+        const again = await gateAsk(1)
           .then(logsOf)
           .catch((e) => {
             if (e instanceof ScanStop) throw e;
@@ -3065,7 +3073,7 @@ async function scanPools(
     // 59783246 yet" in 2,218 to 6,303 ms. One further behind refuses as before; the provider answering holds the request's
     // own last block in its batch as any request's
     let ownTo: number | null = null;
-    const rs = await on.gate.ask(rpc, calls, last ? SCAN_TRIES : 1, fast, hedge, force).then((out) => (behindIn(out) ? ((behind = true), null) : logsOf(out)), async (e) => {
+    const rs = await gateAsk(last ? SCAN_TRIES : 1, hedge, force).then((out) => (behindIn(out) ? ((behind = true), null) : logsOf(out)), async (e) => {
       if (unheld && own !== undefined && (e instanceof NotHeldYet || e instanceof ScanRefused)) {
         const h = await own().then(Number, () => null);
         if (h !== null && h < b && head - h <= lag) return ((ownTo = h), null);
@@ -3078,7 +3086,7 @@ async function scanPools(
       notYet = e instanceof NotHeldYet;
       return null;
     });
-    if (ownTo !== null) return a > ownTo ? undefined : one({ part, a, b: ownTo, on, into, force }, splits);
+    if (ownTo !== null) return a > ownTo ? undefined : sub(a, ownTo, splits);
     // the tail's answer past 4 times the pools the venue's measured rate makes of its blocks (and past one): a flood of
     // pools (independent review of 266cca1b4, M3: 50,000 made-up pools of other currencies in the tail's blocks cost a
     // quote 15 getLogs and 50,001 logs where main asked 2), so this quote drops the tail and scans by currency, as main
@@ -3103,8 +3111,7 @@ async function scanPools(
     if (behind && behindLeft > 0) {
       behindLeft--;
       await new Promise((r) => setTimeout(r, SCAN_AGAIN_MS));
-      const again = await on.gate
-        .ask(rpc, calls, 1, fast)
+      const again = await gateAsk(1)
         .then((out) => (behindIn(out) ? null : logsOf(out)))
         .catch((e) => {
           if (e instanceof ScanStop) throw e;
@@ -3117,7 +3124,7 @@ async function scanPools(
     if (alone) return halves(splits);
     // one whose last block the provider does not hold yet is asked again whole, its tries left (NotHeldYet)
     if (notYet) {
-      const again = logsOf(await on.gate.ask(rpc, calls, SCAN_TRIES - 1, fast, undefined, force));
+      const again = logsOf(await gateAsk(SCAN_TRIES - 1, undefined, force));
       if (again === null) return refuse("rpc_error", "the scan provider answered no logs");
       if (!fine(again)) return short();
       return void keep(again);
@@ -3192,6 +3199,15 @@ async function scanPools(
       let back: ReturnType<typeof setTimeout> | undefined;
       let backed = false;
       const stop = new AbortController();
+      // the stand-in's cut: once the race is over, the stand-in is sent no more requests, down every race of its own (a
+      // hedged request's other copy is cut once one answers, as Dean and Barroso's "The Tail at Scale" has it). The
+      // first's request carries only the cut of a race it stands in for: once the stand-in wins, `lost` ends it at its
+      // send, and as a warm request with a next it asks its provider nothing more but its span up to the provider's own
+      // head (ownTo), which waits on the quote's head read: with the first 20 blocks behind a held head and answering
+      // that read first, it still named the stand-in's head, and with the stand-in's read failing the quote refused,
+      // the first asked nothing more either way (read on this card's branch, 2026-11-25 22:3xZ)
+      const ended = new AbortController();
+      const cut = j.cut === undefined ? ended.signal : AbortSignal.any([j.cut, ended.signal]);
       const lost = new Promise<never>((_, no) => {
         if (stop.signal.aborted) return no(stop.signal.reason);
         stop.signal.addEventListener("abort", () => no(stop.signal.reason), { once: true });
@@ -3204,6 +3220,7 @@ async function scanPools(
         clearTimeout(timer);
         clearTimeout(back);
         go();
+        ended.abort(new ScanStop("rpc_error", "the scan request's race is over"));
       };
       const win = (xs: Got[]) => end(() => ((j.into ?? got).push(...xs), resolve()));
       const fail = (e: unknown) => end(() => reject(e));
@@ -3214,10 +3231,10 @@ async function scanPools(
         const rest: Job[] = [];
         jobsOf(j.part, j.a, j.b, next, rest);
         shortMax += 2 * rest.length;
-        settle(rest.map((r) => run({ ...r, into: theirs }))).then(
+        settle(rest.map((r) => run({ ...r, into: theirs, cut }))).then(
           () => {
-            win(theirs);
             lose(new ScanRefused("rpc_error", "the next scan provider answered first"));
+            win(theirs);
           },
           (e) => {
             nextOut = { e };

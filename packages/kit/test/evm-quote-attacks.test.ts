@@ -7882,8 +7882,8 @@ test("SL9 card base-warm-quote-rides-a-stalled-last-scan: a scan's request its h
 // and answered in 153 ms, while the stand-in's last answered each block beyond its head. A first that passed a warm
 // request over is asked once the stand-in has been out past the first's own time for a getLogs (evmHedgeAfter), the rule
 // the stand-in itself is asked by; EVM_SCAN_HOLD_MS only before the first has any. Here the first answers two quotes (its
-// time measured), is held, the next two refuse and the last never answers a getLogs: the first is asked before
-// EVM_SCAN_HOLD_MS on the test clock (a timer just short of it marks it).
+// time measured), is held, the next two refuse and the last never answers a getLogs: the first is asked, and the whole
+// quote ends, before EVM_SCAN_HOLD_MS on the test clock (a timer just short of it marks it).
 test("SL10 card evm-held-first-asked-at-its-own-time: a warm scan's held first, its time measured, is asked at that time where the stand-in has not answered, never at EVM_SCAN_HOLD_MS", { timeout: 60_000 }, () => onTestClock(async () => {
   evmPaceReset();
   quoteMod.evmSpeedReset();
@@ -7910,12 +7910,68 @@ test("SL10 card evm-held-first-asked-at-its-own-time: a warm scan's held first, 
   const hang: EvmRpc = async (calls, signal) => (calls.some((c) => c.method === "eth_getLogs") ? untilAborted(signal) : last(calls));
   const mark = setTimeout(() => events.push("hold"), quoteMod.EVM_SCAN_HOLD_MS - 1);
   const v = await triQuote(token, [first, refusing("two.sl10.test"), refusing("three.sl10.test"), hang], "base", 5_000_010);
+  events.push("done");
   clearTimeout(mark);
   evmPaceReset();
   console.log(`SL10: ${JSON.stringify(v)}, own ${own} ms, ${JSON.stringify(events)}`);
   assert.deepEqual(v, below);
   assert.ok(events.includes("first"), "the held first was never asked");
-  assert.ok(!events.includes("hold") || events.indexOf("first") < events.indexOf("hold"), `the held first was asked only at EVM_SCAN_HOLD_MS: ${JSON.stringify(events)}`);
+  assert.ok(!events.includes("hold"), `the quote ended only at EVM_SCAN_HOLD_MS, its held first asked then: ${JSON.stringify(events)}`);
+}));
+
+// card evm-held-first-asked-at-its-own-time: with the first asked at its own time, a read-only Base run from the Mac,
+// publicnode held and Sentio's 19:4xZ answers planted (2026-11-25 22:0xZ), had publicnode answer the warm span at 0.9 s
+// in a quote that ended at 7,642 ms, 150 ms after the last of nine "beyond the latest block" answers Sentio gave to
+// halves of blocks already back: the stand-in the first beat was never cut, and Tenderly, Pocket and Sentio were each
+// still asked the span, at their paces, while the quote waited on the gates they held. A stand-in is cut once the
+// first's answer is kept, as a hedged request's other copy is (each provider's gate sends nothing more of it). Here the
+// first answers two quotes (its time measured) and is held; the three after it are behind its head, each answering a
+// getLogs "beyond the latest block" (the second and the third in 10 ms, the last in 250, so the last is halving its
+// blocks when the first answers): the quote ends at the first's answer, before EVM_SCAN_HOLD_MS on the test clock, and
+// none of the three is sent a getLogs after it (the first's own tail, read on after a quote, is its own).
+test("SL11 card evm-held-first-asked-at-its-own-time: a stand-in the held first beat is cut: no provider after it is sent another request once the first's answer is kept, and the quote ends then", { timeout: 60_000 }, () => onTestClock(async () => {
+  evmPaceReset();
+  quoteMod.evmSpeedReset();
+  const token = "0x00000000000000000000000000000000005c4651";
+  const url = "https://base-rpc.publicnode.com";
+  let inner = scanner(5_000_000, []);
+  const events: string[] = [];
+  const posted = (name: string, answer: (calls: { method: string; params: unknown[] }[]) => Promise<unknown>) =>
+    (async (_u: string, init: RequestInit) => {
+      const calls = (JSON.parse(init.body as string) as { method: string; params: unknown[] }[]).map((c) => ({ method: c.method, params: c.params }));
+      if (calls.some((c) => c.method === "eth_getLogs")) events.push(name);
+      return new Response(JSON.stringify(await answer(calls)), { status: 200 });
+    }) as unknown as typeof fetch;
+  const first = evmJsonRpc(url, posted("first", (calls) => inner(calls)));
+  await triQuote(token, [first, scanner(5_000_000, []), scanner(5_000_000, []), scanner(5_000_000, [])]);
+  inner = scanner(5_000_005, []);
+  await triQuote(token, [first, scanner(5_000_005, []), scanner(5_000_005, []), scanner(5_000_005, [])], "base", 5_000_005);
+  assert.ok((quoteMod.evmHedgeAfter(url, "logs") ?? Infinity) < quoteMod.EVM_SCAN_HOLD_MS, "the first's own time was never measured");
+  inner = scanner(5_000_010, realAt(token, 5_000_008));
+  events.length = 0;
+  evmProviderHold(url);
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const behind = (host: string, ms: number) => {
+    const s = scanner(5_000_010, realAt(token, 5_000_008));
+    return evmJsonRpc(`https://${host}`, posted(host, async (calls) => {
+      if (!calls.some((c) => c.method === "eth_getLogs")) return s(calls);
+      await wait(ms);
+      return calls.map((_c, id) => ({ jsonrpc: "2.0", id, error: { code: -32000, message: "block 5000010 is beyond the latest block 4999929 of this node, retry" } }));
+    }));
+  };
+  const mark = setTimeout(() => events.push("hold"), quoteMod.EVM_SCAN_HOLD_MS - 1);
+  const v = await triQuote(token, [first, behind("two.sl11.test", 10), behind("three.sl11.test", 10), behind("four.sl11.test", 250)], "base", 5_000_010);
+  events.push("done");
+  clearTimeout(mark);
+  // what a stand-in left running would still send, on the test clock
+  await wait(20_000);
+  evmPaceReset();
+  console.log(`SL11: ${JSON.stringify(v)}, ${JSON.stringify(events.filter((e, i) => e !== "first" || i <= events.indexOf("done")))}`);
+  assert.deepEqual(v, below);
+  assert.ok(events.includes("first"), "the held first was never asked");
+  assert.ok(!events.includes("hold") && events.includes("done"), `the quote ended only at EVM_SCAN_HOLD_MS: ${JSON.stringify(events)}`);
+  const after = events.slice(events.indexOf("done") + 1).filter((e) => e !== "first");
+  assert.deepEqual(after, [], `stand-in requests sent after the first's answer was kept: ${JSON.stringify(events.filter((e, i) => e !== "first" || i <= events.indexOf("done")))}`);
 }));
 
 test("TAIL4 card evm-scan-chain-tail (independent review of 92717c7, MEDIUM 1): blocks a spare answered no logs of are never kept as read for another coin: a pool of B made there is found by B's quote on the first", { timeout: 60_000 }, () => onTestClock(async () => {

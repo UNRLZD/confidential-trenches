@@ -263,7 +263,7 @@ export const MUTANTS = [
   // through its hold, where the providers after it fail it (the warm race at once or at EVM_SCAN_HOLD_MS, the cold run,
   // the head's read)
   [QUOTE, "!spare || provider === undefined || force", "!spare || provider === undefined", R, "SL8 "],
-  [QUOTE, "    const rs = await on.gate.ask(rpc, calls, last ? SCAN_TRIES : 1, fast, hedge, force).then(", "    const rs = await on.gate.ask(rpc, calls, last ? SCAN_TRIES : 1, fast, hedge).then(", R, "SL8 "],
+  [QUOTE, "    const rs = await gateAsk(last ? SCAN_TRIES : 1, hedge, force).then(", "    const rs = await gateAsk(last ? SCAN_TRIES : 1, hedge).then(", R, "SL8 "],
   [QUOTE, "          if (e instanceof ScanPassed) back ??= setTimeout(again,", "          if (false) back ??= setTimeout(again,", R, "SL8 "],
   [QUOTE, "            if (firstOut.e instanceof ScanPassed && !backed) return again();", "            if (false) return again();", R, "SL8 "],
   [QUOTE, "        one({ ...j, into: ours, force: true, hedge:", "        one({ ...j, into: ours, force: false, hedge:", R, "SL8 "],
@@ -277,6 +277,14 @@ export const MUTANTS = [
   [QUOTE, "        if (url !== undefined && wire !== undefined) scanTook(url, performance.now() - wire);", "        if (false) scanTook(url, performance.now() - wire);", R, "SL10 "],
   [QUOTE, "          if (e instanceof ScanPassed) back ??= setTimeout(again, evmHedgeAfter(url, \"logs\") ?? EVM_SCAN_HOLD_MS);", "          if (e instanceof ScanPassed) back ??= setTimeout(again, EVM_SCAN_HOLD_MS);", R, "SL10 "],
   [QUOTE, "  t.push(ms);\n  if (t.length > EVM_HEDGE_KEPT) t.shift();\n};\nexport function evmHedgeAfter(", "  if (t.length > EVM_HEDGE_KEPT) t.shift();\n};\nexport function evmHedgeAfter(", R, "SL10 "],
+  // card evm-held-first-asked-at-its-own-time: a race's stand-in is cut once the race is over, down every race of its
+  // own and every half, at each ask of a provider's gate
+  [QUOTE, "        if (cut?.aborted) {\n          done();\n          throw cut.reason;\n        }", "        if (false) {\n          done();\n          throw cut.reason;\n        }", R, "SL11 "],
+  [QUOTE, "        ended.abort(new ScanStop(", "        void (new ScanStop(", R, "SL11 "],
+  [QUOTE, "settle(rest.map((r) => run({ ...r, into: theirs, cut })))", "settle(rest.map((r) => run({ ...r, into: theirs })))", R, "SL11 "],
+  [QUOTE, "      const cut = j.cut === undefined ? ended.signal : AbortSignal.any([j.cut, ended.signal]);", "      const cut = ended.signal;", R, "SL11 "],
+  [QUOTE, "on.gate.ask(rpc, calls, tries, fast, h, f, cut)", "on.gate.ask(rpc, calls, tries, fast, h, f)", R, "SL11 "],
+  [QUOTE, "one({ part, a: from, b: to, on, into, force, cut }, left)", "one({ part, a: from, b: to, on, into, force }, left)", R, "SL11 "],
   // re-anchored (card evm-unreachable-moves-on): the 5xx test is serverFault's since card evm-5xx-holds-the-provider-
   // for-the-round; SL1 passes on it (the request still reaches the next after its tries), SP5xx does not
   [QUOTE, "          if (spareNext && out5xx && !deepCall) {", "          if (false && out5xx && !deepCall) {", R, "SP5xx "],
