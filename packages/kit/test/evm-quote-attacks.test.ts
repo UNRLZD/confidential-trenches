@@ -6458,6 +6458,41 @@ test("LH2 a provider that answers fast with a 200 carrying a state error ranks b
   assert.equal(hostOf(quoteMod.evmRanked(urls).at(-1)!), "cut.lh2.test");
 });
 
+// card evm-state-cut-holds-only-fresh-reads: read from the Mac 25 Nov 17:1xZ (the kit's holds logged), Robinhood's
+// publicnode and bloXroute were each held 30 s for their state-cut answers to a 13.4 s cold quote's late reads at its own
+// block, about 128 blocks back at 104.7 ms a block, and the taps after it ran on the paced providers left
+test("LH4 a state-cut answer to a read whose block was first sent past EVM_STATE_FRESH_MS holds no provider; a fresh read's still holds it", () => onTestClock(async () => {
+  quoteMod.evmSpeedReset();
+  // read off the module, so this file still loads at a base without it and the test fails on the behaviour
+  const FRESH_MS = (quoteMod as unknown as { EVM_STATE_FRESH_MS?: number }).EVM_STATE_FRESH_MS ?? 4_000;
+  const OLD = "0x" + "a1".repeat(32);
+  const NEWER = "0x" + "b2".repeat(32);
+  let cut = false;
+  // past its state window for OLD once `cut`, and for NEWER at once (publicnode's words, -32602, 25 Nov 17:1xZ)
+  const windowed: EvmRpc = async (calls) =>
+    calls.map((c, id) => {
+      const at = (c.params[1] as { blockHash?: string } | undefined)?.blockHash;
+      if (c.method === "eth_call" && ((at === OLD && cut) || at === NEWER)) return { jsonrpc: "2.0", id, error: { code: -32602, message: "Archive requests require a personal token. Get one at: https://www.allnodes.com/publicnode" } };
+      return { jsonrpc: "2.0", id, result: "0x" };
+    });
+  const { f, urls, idle } = hosted({ "cut.lh3.test": { rpc: windowed, ms: 1 }, "a.lh3.test": { rpc: windowed, ms: 80 } });
+  const [p] = quoteMod.evmProviders(urls, f);
+  const read = (hash: string) => p!([{ method: "eth_call", params: [{ to: NATIVE, data: "0x" }, { blockHash: hash, requireCanonical: true }] }]);
+  // the quote's first read at its block, answered
+  await read(OLD);
+  assert.equal(hostOf(quoteMod.evmRanked(urls)[0]!), "cut.lh3.test", "measured, the first");
+  // the same quote's read at that block past the window, answered with the provider's state cut: the read's age
+  await pause(FRESH_MS + 1);
+  cut = true;
+  await read(OLD);
+  await idle();
+  assert.equal(hostOf(quoteMod.evmRanked(urls)[0]!), "cut.lh3.test", `not held for a late read: ranked ${quoteMod.evmRanked(urls).map(hostOf).join(",")}`);
+  // a read at a block first sent now, answered the same: the provider's own cut, held as LH2
+  await read(NEWER);
+  await idle();
+  assert.equal(hostOf(quoteMod.evmRanked(urls).at(-1)!), "cut.lh3.test", `held for a fresh read: ranked ${quoteMod.evmRanked(urls).map(hostOf).join(",")}`);
+}));
+
 // the review of the lag hold (card evm-quote-lag-held): MED-1 a non-2xx answer, MED-2 the retry's majority, LOW-1 one
 // hold a quote, LOW-2 a revert, LOW-3 the no-longer answers alone, LOW-4 the two-provider list, LOW-5 one wait
 /** A provider at `top` holding every block up to it by number (each model block has the hash NEW), or, with `fake`,
