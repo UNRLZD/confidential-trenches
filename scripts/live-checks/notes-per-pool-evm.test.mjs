@@ -7,8 +7,10 @@
 // and a sync with no end fails at its deadline, naming the call it is stuck on.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import http from "node:http";
 import { test } from "node:test";
-import { CHAINS, VIEWS, check, replayer, spoil } from "./notes-per-pool-evm.mjs";
+import { CHAINS, VIEWS, check, post, replayer, spoil } from "./notes-per-pool-evm.mjs";
+import { RETRY } from "./provider-answer.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./notes-per-pool-evm.answers.json", import.meta.url), "utf8"));
 /** The page the pool sync's page counts are held to, in blocks: the pager's first and widest before card
@@ -146,6 +148,83 @@ test("Base's pair pages the pool's whole life at the pager's full page, each pro
     const n = pages.get(new URL(u).host) ?? 0;
     assert.ok(n > 0 && n <= budget, `${new URL(u).host}: ${n} eth_getLogs pages, over ${budget} (${[...pages].map(([h, k]) => `${h} ${k}`).join(", ")})`);
   }
+});
+
+/** A local provider answering every POST with `status` and `body`; `n()` the posts it took. */
+async function provider(status, body) {
+  let posts = 0;
+  const server = http.createServer((req, res) => {
+    req.resume();
+    req.on("end", () => {
+      posts++;
+      res.writeHead(status, { "content-type": "application/json" });
+      res.end(body);
+    });
+  });
+  await new Promise((ok) => server.listen(0, "127.0.0.1", ok));
+  return { url: `http://127.0.0.1:${server.address().port}`, n: () => posts, close: () => new Promise((ok) => server.close(ok)) };
+}
+
+test("a provider's 429 past its tries is that provider's no-answer, never an RPC error the sync is refused on", async () => {
+  // card notes-per-pool-evm-throttle-is-no-answer: from the Mac on 25 Nov 04:0xZ the Robinhood run printed "FAIL
+  // robinhood: RPC error undefined: undefined", robinhood.api.pocket.network's throttle of an eth_getLogs page read as
+  // a JSON-RPC error with no code and no words; the same page answered 200 twice at 04:1xZ, and the run PASS at 04:13Z
+  const was = RETRY.ms;
+  RETRY.ms = 0;
+  const p = await provider(429, JSON.stringify({ error: "Too Many Requests" }));
+  try {
+    const a = await post(p.url, "eth_getLogs", [{ fromBlock: "0x1", toBlock: "0x2" }]);
+    assert.equal(a.noAnswer, true, JSON.stringify(a));
+    assert.ok(a.error.startsWith(`${new URL(p.url).host} HTTP 429: `), a.error);
+    assert.ok(!/undefined/.test(a.error), a.error);
+    assert.equal(p.n(), 4, "the call is read 4 times before it is a no-answer, as before");
+  } finally {
+    RETRY.ms = was;
+    await p.close();
+  }
+});
+
+test("a provider's JSON-RPC error is its answer in its own words: a range cap keeps its span, an error with no words reads as its JSON", async () => {
+  const cap = await provider(200, JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: -32701, message: "exceed maximum block range: 50000" } }));
+  const bare = await provider(200, JSON.stringify({ jsonrpc: "2.0", id: 1, error: { reason: "busy" } }));
+  try {
+    assert.deepEqual(await post(cap.url, "eth_getLogs", [{}]), { error: "RPC error -32701: exceed maximum block range: 50000" });
+    assert.deepEqual(await post(bare.url, "eth_getLogs", [{}]), { error: 'RPC error {"reason":"busy"}' });
+    assert.equal(cap.n() + bare.n(), 2, "an answer is read once");
+  } finally {
+    await cap.close();
+    await bare.close();
+  }
+});
+
+/** The Base stand-in, but every read on the second seat past the deploy receipt answered `answer` (the sync needs both
+ *  seats' chain id, anchors and views; a page of logs it walks to the other seat). */
+function secondAnswers(answer) {
+  const { transport } = standIn();
+  const second = new URL(CHAINS.base.rpcs[1]).host;
+  return async (url, method, params) => (new URL(url).host === second && method !== "eth_getTransactionReceipt" ? answer : transport(url, method, params));
+}
+
+test("a sync refused on a provider's no-answer it was given is INCONCLUSIVE, naming the provider; any other refusal stays FAIL", async () => {
+  const host = new URL(CHAINS.base.rpcs[1]).host;
+  const throttled = { error: `${host} HTTP 429: 429 Too Many Requests`, noAnswer: true };
+  const r = await check("base", secondAnswers(throttled), { wait: false, deadlineMs: 60_000 });
+  assert.equal(r.ok, false);
+  assert.equal(r.verdict, "INCONCLUSIVE", r.lines.join("\n"));
+  assert.ok(r.lines.at(-1).includes(`${host} HTTP 429`), r.lines.at(-1));
+  const refused = await check("base", secondAnswers({ error: "RPC error -32000: execution aborted" }), { wait: false, deadlineMs: 60_000 });
+  assert.equal(refused.ok, false);
+  assert.equal(refused.verdict, "FAIL", refused.lines.join("\n"));
+  // the recorded runs keep their verdicts
+  for (const name of Object.keys(CHAINS)) {
+    assert.equal((await check(name, replayer(A.good[name]), { wait: false })).verdict, "PASS", name);
+    assert.equal((await check(name, replayer(A.bad[name]), { wait: false })).verdict, "FAIL", name);
+  }
+});
+
+test("a recorded no-answer replays as one", async () => {
+  const e = { url: CHAINS.base.rpcs[0], method: "eth_chainId", params: [], error: "base-rpc.publicnode.com HTTP 429: 429 Too Many Requests", noAnswer: true };
+  assert.deepEqual(await replayer([e])(e.url, e.method, e.params), { error: e.error, noAnswer: true });
 });
 
 test("a sync with no end fails at its deadline, naming the call it is stuck on: the host only, the method, the range and the try", async () => {
