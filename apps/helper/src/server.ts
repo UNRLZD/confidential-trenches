@@ -28,7 +28,7 @@ import { withChange4h } from "./data/candles.ts";
 import { address as solanaAddress, createSolanaLists } from "./data/solana/lists.ts";
 import { LOGO_NONE_MS, LOGOS, type LogoChain, type Logos } from "./data/logo.ts";
 import { createEvmLists, type EvmChain } from "./data/evm/lists.ts";
-import { createSwaps, INDEX_RPCS, SWAP_RPCS, TRADES_MAX, VENUES, type EvmSwaps, type IndexedPool } from "./data/evm/swaps.ts";
+import { createSwaps, INDEX_RPCS, SWAP_RPCS, SWAP_TOPICS, TRADES_MAX, VENUES, type EvmSwaps, type IndexedPool } from "./data/evm/swaps.ts";
 import { createPoolIndex, jsonRpcPost, type PoolIndex, type PoolIndexConfig } from "./data/evm/pool-index.ts";
 import { createEvmToken, holdersDay, type EvmToken } from "./data/evm/token.ts";
 import { createHeld, DEX_LIMITS, parseHeld, type Held } from "./data/held.ts";
@@ -1002,6 +1002,22 @@ export function quoteIndexFromSign(chain: "base", fetchFn: typeof fetch = fetch)
   return (token) => by.get(token) ?? [];
 }
 
+/** Card robinhood-lists-own-reads: each EVM chain whose swaps hold a chain-wide index (INDEX_RPCS: Robinhood's) has its
+ *  Trending 5m and 1h ranked from that index's swaps, their rows DexScreener's on `dex`, the budget the token pages draw
+ *  (evmNamedFrom), never a GeckoTerminal list call; a pair whose coin is the chain's WETH, ETH or USD token is no row. */
+export function ownTrending(evmLists: EvmLists, swaps: Partial<Record<EvmChain, Pick<EvmSwaps, "index">>>, dex: ReturnType<typeof upstreamBudget>): EvmChain[] {
+  const wired: EvmChain[] = [];
+  for (const chain of ["base", "robinhood"] as const) {
+    const index = swaps[chain]?.index;
+    const lists = evmLists[chain];
+    if (index == null || lists === undefined) continue;
+    const v = VENUES[chain];
+    lists.own({ index, poolManager: v.poolManager, topics: SWAP_TOPICS, quotes: [v.weth, v.usd, "0x0000000000000000000000000000000000000000"], dex });
+    wired.push(chain);
+  }
+  return wired;
+}
+
 export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmLists: EvmLists, gecko?: GeckoBudget, holds?: ProviderHolds, keyed?: Keyed | null, evmNamed: Partial<Record<EvmChain, EvmNamed>> = {}, disk?: { storeDir: string; writable: Promise<unknown> }, quoteIndex: Partial<Record<EvmChain, (token: string) => readonly IndexedPool[]>> = {}): Swaps {
   const out: Swaps = {};
   for (const chain of ["base", "robinhood"] as const) {
@@ -1569,6 +1585,7 @@ if (import.meta.main) {
     // this holder: empty until it opens (card robinhood-few-trade-tapes-fill-inside-45s)
     const indexOf: { robinhood?: Pick<PoolIndex, "pools"> } = {};
     const swaps: Swaps = { ...evmSwapsFromEnv(process.env, evmLists, gecko, holds, keyed, evmNamed, { storeDir, writable: senders.held }, { base: quoteIndexFromSign("base"), robinhood: (t) => indexOf.robinhood?.pools(t).pools ?? [] }), solana: solanaTradesFromEnv(process.env, lists, token, rpc, slots) };
+    ownTrending(evmLists, swaps, dex);
     // card market-data-evm-token: each EVM chain's token page and holders, its rows the lists', its info CoinGecko's keyed
     // on-chain read, never GeckoTerminal's keyless window (card evm-token-page-off-the-5-call-window), its pool and
     // decimals the swap reads' when they hold them

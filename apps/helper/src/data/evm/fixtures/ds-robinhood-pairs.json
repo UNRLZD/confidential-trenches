@@ -1,0 +1,2749 @@
+{
+ "recorded_at": "2026-11-25T07:37:25.492Z",
+ "head": 122876920,
+ "blocks": 2600,
+ "counts": [
+  [
+   "0x52e65b17fb6e5ba00ed806f37afcd2daa50271ca",
+   2530
+  ],
+  [
+   "0xa791e5169faf703c0b63fd9552c33ec1128a773a00f5dc33a640da62a022cd35",
+   707
+  ],
+  [
+   "0x69bfaf19c9f377bb306a89aed9f6b07e2c1a8d9a",
+   303
+  ],
+  [
+   "0x7615926023bb149f36095645c2a81dc367d39750",
+   301
+  ],
+  [
+   "0x62ab521f71431f78ac374cdbadc6cda3c8916b6c",
+   234
+  ],
+  [
+   "0xfae65eaa11943f45e83d5b45dc7a7c801c51bfb0",
+   209
+  ],
+  [
+   "0x24107d152f14a76d292123265ae3f3c71f863fc2f4ef7ba49d64e78d28ea379e",
+   204
+  ],
+  [
+   "0x16679e2ac1a798865ecf1c1639e67693ddb1c220",
+   191
+  ],
+  [
+   "0x75ae79fd767a7cc410ab4eed13f8d3498e878d6a",
+   183
+  ],
+  [
+   "0xbac3aa3b91584a53a579b3c999a56756e954e59247e497bad1d25a4334bde551",
+   174
+  ],
+  [
+   "0x84bd4e2d8be11aeb0afc1195b38f587b61e90068548f1063fdbe448fb8cad0b6",
+   167
+  ],
+  [
+   "0x387bf619da4d3fb62bb276482693dba1b9b3520f573cabdfe033384a24125982",
+   163
+  ],
+  [
+   "0xc3c9f0171490ef0f4536fe493f3b0ebb5ee0cb5e",
+   148
+  ],
+  [
+   "0xecfb043b5115f5c2cae133c3ab0bb47628385bcdf7213e1f8ae9bc05171787a3",
+   133
+  ],
+  [
+   "0x54f7883914619af9105355bf83ed678bcf9f63560218ac61c9963b9503d0ba32",
+   124
+  ],
+  [
+   "0xd4eb21209c4d6093f80b5b84f5c45cc093ea14a3",
+   119
+  ],
+  [
+   "0xddcbba3666f578e3f09516f21ff85bfee859ab5e",
+   117
+  ],
+  [
+   "0x2d4e535e1bc2e11112088c522ff26549e3c01aa774657b239cffe6710a141da6",
+   111
+  ],
+  [
+   "0xa9188730fe85be88ad499d7d52b099e800fb0334",
+   106
+  ],
+  [
+   "0x3e1afde90341f843c941ff4077d915bde3008c7e",
+   101
+  ],
+  [
+   "0x37f6b6fcd3ef8bc3425288df7ee446a481b7f90f",
+   90
+  ],
+  [
+   "0x3a6ec0aa6c702323414d449b5f60f4b742a82ded",
+   82
+  ],
+  [
+   "0xee141c6878256984d5b8f88c4b70aa3d29226d50",
+   76
+  ],
+  [
+   "0x71f9660f9535e3e81d720696a58ea80274da8b2c6eb7c3acb22611d977439a5c",
+   75
+  ],
+  [
+   "0xda14bf8a87711e1f30dbe620f2df3fdf371f7503f1a72202d15631f657651ec0",
+   68
+  ],
+  [
+   "0x8bb3514e2204e1cdf3ac149efee7ff04d91b719f",
+   66
+  ],
+  [
+   "0x851ef5c137018c41daec442730230254f98e562c72d9d5594505099b1d811f28",
+   65
+  ],
+  [
+   "0x934e60d1c6c34242b92159a5bcc710fafa50ad87",
+   65
+  ],
+  [
+   "0xf2a0be59ab76b96f957bd5e5b967f2b75e8db269",
+   63
+  ],
+  [
+   "0x26250ba84465454bc731f710e46f1f32b167d66b",
+   63
+  ],
+  [
+   "0xedc488cb15abce61894f9a22e8ce920e9ed0953c",
+   60
+  ],
+  [
+   "0xc61284332117c3fb23a2a56cceffd07f7af60029",
+   57
+  ],
+  [
+   "0xa792177a07e834d20c9fb1caa1121748fc3165fdf0387c4863075e86b86c0709",
+   56
+  ],
+  [
+   "0xa1513da56f71b83d98124d645828a14a191b8010",
+   56
+  ],
+  [
+   "0x9cc8c4f6118419a27f113723f1dea646685be55f",
+   56
+  ],
+  [
+   "0x2708a0e381bb922d589e13df92ed2c9b0d1aa0eb",
+   52
+  ],
+  [
+   "0xc0be1cb0f674d9737c72b2a63fc542361185b807",
+   49
+  ],
+  [
+   "0x4be9657ec9002e528f4f17a5c43edc525a07f888f7b180c2afbf75e096c4f38a",
+   47
+  ],
+  [
+   "0xe1ae6a4c6ccc9f037389a8d50a4f577bde1a9fe01d85d88ecbbd39955ce53288",
+   47
+  ],
+  [
+   "0x741ad272ca4fc8d3cb3b08202be4c00d0286d91e",
+   46
+  ]
+ ],
+ "answers": [
+  {
+   "ids": [
+    "0x52e65b17fb6e5ba00ed806f37afcd2daa50271ca",
+    "0xa791e5169faf703c0b63fd9552c33ec1128a773a00f5dc33a640da62a022cd35",
+    "0x69bfaf19c9f377bb306a89aed9f6b07e2c1a8d9a",
+    "0x7615926023bb149f36095645c2a81dc367d39750",
+    "0x62ab521f71431f78ac374cdbadc6cda3c8916b6c",
+    "0xfae65eaa11943f45e83d5b45dc7a7c801c51bfb0",
+    "0x24107d152f14a76d292123265ae3f3c71f863fc2f4ef7ba49d64e78d28ea379e",
+    "0x16679e2ac1a798865ecf1c1639e67693ddb1c220",
+    "0x75ae79fd767a7cc410ab4eed13f8d3498e878d6a",
+    "0xbac3aa3b91584a53a579b3c999a56756e954e59247e497bad1d25a4334bde551",
+    "0x84bd4e2d8be11aeb0afc1195b38f587b61e90068548f1063fdbe448fb8cad0b6",
+    "0x387bf619da4d3fb62bb276482693dba1b9b3520f573cabdfe033384a24125982",
+    "0xc3c9f0171490ef0f4536fe493f3b0ebb5ee0cb5e",
+    "0xecfb043b5115f5c2cae133c3ab0bb47628385bcdf7213e1f8ae9bc05171787a3",
+    "0x54f7883914619af9105355bf83ed678bcf9f63560218ac61c9963b9503d0ba32",
+    "0xd4eb21209c4d6093f80b5b84f5c45cc093ea14a3",
+    "0xddcbba3666f578e3f09516f21ff85bfee859ab5e",
+    "0x2d4e535e1bc2e11112088c522ff26549e3c01aa774657b239cffe6710a141da6",
+    "0xa9188730fe85be88ad499d7d52b099e800fb0334",
+    "0x3e1afde90341f843c941ff4077d915bde3008c7e",
+    "0x37f6b6fcd3ef8bc3425288df7ee446a481b7f90f",
+    "0x3a6ec0aa6c702323414d449b5f60f4b742a82ded",
+    "0xee141c6878256984d5b8f88c4b70aa3d29226d50",
+    "0x71f9660f9535e3e81d720696a58ea80274da8b2c6eb7c3acb22611d977439a5c",
+    "0xda14bf8a87711e1f30dbe620f2df3fdf371f7503f1a72202d15631f657651ec0",
+    "0x8bb3514e2204e1cdf3ac149efee7ff04d91b719f",
+    "0x851ef5c137018c41daec442730230254f98e562c72d9d5594505099b1d811f28",
+    "0x934e60d1c6c34242b92159a5bcc710fafa50ad87",
+    "0xf2a0be59ab76b96f957bd5e5b967f2b75e8db269",
+    "0x26250ba84465454bc731f710e46f1f32b167d66b"
+   ],
+   "status": 200,
+   "body": {
+    "schemaVersion": "1.0.0",
+    "pairs": [
+     {
+      "chainId": "robinhood",
+      "dexId": "uniswap",
+      "url": "https://dexscreener.com/robinhood/0x52e65b17fb6e5ba00ed806f37afcd2daa50271ca",
+      "pairAddress": "0x52e65B17fB6E5BA00Ed806f37Afcd2DaA50271Ca",
+      "labels": [
+       "v3"
+      ],
+      "baseToken": {
+       "address": "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+       "name": "WETH",
+       "symbol": "WETH"
+      },
+      "quoteToken": {
+       "address": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+       "name": "Global Dollar",
+       "symbol": "USDG"
+      },
+      "priceNative": "1634.4134",
+      "priceUsd": "1634.41",
+      "txns": {
+       "m5": {
+        "buys": 993,
+        "sells": 955
+       },
+       "h1": {
+        "buys": 3604,
+        "sells": 3900
+       },
+       "h6": {
+        "buys": 23924,
+        "sells": 24546
+       },
+       "h24": {
+        "buys": 145843,
+        "sells": 143327
+       }
+      },
+      "volume": {
+       "h24": 138803117.76,
+       "h6": 23103417.48,
+       "h1": 4315480.86,
+       "m5": 1832458.67
+      },
+      "priceChange": {
+       "m5": -1.1,
+       "h1": -1.41,
+       "h6": -1.78,
+       "h24": -3.63
+      },
+      "liquidity": {
+       "base": 5225.6752,
+       "quote": 900255,
+       "usd": 9441169.8
+      },
+      "fdv": 58546223,
+      "marketCap": 58546223,
+      "pairCreatedAt": 1783025468000
+     },
+     {
+      "chainId": "robinhood",
+      "dexId": "uniswap",
+      "url": "https://dexscreener.com/robinhood/0xa791e5169faf703c0b63fd9552c33ec1128a773a00f5dc33a640da62a022cd35",
+      "pairAddress": "0xa791e5169faf703c0b63fd9552c33ec1128a773a00f5dc33a640da62a022cd35",
+      "labels": [
+       "v4"
+      ],
+      "baseToken": {
+       "address": "0x0000000000000000000000000000000000000000",
+       "name": "Ether",
+       "symbol": "ETH"
+      },
+      "quoteToken": {
+       "address": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+       "name": "Global Dollar",
+       "symbol": "USDG"
+      },
+      "priceNative": "1634.2884",
+      "priceUsd": "1634.28",
+      "txns": {
+       "m5": {
+        "buys": 211,
+        "sells": 319
+       },
+       "h1": {
+        "buys": 1098,
+        "sells": 1363
+       },
+       "h6": {
+        "buys": 8076,
+        "sells": 8504
+       },
+       "h24": {
+        "buys": 44544,
+        "sells": 43999
+       }
+      },
+      "volume": {
+       "h24": 47241193.96,
+       "h6": 9222391.28,
+       "h1": 1542382.73,
+       "m5": 374692.15
+      },
+      "priceChange": {
+       "m5": -1.1,
+       "h1": -1.41,
+       "h6": -1.79,
+       "h24": -3.62
+      },
+      "liquidity": {
+       "base": 3662.2456,
+       "quote": 765324,
+       "usd": 6750490.25
+      },
+      "pairCreatedAt": 1793316530000
+     },
+     {
+      "chainId": "robinhood",
+      "dexId": "uniswap",
+      "url": "https://dexscreener.com/robinhood/0x69bfaf19c9f377bb306a89aed9f6b07e2c1a8d9a",
+      "pairAddress": "0x69BfaF19C9f377BB306a89aEd9F6B07e2c1a8d9a",
+      "labels": [
+       "v3"
+      ],
+      "baseToken": {
+       "address": "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+       "name": "WETH",
+       "symbol": "WETH"
+      },
+      "quoteToken": {
+       "address": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+       "name": "Global Dollar",
+       "symbol": "USDG"
+      },
+      "priceNative": "1634.2276",
+      "priceUsd": "1634.22",
+      "txns": {
+       "m5": {
+        "buys": 68,
+        "sells": 159
+       },
+       "h1": {
+        "buys": 253,
+        "sells": 420
+       },
+       "h6": {
+        "buys": 1926,
+        "sells": 2017
+       },
+       "h24": {
+        "buys": 11892,
+        "sells": 11443
+       }
+      },
+      "volume": {
+       "h24": 2140194.03,
+       "h6": 344935.04,
+       "h1": 73844.1,
+       "m5": 31094.48
+      },
+      "priceChange": {
+       "m5": -1.11,
+       "h1": -1.38,
+       "h6": -1.78,
+       "h24": -3.64
+      },
+      "liquidity": {
+       "base": 510.82,
+       "quote": 123128,
+       "usd": 957924.47
+      },
+      "fdv": 58539567,
+      "marketCap": 58539567,
+      "pairCreatedAt": 1782320219000
+     },
+     {
+      "chainId": "robinhood",
+      "dexId": "aero",
+      "url": "https://dexscreener.com/robinhood/0x7615926023bb149f36095645c2a81dc367d39750",
+      "pairAddress": "0x7615926023bb149f36095645C2a81DC367d39750",
+      "baseToken": {
+       "address": "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+       "name": "WETH",
+       "symbol": "WETH"
+      },
+      "quoteToken": {
+       "address": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+       "name": "Global Dollar",
+       "symbol": "USDG"
+      },
+      "priceNative": "1635.08105",
+      "priceUsd": "1635.081",
+      "txns": {
+       "m5": {
+        "buys": 102,
+        "sells": 181
+       },
+       "h1": {
+        "buys": 911,
+        "sells": 1204
+       },
+       "h6": {
+        "buys": 7111,
+        "sells": 7351
+       },
+       "h24": {
+        "buys": 34868,
+        "sells": 33975
+       }
+      },
+      "volume": {
+       "h24": 69214055.43,
+       "h6": 17246729.05,
+       "h1": 3216968.81,
+       "m5": 354856.54
+      },
+      "priceChange": {
+       "m5": -1.04,
+       "h1": -1.36,
+       "h6": -1.75,
+       "h24": -3.58
+      },
+      "liquidity": {
+       "base": 654.5897,
+       "quote": 58379,
+       "usd": 1128686.37
+      },
+      "fdv": 58570135,
+      "marketCap": 58570135
+     },
+     {
+      "chainId": "robinhood",
+      "dexId": "uniswap",
+      "url": "https://dexscreener.com/robinhood/0x62ab521f71431f78ac374cdbadc6cda3c8916b6c",
+      "pairAddress": "0x62AB521f71431f78ac374CdbadC6cda3c8916b6C",
+      "labels": [
+       "v3"
+      ],
+      "baseToken": {
+       "address": "0xd0601CE157Db5bdC3162BbaC2a2C8aF5320D9EEC",
+       "name": "NVIDIA • Robinhood Token",
+       "symbol": "NVDA"
+      },
+      "quoteToken": {
+       "address": "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+       "name": "WETH",
+       "symbol": "WETH"
+      },
+      "priceNative": "0.09152",
+      "priceUsd": "151.44",
+      "txns": {
+       "m5": {
+        "buys": 100,
+        "sells": 70
+       },
+       "h1": {
+        "buys": 227,
+        "sells": 259
+       },
+       "h6": {
+        "buys": 1029,
+        "sells": 1059
+       },
+       "h24": {
+        "buys": 9808,
+        "sells": 10636
+       }
+      },
+      "volume": {
+       "h24": 7157501.45,
+       "h6": 688111.5,
+       "h1": 212462.49,
+       "m5": 95851.34
+      },
+      "priceChange": {
+       "m5": 0.58,
+       "h1": -0.29,
+       "h6": -0.83,
+       "h24": -7.37
+      },
+      "liquidity": {
+       "base": 3406.9219,
+       "quote": 480.7218,
+       "usd": 1311409.08
+      },
+      "fdv": 20511859,
+      "marketCap": 19176788,
+      "pairCreatedAt": 1784903496000,
+      "info": {
+       "imageUrl": "https://cdn.dexscreener.com/cms/images/https%3A%2F%2Fcoin-images.coingecko.com%2Fcoins%2Fimages%2F102174110%2Flarge%2F0xd0601ce157db5bdc3162bbac2a2c8af5320d9eec.png%3F1782444565?width=800&height=800&quality=95&format=auto",
+       "openGraph": "https://cdn.dexscreener.com/token-images/og/robinhood/0xd0601ce157db5bdc3162bbac2a2c8af5320d9eec?timestamp=1795592100000",
+       "websites": [
+        {
+         "url": "https://robinhood.com/us/en/",
+         "label": "robinhood.com"
+        }
+       ],
+       "socials": [
+        {
+         "url": "https://twitter.com/RobinhoodApp",
+         "type": "twitter"
+        }
+       ]
+      }
+     },
+     {
+      "chainId": "robinhood",
+      "dexId": "ramses",
+      "url": "https://dexscreener.com/robinhood/0xfae65eaa11943f45e83d5b45dc7a7c801c51bfb0",
+      "pairAddress": "0xFAE65eAa11943f45E83D5B45DC7A7C801C51bfB0",
+      "labels": [
+       "v3"
+      ],
+      "baseToken": {
+       "address": "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+       "name": "WETH",
+       "symbol": "WETH"
+      },
+      "quoteToken": {
+       "address": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+       "name": "Global Dollar",
+       "symbol": "USDG"
+      },
+      "priceNative": "1634.05256",
+      "priceUsd": "1634.052",
+      "txns": {
+       "m5": {
+        "buys": 62,
+        "sells": 135
+       },
+       "h1": {
+        "buys": 371,
+        "sells": 427
+       },
+       "h6": {
+        "buys": 2403,
+        "sells": 2197
+       },
+       "h24": {
+        "buys": 12094,
+        "sells": 10952
+       }
+      },
+      "volume": {
+       "h24": 2231707.05,
+       "h6": 487749.2,
+       "h1": 81174.54,
+       "m5": 21348.48
+      },
+      "priceChange": {
+       "m5": -1.1,
+       "h1": -1.42,
+       "h6": -1.81,
+       "h24": -3.65
+      },
+      "liquidity": {
+       "base": 266.6628,
+       "quote": 34165,
+       "usd": 469906.23
+      },
+      "fdv": 58533294,
+      "marketCap": 58533294,
+      "pairCreatedAt": 1787155774000
+     },
+     {
+      "chainId": "robinhood",
+      "dexId": "uniswap",
+      "url": "https://dexscreener.com/robinhood/0x24107d152f14a76d292123265ae3f3c71f863fc2f4ef7ba49d64e78d28ea379e",
+      "pairAddress": "0x24107d152f14a76d292123265ae3f3c71f863fc2f4ef7ba49d64e78d28ea379e",
+      "labels": [
+       "v4"
+      ],
+      "baseToken": {
+       "address": "0x0000000000000000000000000000000000000000",
+       "name": "Ether",
+       "symbol": "ETH"
+      },
+      "quoteToken": {
+       "address": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+       "name": "Global Dollar",
+       "symbol": "USDG"
+      },
+      "priceNative": "1634.3872",
+      "priceUsd": "1634.38",
+      "txns": {
+       "m5": {
+        "buys": 72,
+        "sells": 106
+       },
+       "h1": {
+        "buys": 300,
+        "sells": 326
+       },
+       "h6": {
+        "buys": 1955,
+        "sells": 1825
+       },
+       "h24": {
+        "buys": 10216,
+        "sells": 9382
+       }
+      },
+      "volume": {
+       "h24": 699608.28,
+       "h6": 128054.51,
+       "h1": 20636.94,
+       "m5": 5476.02
+      },
+      "priceChange": {
+       "m5": -1.08,
+       "h1": -1.4,
+       "h6": -1.8,
+       "h24": -3.64
+      },
+      "liquidity": {
+       "base": 23.8471,
+       "quote": 1527.3883,
+       "usd": 40502.88
+      },
+      "pairCreatedAt": 1782982688000
+     },
+     {
+      "chainId": "robinhood",
+      "dexId": "up",
+      "url": "https://dexscreener.com/robinhood/0x16679e2ac1a798865ecf1c1639e67693ddb1c220",
+      "pairAddress": "0x16679e2ac1A798865eCf1c1639e67693ddB1C220",
+      "labels": [
+       "v3"
+      ],
+      "baseToken": {
+       "address": "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+       "name": "WETH",
+       "symbol": "WETH"
+      },
+      "quoteToken": {
+       "address": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+       "name": "Global Dollar",
+       "symbol": "USDG"
+      },
+      "priceNative": "1634.1615",
+      "priceUsd": "1634.16",
+      "txns": {
+       "m5": {
+        "buys": 65,
+        "sells": 94
+       },
+       "h1": {
+        "buys": 275,
+        "sells": 331
+       },
+       "h6": {
+        "buys": 1768,
+        "sells": 1757
+       },
+       "h24": {
+        "buys": 10390,
+        "sells": 10349
+       }
+      },
+      "volume": {
+       "h24": 1969146.95,
+       "h6": 314484.33,
+       "h1": 58567.63,
+       "m5": 17022.45
+      },
+      "priceChange": {
+       "m5": -1.11,
+       "h1": -1.42,
+       "h6": -1.79,
+       "h24": -3.66
+      },
+      "liquidity": {
+       "base": 60.3312,
+       "quote": 11018,
+       "usd": 109609.11
+      },
+      "fdv": 58537199,
+      "marketCap": 58537199
+     },
+     {
+      "chainId": "robinhood",
+      "dexId": "uniswap",
+      "url": "https://dexscreener.com/robinhood/0x75ae79fd767a7cc410ab4eed13f8d3498e878d6a",
+      "pairAddress": "0x75aE79FD767A7cC410AB4EED13f8d3498e878d6A",
+      "labels": [
+       "v3"
+      ],
+      "baseToken": {
+       "address": "0xbbB6c29bCc3a1028A2B54310DF73F4F7A3bcB373",
+       "name": "Anthropic, PBC Class A Common Stock • Robinhood Token",
+       "symbol": "ANT"
+      },
+      "quoteToken": {
+       "address": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+       "name": "Global Dollar",
+       "symbol": "USDG"
+      },
+      "priceNative": "78.1420",
+      "priceUsd": "78.14",
+      "txns": {
+       "m5": {
+        "buys": 69,
+        "sells": 103
+       },
+       "h1": {
+        "buys": 329,
+        "sells": 488
+       },
+       "h6": {
+        "buys": 2201,
+        "sells": 2505
+       },
+       "h24": {
+        "buys": 20803,
+        "sells": 21212
+       }
+      },
+      "volume": {
+       "h24": 37032850.95,
+       "h6": 5286387.66,
+       "h1": 986532.5,
+       "m5": 213323.17
+      },
+      "priceChange": {
+       "m5": -0.55,
+       "h1": -2.26,
+       "h6": -4.06,
+       "h24": -8.9
+      },
+      "liquidity": {
+       "base": 9718.6248,
+       "quote": 368509,
+       "usd": 1127943.29
+      },
+      "fdv": 3848035,
+      "marketCap": 3848035,
+      "pairCreatedAt": 1794932034000
+     },
+     {
+      "chainId": "robinhood",
+      "dexId": "uniswap",
+      "url": "https://dexscreener.com/robinhood/0xbac3aa3b91584a53a579b3c999a56756e954e59247e497bad1d25a4334bde551",
+      "pairAddress": "0xbac3aa3b91584a53a579b3c999a56756e954e59247e497bad1d25a4334bde551",
+      "labels": [
+       "v4"
+      ],
+      "baseToken": {
+       "address": "0x0000000000000000000000000000000000000000",
+       "name": "Ether",
+       "symbol": "ETH"
+      },
+      "quoteToken": {
+       "address": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+       "name": "Global Dollar",
+       "symbol": "USDG"
+      },
+      "priceNative": "1633.3367",
+      "priceUsd": "1633.33",
+      "txns": {
+       "m5": {
+        "buys": 16,
+        "sells": 154
+       },
+       "h1": {
+        "buys": 103,
+        "sells": 272
+       },
+       "h6": {
+        "buys": 993,
+        "sells": 1076
+       },
+       "h24": {
+        "buys": 4150,
+        "sells": 4154
+       }
+      },
+      "volume": {
+       "h24": 4870742.59,
+       "h6": 1194274.32,
+       "h1": 240286.99,
+       "m5": 78134.41
+      },
+      "priceChange": {
+       "m5": -1.19,
+       "h1": -1.42,
+       "h6": -1.49,
+       "h24": -3.71
+      },
+      "liquidity": {
+       "base": 3082.1372,
+       "quote": 342989,
+       "usd": 5377157.51
+      },
+      "pairCreatedAt": 1787212707000
+     },
+     {
+      "chainId": "robinhood",
+      "dexId": "uniswap",
+      "url": "https://dexscreener.com/robinhood/0x84bd4e2d8be11aeb0afc1195b38f587b61e90068548f1063fdbe448fb8cad0b6",
+      "pairAddress": "0x84bd4e2d8be11aeb0afc1195b38f587b61e90068548f1063fdbe448fb8cad0b6",
+      "labels": [
+       "v4"
+      ],
+      "baseToken": {
+       "address": "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+       "name": "WETH",
+       "symbol": "WETH"
+      },
+      "quoteToken": {
+       "address": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+       "name": "Global Dollar",
+       "symbol": "USDG"
+      },
+      "priceNative": "1634.005366",
+      "priceUsd": "1634.0053",
+      "txns": {
+       "m5": {
+        "buys": 57,
+        "sells": 81
+       },
+       "h1": {
+        "buys": 146,
+        "sells": 236
+       },
+       "h6": {
+        "buys": 826,
+        "sells": 1161
+       },
+       "h24": {
+        "buys": 4301,
+        "sells": 5411
+       }
+      },
+      "volume": {
+       "h24": 296053.01,
+       "h6": 63177.76,
+       "h1": 12714.37,
+       "m5": 4853.38
+      },
+      "priceChange": {
+       "m5": -1.1,
+       "h1": -1.43,
+       "h6": -1.8,
+       "h24": -3.68
+      },
+      "liquidity": {
+       "base": 23.3308,
+       "quote": 16348,
+       "usd": 54471.13
+      },
+      "fdv": 58453546,
+      "marketCap": 58453546,
+      "pairCreatedAt": 1784212668000
+     },
+     {
+      "chainId": "robinhood",
+      "dexId": "uniswap",
+      "url": "https://dexscreener.com/robinhood/0x387bf619da4d3fb62bb276482693dba1b9b3520f573cabdfe033384a24125982",
+      "pairAddress": "0x387bf619da4d3fb62bb276482693dba1b9b3520f573cabdfe033384a24125982",
+      "labels": [
+       "v4"
+      ],
+      "baseToken": {
+       "address": "0x0000000000000000000000000000000000000000",
+       "name": "Ether",
+       "symbol": "ETH"
+      },
+      "quoteToken": {
+       "address": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+       "name": "Global Dollar",
+       "symbol": "USDG"
+      },
+      "priceNative": "1634.4996",
+      "priceUsd": "1634.49",
+      "txns": {
+       "m5": {
+        "buys": 31,
+        "sells": 97
+       },
+       "h1": {
+        "buys": 158,
+        "sells": 235
+       },
+       "h6": {
+        "buys": 1185,
+        "sells": 1237
+       },
+       "h24": {
+        "buys": 6620,
+        "sells": 6497
+       }
+      },
+      "volume": {
+       "h24": 919081.76,
+       "h6": 163704.97,
+       "h1": 32146.11,
+       "m5": 15836.07
+      },
+      "priceChange": {
+       "m5": -1.11,
+       "h1": -1.35,
+       "h6": -1.75,
+       "h24": -3.65
+      },
+      "liquidity": {
+       "base": 237.7084,
+       "quote": 79034,
+       "usd": 467569.33
+      },
+      "pairCreatedAt": 1782320219000
+     },
+     {
+      "chainId": "robinhood",
+      "dexId": "uniswap",
+      "url": "https://dexscreener.com/robinhood/0xc3c9f0171490ef0f4536fe493f3b0ebb5ee0cb5e",
+      "pairAddress": "0xC3c9F0171490Ef0F4536fe493F3b0EbB5ee0CB5e",
+      "labels": [
+       "v3"
+      ],
+      "baseToken": {
+       "address": "0x4a0E65A3EcceC6dBe60AE065F2e7bb85Fae35eEa",
+       "name": "Space Exploration Technologies Corp. Class A Common Stock • Robinhood Token",
+       "symbol": "SPCX"
+      },
+      "quoteToken": {
+       "address": "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+       "name": "WETH",
+       "symbol": "WETH"
+      },
+      "priceNative": "0.07524",
+      "priceUsd": "124.51",
+      "txns": {
+       "m5": {
+        "buys": 82,
+        "sells": 26
+       },
+       "h1": {
+        "buys": 141,
+        "sells": 101
+       },
+       "h6": {
+        "buys": 714,
+        "sells": 640
+       },
+       "h24": {
+        "buys": 5328,
+        "sells": 5194
+       }
+      },
+      "volume": {
+       "h24": 1575018.79,
+       "h6": 188441.47,
+       "h1": 40328.45,
+       "m5": 19534.57
+      },
+      "priceChange": {
+       "m5": 0.85,
+       "h1": 0.44,
+       "h6": -0.73,
+       "h24": -7.3
+      },
+      "liquidity": {
+       "base": 1729.02063,
+       "quote": 213.6057,
+       "usd": 568740.04
+      },
+      "fdv": 14971185,
+      "marketCap": 14971185,
+      "pairCreatedAt": 1784542553000
+     },
+     {
+      "chainId": "robinhood",
+      "dexId": "uniswap",
+      "url": "https://dexscreener.com/robinhood/0xecfb043b5115f5c2cae133c3ab0bb47628385bcdf7213e1f8ae9bc05171787a3",
+      "pairAddress": "0xecfb043b5115f5c2cae133c3ab0bb47628385bcdf7213e1f8ae9bc05171787a3",
+      "labels": [
+       "v4"
+      ],
+      "baseToken": {
+       "address": "0xc63BAA772878b35a17aAE4bEaAfb8039Cd1B371A",
+       "name": "MarketFloat",
+       "symbol": "MFLO"
+      },
+      "quoteToken": {
+       "address": "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+       "name": "WETH",
+       "symbol": "WETH"
+      },
+      "priceNative": "0.000000001241",
+      "priceUsd": "0.000002054",
+      "txns": {
+       "m5": {
+        "buys": 65,
+        "sells": 48
+       },
+       "h1": {
+        "buys": 806,
+        "sells": 579
+       },
+       "h6": {
+        "buys": 806,
+        "sells": 579
+       },
+       "h24": {
+        "buys": 806,
+        "sells": 579
+       }
+      },
+      "volume": {
+       "h24": 615509.28,
+       "h6": 615509.28,
+       "h1": 615509.28,
+       "m5": 48668.33
+      },
+      "priceChange": {
+       "m5": 14.36,
+       "h1": 1084,
+       "h6": 1084,
+       "h24": 1084
+      },
+      "liquidity": {
+       "base": 28537119518,
+       "quote": 25.319,
+       "usd": 100522.09
+      },
+      "fdv": 205438,
+      "marketCap": 205438,
+      "pairCreatedAt": 1795589343000
+     },
+     {
+      "chainId": "robinhood",
+      "dexId": "uniswap",
+      "url": "https://dexscreener.com/robinhood/0x54f7883914619af9105355bf83ed678bcf9f63560218ac61c9963b9503d0ba32",
+      "pairAddress": "0x54f7883914619af9105355bf83ed678bcf9f63560218ac61c9963b9503d0ba32",
+      "labels": [
+       "v4"
+      ],
+      "baseToken": {
+       "address": "0x0000000000000000000000000000000000000000",
+       "name": "Ether",
+       "symbol": "ETH"
+      },
+      "quoteToken": {
+       "address": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+       "name": "Global Dollar",
+       "symbol": "USDG"
+      },
+      "priceNative": "1634.7444",
+      "priceUsd": "1634.74",
+      "txns": {
+       "m5": {
+        "buys": 24,
+        "sells": 79
+       },
+       "h1": {
+        "buys": 92,
+        "sells": 146
+       },
+       "h6": {
+        "buys": 602,
+        "sells": 655
+       },
+       "h24": {
+        "buys": 3220,
+        "sells": 3321
+       }
+      },
+      "volume": {
+       "h24": 244823.68,
+       "h6": 48378.56,
+       "h1": 9414.92,
+       "m5": 4725.29
+      },
+      "priceChange": {
+       "m5": -1.09,
+       "h1": -1.33,
+       "h6": -1.73,
+       "h24": -3.64
+      },
+      "liquidity": {
+       "base": 143.1189,
+       "quote": 17271,
+       "usd": 251234.77
+      },
+      "pairCreatedAt": 1783521035000
+     },
+     {
+      "chainId": "robinhood",
+      "dexId": "uniswap",
+      "url": "https://dexscreener.com/robinhood/0xd4eb21209c4d6093f80b5b84f5c45cc093ea14a3",
+      "pairAddress": "0xd4EB21209C4D6093f80B5b84f5C45cc093EA14a3",
+      "labels": [
+       "v3"
+      ],
+      "baseToken": {
+       "address": "0xd0601CE157Db5bdC3162BbaC2a2C8aF5320D9EEC",
+       "name": "NVIDIA • Robinhood Token",
+       "symbol": "NVDA"
+      },
+      "quoteToken": {
+       "address": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+       "name": "Global Dollar",
+       "symbol": "USDG"
+      },
+      "priceNative": "149.5998",
+      "priceUsd": "149.59",
+      "txns": {
+       "m5": {
+        "buys": 28,
+        "sells": 74
+       },
+       "h1": {
+        "buys": 245,
+        "sells": 334
+       },
+       "h6": {
+        "buys": 1626,
+        "sells": 1706
+       },
+       "h24": {
+        "buys": 14045,
+        "sells": 14750
+       }
+      },
+      "volume": {
+       "h24": 8735797.11,
+       "h6": 952275.15,
+       "h1": 174225.92,
+       "m5": 46489.44
+      },
+      "priceChange": {
+       "m5": -0.61,
+       "h1": -1.64,
+       "h6": -2.17,
+       "h24": -8.44
+      },
+      "liquidity": {
+       "base": 11384,
+       "quote": 214485,
+       "usd": 1917538.97
+      },
+      "fdv": 20262434,
+      "marketCap": 18943598,
+      "pairCreatedAt": 1784631726000,
+      "info": {
+       "imageUrl": "https://cdn.dexscreener.com/cms/images/https%3A%2F%2Fcoin-images.coingecko.com%2Fcoins%2Fimages%2F102174110%2Flarge%2F0xd0601ce157db5bdc3162bbac2a2c8af5320d9eec.png%3F1782444565?width=800&height=800&quality=95&format=auto",
+       "openGraph": "https://cdn.dexscreener.com/token-images/og/robinhood/0xd0601ce157db5bdc3162bbac2a2c8af5320d9eec?timestamp=1795592100000",
+       "websites": [
+        {
+         "url": "https://robinhood.com/us/en/",
+         "label": "robinhood.com"
+        }
+       ],
+       "socials": [
+        {
+         "url": "https://twitter.com/RobinhoodApp",
+         "type": "twitter"
+        }
+       ]
+      }
+     },
+     {
+      "chainId": "robinhood",
+      "dexId": "uniswap",
+      "url": "https://dexscreener.com/robinhood/0xddcbba3666f578e3f09516f21ff85bfee859ab5e",
+      "pairAddress": "0xDDCBBa3666f578E3F09516f21Ff85BFee859AB5e",
+      "labels": [
+       "v3"
+      ],
+      "baseToken": {
+       "address": "0x117cc2133c37B721F49dE2A7a74833232B3B4C0C",
+       "name": "SPDR S&P 500 ETF Trust • Robinhood Token",
+       "symbol": "SPY"
+      },
+      "quoteToken": {
+       "address": "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+       "name": "WETH",
+       "symbol": "WETH"
+      },
+      "priceNative": "0.4349",
+      "priceUsd": "719.66",
+      "txns": {
+       "m5": {
+        "buys": 78,
+        "sells": 20
+       },
+       "h1": {
+        "buys": 157,
+        "sells": 81
+       },
+       "h6": {
+        "buys": 645,
+        "sells": 562
+       },
+       "h24": {
+        "buys": 3591,
+        "sells": 3380
+       }
+      },
+      "volume": {
+       "h24": 1050483.21,
+       "h6": 131283.78,
+       "h1": 28086.32,
+       "m5": 14240.41
+      },
+      "priceChange": {
+       "m5": 1.09,
+       "h1": 0.86,
+       "h6": 0.32,
+       "h24": -0.73
+      },
+      "liquidity": {
+       "base": 78.02498,
+       "quote": 310.2925,
+       "usd": 569598.83
+      },
+      "fdv": 19696743,
+      "marketCap": 19696743,
+      "pairCreatedAt": 1785765407000
+     },
+     {
+      "chainId": "robinhood",
+      "dexId": "uniswap",
+      "url": "https://dexscreener.com/robinhood/0x2d4e535e1bc2e11112088c522ff26549e3c01aa774657b239cffe6710a141da6",
+      "pairAddress": "0x2d4e535e1bc2e11112088c522ff26549e3c01aa774657b239cffe6710a141da6",
+      "labels": [
+       "v4"
+      ],
+      "baseToken": {
+       "address": "0x0000000000000000000000000000000000000000",
+       "name": "Ether",
+       "symbol": "ETH"
+      },
+      "quoteToken": {
+       "address": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+       "name": "Global Dollar",
+       "symbol": "USDG"
+      },
+      "priceNative": "1634.3407",
+      "priceUsd": "1634.34",
+      "txns": {
+       "m5": {
+        "buys": 15,
+        "sells": 75
+       },
+       "h1": {
+        "buys": 93,
+        "sells": 177
+       },
+       "h6": {
+        "buys": 718,
+        "sells": 751
+       },
+       "h24": {
+        "buys": 2625,
+        "sells": 2851
+       }
+      },
+      "volume": {
+       "h24": 3451041.73,
+       "h6": 914969.93,
+       "h1": 221746.34,
+       "m5": 129188.05
+      },
+      "priceChange": {
+       "m5": -1.14,
+       "h1": -1.35,
+       "h6": -1.44,
+       "h24": -3.64
+      },
+      "liquidity": {
+       "base": 1011.06136,
+       "quote": 934558,
+       "usd": 2586977.71
+      },
+      "pairCreatedAt": 1795426229000
+     },
+     {
+      "chainId": "robinhood",
+      "dexId": "uniswap",
+      "url": "https://dexscreener.com/robinhood/0xa9188730fe85be88ad499d7d52b099e800fb0334",
+      "pairAddress": "0xa9188730Fe85Be88ad499D7d52B099e800fB0334",
+      "labels": [
+       "v3"
+      ],
+      "baseToken": {
+       "address": "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+       "name": "WETH",
+       "symbol": "WETH"
+      },
+      "quoteToken": {
+       "address": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+       "name": "Global Dollar",
+       "symbol": "USDG"
+      },
+      "priceNative": "1636.9085",
+      "priceUsd": "1636.90",
+      "txns": {
+       "m5": {
+        "buys": 0,
+        "sells": 101
+       },
+       "h1": {
+        "buys": 11,
+        "sells": 121
+       },
+       "h6": {
+        "buys": 180,
+        "sells": 307
+       },
+       "h24": {
+        "buys": 1274,
+        "sells": 1574
+       }
+      },
+      "volume": {
+       "h24": 405425.57,
+       "h6": 74294.89,
+       "h1": 26387.31,
+       "m5": 21272.25
+      },
+      "priceChange": {
+       "m5": -1.13,
+       "h1": -1.19,
+       "h6": -1.37,
+       "h24": -3.47
+      },
+      "liquidity": {
+       "base": 480.2118,
+       "quote": 175490,
+       "usd": 961553.28
+      },
+      "fdv": 58635599,
+      "marketCap": 58635599,
+      "pairCreatedAt": 1781199780000
+     },
+     {
+      "chainId": "robinhood",
+      "dexId": "ramses",
+      "url": "https://dexscreener.com/robinhood/0x3e1afde90341f843c941ff4077d915bde3008c7e",
+      "pairAddress": "0x3e1afDe90341F843c941fF4077d915bDE3008c7E",
+      "labels": [
+       "v3"
+      ],
+      "baseToken": {
+       "address": "0x117cc2133c37B721F49dE2A7a74833232B3B4C0C",
+       "name": "SPDR S&P 500 ETF Trust • Robinhood Token",
+       "symbol": "SPY"
+      },
+      "quoteToken": {
+       "address": "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+       "name": "WETH",
+       "symbol": "WETH"
+      },
+      "priceNative": "0.4350",
+      "priceUsd": "719.84",
+      "txns": {
+       "m5": {
+        "buys": 55,
+        "sells": 31
+       },
+       "h1": {
+        "buys": 133,
+        "sells": 103
+       },
+       "h6": {
+        "buys": 685,
+        "sells": 664
+       },
+       "h24": {
+        "buys": 3055,
+        "sells": 3031
+       }
+      },
+      "volume": {
+       "h24": 419227.36,
+       "h6": 106551.09,
+       "h1": 18820.52,
+       "m5": 9316.62
+      },
+      "priceChange": {
+       "m5": 1.09,
+       "h1": 0.93,
+       "h6": 0.36,
+       "h24": -0.73
+      },
+      "liquidity": {
+       "base": 13.8063,
+       "quote": 18.3116,
+       "usd": 40239.12
+      },
+      "fdv": 19701751,
+      "marketCap": 19701751,
+      "pairCreatedAt": 1787225344000
+     },
+     {
+      "chainId": "robinhood",
+      "dexId": "uniswap",
+      "url": "https://dexscreener.com/robinhood/0x37f6b6fcd3ef8bc3425288df7ee446a481b7f90f",
+      "pairAddress": "0x37F6B6FCd3eF8bC3425288dF7ee446a481b7f90f",
+      "labels": [
+       "v3"
+      ],
+      "baseToken": {
+       "address": "0x16D3Fc1d16a98f94E554B7487a2ed8EdeDAc5dd8",
+       "name": "BASKET",
+       "symbol": "Basket"
+      },
+      "quoteToken": {
+       "address": "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+       "name": "WETH",
+       "symbol": "WETH"
+      },
+      "priceNative": "0.00000005062",
+      "priceUsd": "0.00008376",
+      "txns": {
+       "m5": {
+        "buys": 59,
+        "sells": 31
+       },
+       "h1": {
+        "buys": 244,
+        "sells": 56
+       },
+       "h6": {
+        "buys": 244,
+        "sells": 56
+       },
+       "h24": {
+        "buys": 244,
+        "sells": 56
+       }
+      },
+      "volume": {
+       "h24": 42618.14,
+       "h6": 42618.14,
+       "h1": 42618.14,
+       "m5": 13220.56
+      },
+      "priceChange": {
+       "m5": 72.3,
+       "h1": 1590,
+       "h6": 1590,
+       "h24": 1590
+      },
+      "liquidity": {
+       "base": 7205.3578,
+       "quote": 0.0002821,
+       "usd": 1.07
+      },
+      "fdv": 83766,
+      "marketCap": 83766,
+      "pairCreatedAt": 1795591545000
+     },
+     {
+      "chainId": "robinhood",
+      "dexId": "uniswap",
+      "url": "https://dexscreener.com/robinhood/0x3a6ec0aa6c702323414d449b5f60f4b742a82ded",
+      "pairAddress": "0x3a6eC0aa6C702323414d449B5F60f4B742A82dED",
+      "labels": [
+       "v3"
+      ],
+      "baseToken": {
+       "address": "0x6330D8C3178a418788dF01a47479c0ce7CCF450b",
+       "name": "Coinbase • Robinhood Token",
+       "symbol": "COIN"
+      },
+      "quoteToken": {
+       "address": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+       "name": "Global Dollar",
+       "symbol": "USDG"
+      },
+      "priceNative": "100.1643",
+      "priceUsd": "100.16",
+      "txns": {
+       "m5": {
+        "buys": 8,
+        "sells": 70
+       },
+       "h1": {
+        "buys": 33,
+        "sells": 108
+       },
+       "h6": {
+        "buys": 145,
+        "sells": 241
+       },
+       "h24": {
+        "buys": 1198,
+        "sells": 1323
+       }
+      },
+      "volume": {
+       "h24": 182556.85,
+       "h6": 102367.83,
+       "h1": 87204.35,
+       "m5": 59930.12
+      },
+      "priceChange": {
+       "m5": -0.61,
+       "h1": -0.93,
+       "h6": -1.85,
+       "h24": -6.38
+      },
+      "liquidity": {
+       "base": 879.8554,
+       "quote": 157046,
+       "usd": 245176.62
+      },
+      "fdv": 2470933,
+      "marketCap": 2470933,
+      "pairCreatedAt": 1789125420000
+     },
+     {
+      "chainId": "robinhood",
+      "dexId": "aero",
+      "url": "https://dexscreener.com/robinhood/0xee141c6878256984d5b8f88c4b70aa3d29226d50",
+      "pairAddress": "0xee141c6878256984D5b8f88c4B70aA3D29226D50",
+      "baseToken": {
+       "address": "0xd0601CE157Db5bdC3162BbaC2a2C8aF5320D9EEC",
+       "name": "NVIDIA • Robinhood Token",
+       "symbol": "NVDA"
+      },
+      "quoteToken": {
+       "address": "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+       "name": "WETH",
+       "symbol": "WETH"
+      },
+      "priceNative": "0.09160",
+      "priceUsd": "151.57",
+      "txns": {
+       "m5": {
+        "buys": 40,
+        "sells": 16
+       },
+       "h1": {
+        "buys": 176,
+        "sells": 224
+       },
+       "h6": {
+        "buys": 1140,
+        "sells": 1210
+       },
+       "h24": {
+        "buys": 5706,
+        "sells": 5945
+       }
+      },
+      "volume": {
+       "h24": 2179502,
+       "h6": 744828.98,
+       "h1": 134734.59,
+       "m5": 20323.04
+      },
+      "priceChange": {
+       "m5": 0.67,
+       "h1": -0.19,
+       "h6": -0.74,
+       "h24": -7.27
+      },
+      "liquidity": {
+       "base": 109.6575,
+       "quote": 19.8135,
+       "usd": 49407.32
+      },
+      "fdv": 20530010,
+      "marketCap": 19193758,
+      "info": {
+       "imageUrl": "https://cdn.dexscreener.com/cms/images/https%3A%2F%2Fcoin-images.coingecko.com%2Fcoins%2Fimages%2F102174110%2Flarge%2F0xd0601ce157db5bdc3162bbac2a2c8af5320d9eec.png%3F1782444565?width=800&height=800&quality=95&format=auto",
+       "openGraph": "https://cdn.dexscreener.com/token-images/og/robinhood/0xd0601ce157db5bdc3162bbac2a2c8af5320d9eec?timestamp=1795592100000",
+       "websites": [
+        {
+         "url": "https://robinhood.com/us/en/",
+         "label": "robinhood.com"
+        }
+       ],
+       "socials": [
+        {
+         "url": "https://twitter.com/RobinhoodApp",
+         "type": "twitter"
+        }
+       ]
+      }
+     },
+     {
+      "chainId": "robinhood",
+      "dexId": "uniswap",
+      "url": "https://dexscreener.com/robinhood/0x71f9660f9535e3e81d720696a58ea80274da8b2c6eb7c3acb22611d977439a5c",
+      "pairAddress": "0x71f9660f9535e3e81d720696a58ea80274da8b2c6eb7c3acb22611d977439a5c",
+      "labels": [
+       "v4"
+      ],
+      "baseToken": {
+       "address": "0xd0601CE157Db5bdC3162BbaC2a2C8aF5320D9EEC",
+       "name": "NVIDIA • Robinhood Token",
+       "symbol": "NVDA"
+      },
+      "quoteToken": {
+       "address": "0x0000000000000000000000000000000000000000",
+       "name": "Ether",
+       "symbol": "ETH"
+      },
+      "priceNative": "0.09150",
+      "priceUsd": "151.42",
+      "txns": {
+       "m5": {
+        "buys": 38,
+        "sells": 19
+       },
+       "h1": {
+        "buys": 69,
+        "sells": 70
+       },
+       "h6": {
+        "buys": 265,
+        "sells": 276
+       },
+       "h24": {
+        "buys": 2618,
+        "sells": 2777
+       }
+      },
+      "volume": {
+       "h24": 324677.89,
+       "h6": 30143.08,
+       "h1": 9378.39,
+       "m5": 4472.66
+      },
+      "priceChange": {
+       "m5": 0.56,
+       "h1": -0.31,
+       "h6": -0.84,
+       "h24": -7.37
+      },
+      "liquidity": {
+       "base": 231.8921,
+       "quote": 25.7295,
+       "usd": 77688.88
+      },
+      "fdv": 20509284,
+      "marketCap": 19174381,
+      "pairCreatedAt": 1784682766000,
+      "info": {
+       "imageUrl": "https://cdn.dexscreener.com/cms/images/https%3A%2F%2Fcoin-images.coingecko.com%2Fcoins%2Fimages%2F102174110%2Flarge%2F0xd0601ce157db5bdc3162bbac2a2c8af5320d9eec.png%3F1782444565?width=800&height=800&quality=95&format=auto",
+       "openGraph": "https://cdn.dexscreener.com/token-images/og/robinhood/0xd0601ce157db5bdc3162bbac2a2c8af5320d9eec?timestamp=1795592100000",
+       "websites": [
+        {
+         "url": "https://robinhood.com/us/en/",
+         "label": "robinhood.com"
+        }
+       ],
+       "socials": [
+        {
+         "url": "https://twitter.com/RobinhoodApp",
+         "type": "twitter"
+        }
+       ]
+      }
+     },
+     {
+      "chainId": "robinhood",
+      "dexId": "uniswap",
+      "url": "https://dexscreener.com/robinhood/0xda14bf8a87711e1f30dbe620f2df3fdf371f7503f1a72202d15631f657651ec0",
+      "pairAddress": "0xda14bf8a87711e1f30dbe620f2df3fdf371f7503f1a72202d15631f657651ec0",
+      "labels": [
+       "v4"
+      ],
+      "baseToken": {
+       "address": "0xd0601CE157Db5bdC3162BbaC2a2C8aF5320D9EEC",
+       "name": "NVIDIA • Robinhood Token",
+       "symbol": "NVDA"
+      },
+      "quoteToken": {
+       "address": "0x117cc2133c37B721F49dE2A7a74833232B3B4C0C",
+       "name": "SPDR S&P 500 ETF Trust • Robinhood Token",
+       "symbol": "SPY"
+      },
+      "priceNative": "0.2104",
+      "priceUsd": "150.10",
+      "txns": {
+       "m5": {
+        "buys": 17,
+        "sells": 40
+       },
+       "h1": {
+        "buys": 124,
+        "sells": 197
+       },
+       "h6": {
+        "buys": 843,
+        "sells": 913
+       },
+       "h24": {
+        "buys": 8896,
+        "sells": 9583
+       }
+      },
+      "volume": {
+       "h24": 4128908.46,
+       "h6": 354572.83,
+       "h1": 74334.05,
+       "m5": 22567.97
+      },
+      "priceChange": {
+       "m5": -0.57,
+       "h1": -1.53,
+       "h6": -1.94,
+       "h24": -8.19
+      },
+      "liquidity": {
+       "base": 3631.1971,
+       "quote": 245.1816,
+       "usd": 719960.83
+      },
+      "fdv": 20330897,
+      "marketCap": 19007604,
+      "pairCreatedAt": 1790560425000,
+      "info": {
+       "imageUrl": "https://cdn.dexscreener.com/cms/images/https%3A%2F%2Fcoin-images.coingecko.com%2Fcoins%2Fimages%2F102174110%2Flarge%2F0xd0601ce157db5bdc3162bbac2a2c8af5320d9eec.png%3F1782444565?width=800&height=800&quality=95&format=auto",
+       "openGraph": "https://cdn.dexscreener.com/token-images/og/robinhood/0xd0601ce157db5bdc3162bbac2a2c8af5320d9eec?timestamp=1795592100000",
+       "websites": [
+        {
+         "url": "https://robinhood.com/us/en/",
+         "label": "robinhood.com"
+        }
+       ],
+       "socials": [
+        {
+         "url": "https://twitter.com/RobinhoodApp",
+         "type": "twitter"
+        }
+       ]
+      }
+     },
+     {
+      "chainId": "robinhood",
+      "dexId": "uniswap",
+      "url": "https://dexscreener.com/robinhood/0x8bb3514e2204e1cdf3ac149efee7ff04d91b719f",
+      "pairAddress": "0x8bb3514e2204E1cDF3Ac149EFEe7Ff04D91B719f",
+      "labels": [
+       "v3"
+      ],
+      "baseToken": {
+       "address": "0xaF3D76f1834A1d425780943C99Ea8A608f8a93f9",
+       "name": "Apple • Robinhood Token",
+       "symbol": "AAPL"
+      },
+      "quoteToken": {
+       "address": "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+       "name": "WETH",
+       "symbol": "WETH"
+      },
+      "priceNative": "0.2152",
+      "priceUsd": "356.22",
+      "txns": {
+       "m5": {
+        "buys": 48,
+        "sells": 12
+       },
+       "h1": {
+        "buys": 95,
+        "sells": 61
+       },
+       "h6": {
+        "buys": 371,
+        "sells": 344
+       },
+       "h24": {
+        "buys": 2586,
+        "sells": 2291
+       }
+      },
+      "volume": {
+       "h24": 350268.18,
+       "h6": 38376.63,
+       "h1": 9748.38,
+       "m5": 4250.45
+      },
+      "priceChange": {
+       "m5": 1.15,
+       "h1": 0.99,
+       "h6": 0.66,
+       "h24": 1.52
+      },
+      "liquidity": {
+       "base": 29.6696,
+       "quote": 75.01598,
+       "usd": 134699.57
+      },
+      "fdv": 3395853,
+      "marketCap": 3395853,
+      "pairCreatedAt": 1783643042000
+     },
+     {
+      "chainId": "robinhood",
+      "dexId": "uniswap",
+      "url": "https://dexscreener.com/robinhood/0x851ef5c137018c41daec442730230254f98e562c72d9d5594505099b1d811f28",
+      "pairAddress": "0x851ef5c137018c41daec442730230254f98e562c72d9d5594505099b1d811f28",
+      "labels": [
+       "v4"
+      ],
+      "baseToken": {
+       "address": "0x19DfB4D344e76D71515F4966535bEF45D9E9ba9F",
+       "name": "HEPH AI",
+       "symbol": "HEPH"
+      },
+      "quoteToken": {
+       "address": "0x0000000000000000000000000000000000000000",
+       "name": "Ether",
+       "symbol": "ETH"
+      },
+      "priceNative": "0.00000005218",
+      "priceUsd": "0.00008634",
+      "txns": {
+       "m5": {
+        "buys": 45,
+        "sells": 14
+       },
+       "h1": {
+        "buys": 201,
+        "sells": 106
+       },
+       "h6": {
+        "buys": 201,
+        "sells": 106
+       },
+       "h24": {
+        "buys": 201,
+        "sells": 106
+       }
+      },
+      "volume": {
+       "h24": 95401.14,
+       "h6": 95401.14,
+       "h1": 95401.14,
+       "m5": 21503.26
+      },
+      "priceChange": {
+       "m5": 73.71,
+       "h1": 420,
+       "h6": 420,
+       "h24": 420
+      },
+      "liquidity": {
+       "base": 437769486,
+       "quote": 12.843,
+       "usd": 59050.68
+      },
+      "fdv": 86344,
+      "marketCap": 86344,
+      "pairCreatedAt": 1795590840000
+     },
+     {
+      "chainId": "robinhood",
+      "dexId": "uniswap",
+      "url": "https://dexscreener.com/robinhood/0x934e60d1c6c34242b92159a5bcc710fafa50ad87",
+      "pairAddress": "0x934e60D1C6C34242b92159A5Bcc710FAFa50AD87",
+      "labels": [
+       "v3"
+      ],
+      "baseToken": {
+       "address": "0xCEC185eB182c47d1bA1EFc84e6959e18cd620Be4",
+       "name": "Coinbase Wrapped BTC",
+       "symbol": "cbBTC"
+      },
+      "quoteToken": {
+       "address": "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+       "name": "WETH",
+       "symbol": "WETH"
+      },
+      "priceNative": "35.8264",
+      "priceUsd": "59282.76",
+      "txns": {
+       "m5": {
+        "buys": 59,
+        "sells": 1
+       },
+       "h1": {
+        "buys": 72,
+        "sells": 10
+       },
+       "h6": {
+        "buys": 208,
+        "sells": 165
+       },
+       "h24": {
+        "buys": 1204,
+        "sells": 1295
+       }
+      },
+      "volume": {
+       "h24": 544276.2,
+       "h6": 95119.4,
+       "h1": 17306.11,
+       "m5": 14164.24
+      },
+      "priceChange": {
+       "m5": 0.52,
+       "h1": 0.57,
+       "h6": -0.1,
+       "h24": -1.88
+      },
+      "liquidity": {
+       "base": 1.9155,
+       "quote": 155.5218,
+       "usd": 370901.29
+      },
+      "fdv": 1866484,
+      "marketCap": 1866484,
+      "pairCreatedAt": 1789226098000
+     },
+     {
+      "chainId": "robinhood",
+      "dexId": "ramses",
+      "url": "https://dexscreener.com/robinhood/0xf2a0be59ab76b96f957bd5e5b967f2b75e8db269",
+      "pairAddress": "0xf2A0bE59AB76b96f957bd5E5b967F2B75e8dB269",
+      "labels": [
+       "v3"
+      ],
+      "baseToken": {
+       "address": "0x39dBED3a2bd333467115dE45665cC57F813C4571",
+       "name": "Pons",
+       "symbol": "PONS"
+      },
+      "quoteToken": {
+       "address": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+       "name": "Global Dollar",
+       "symbol": "USDG"
+      },
+      "priceNative": "0.08675",
+      "priceUsd": "0.08675",
+      "txns": {
+       "m5": {
+        "buys": 8,
+        "sells": 49
+       },
+       "h1": {
+        "buys": 111,
+        "sells": 180
+       },
+       "h6": {
+        "buys": 706,
+        "sells": 805
+       },
+       "h24": {
+        "buys": 3490,
+        "sells": 3561
+       }
+      },
+      "volume": {
+       "h24": 716985.32,
+       "h6": 162334.36,
+       "h1": 35227.81,
+       "m5": 5657.67
+      },
+      "priceChange": {
+       "m5": -1.52,
+       "h1": -1.64,
+       "h6": 2.41,
+       "h24": -5.46
+      },
+      "liquidity": {
+       "base": 2913971,
+       "quote": 53929,
+       "usd": 306717.27
+      },
+      "fdv": 57962898,
+      "marketCap": 57962898,
+      "pairCreatedAt": 1786419242000,
+      "info": {
+       "imageUrl": "https://cdn.dexscreener.com/cms/images/dkmXs8KYMyMXjuU1?width=800&height=800&quality=95&format=auto",
+       "header": "https://cdn.dexscreener.com/cms/images/6IKrI-WtX92dxhL0?width=1500&height=500&quality=95&format=auto",
+       "openGraph": "https://cdn.dexscreener.com/token-images/og/robinhood/0x39dbed3a2bd333467115de45665cc57f813c4571?timestamp=1795592100000",
+       "websites": [
+        {
+         "url": "https://ponsfamily.com/launchpad",
+         "label": "Website"
+        }
+       ],
+       "socials": [
+        {
+         "url": "https://x.com/ponsdotfamily",
+         "type": "twitter"
+        }
+       ]
+      }
+     },
+     {
+      "chainId": "robinhood",
+      "dexId": "uniswap",
+      "url": "https://dexscreener.com/robinhood/0x26250ba84465454bc731f710e46f1f32b167d66b",
+      "pairAddress": "0x26250bA84465454bc731F710E46F1f32b167d66B",
+      "labels": [
+       "v3"
+      ],
+      "baseToken": {
+       "address": "0xC9a981FEE1F9DEc688bb123ccDeCc63D0deBFC4e",
+       "name": "SPDR Gold Trust • Robinhood Token",
+       "symbol": "GLD"
+      },
+      "quoteToken": {
+       "address": "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+       "name": "WETH",
+       "symbol": "WETH"
+      },
+      "priceNative": "0.1974",
+      "priceUsd": "326.67",
+      "txns": {
+       "m5": {
+        "buys": 37,
+        "sells": 16
+       },
+       "h1": {
+        "buys": 129,
+        "sells": 60
+       },
+       "h6": {
+        "buys": 513,
+        "sells": 463
+       },
+       "h24": {
+        "buys": 2208,
+        "sells": 2146
+       }
+      },
+      "volume": {
+       "h24": 429707.54,
+       "h6": 91730.01,
+       "h1": 18496.18,
+       "m5": 7563.06
+      },
+      "priceChange": {
+       "m5": 1.08,
+       "h1": 1.36,
+       "h6": 0.55,
+       "h24": -1.48
+      },
+      "liquidity": {
+       "base": 83.2715,
+       "quote": 37.1637,
+       "usd": 88698.06
+      },
+      "fdv": 5330904,
+      "marketCap": 5330904,
+      "pairCreatedAt": 1788393534000,
+      "info": {
+       "imageUrl": "https://cdn.dexscreener.com/cms/images/https%3A%2F%2Fcoin-images.coingecko.com%2Fcoins%2Fimages%2F102175452%2Flarge%2FGLD.png%3F1786367509?width=800&height=800&quality=95&format=auto",
+       "openGraph": "https://cdn.dexscreener.com/token-images/og/robinhood/0xc9a981fee1f9dec688bb123ccdecc63d0debfc4e?timestamp=1795592100000",
+       "websites": [
+        {
+         "url": "https://docs.robinhood.com/rhj",
+         "label": "docs.robinhood.com"
+        }
+       ],
+       "socials": [
+        {
+         "url": "https://twitter.com/RobinhoodCrypto",
+         "type": "twitter"
+        }
+       ]
+      }
+     }
+    ],
+    "pair": null
+   }
+  },
+  {
+   "ids": [
+    "0xedc488cb15abce61894f9a22e8ce920e9ed0953c",
+    "0xc61284332117c3fb23a2a56cceffd07f7af60029",
+    "0xa792177a07e834d20c9fb1caa1121748fc3165fdf0387c4863075e86b86c0709",
+    "0xa1513da56f71b83d98124d645828a14a191b8010",
+    "0x9cc8c4f6118419a27f113723f1dea646685be55f",
+    "0x2708a0e381bb922d589e13df92ed2c9b0d1aa0eb",
+    "0xc0be1cb0f674d9737c72b2a63fc542361185b807",
+    "0x4be9657ec9002e528f4f17a5c43edc525a07f888f7b180c2afbf75e096c4f38a",
+    "0xe1ae6a4c6ccc9f037389a8d50a4f577bde1a9fe01d85d88ecbbd39955ce53288",
+    "0x741ad272ca4fc8d3cb3b08202be4c00d0286d91e"
+   ],
+   "status": 200,
+   "body": {
+    "schemaVersion": "1.0.0",
+    "pairs": [
+     {
+      "chainId": "robinhood",
+      "dexId": "uniswap",
+      "url": "https://dexscreener.com/robinhood/0xedc488cb15abce61894f9a22e8ce920e9ed0953c",
+      "pairAddress": "0xedc488cb15ABce61894f9A22e8CE920E9ed0953c",
+      "labels": [
+       "v3"
+      ],
+      "baseToken": {
+       "address": "0xf62C728281c60781C49509F735edC5EEc18B93CC",
+       "name": "JaoJiu",
+       "symbol": "JaoJiu"
+      },
+      "quoteToken": {
+       "address": "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+       "name": "WETH",
+       "symbol": "WETH"
+      },
+      "priceNative": "0.00000003670",
+      "priceUsd": "0.00006074",
+      "txns": {
+       "m5": {
+        "buys": 33,
+        "sells": 18
+       },
+       "h1": {
+        "buys": 83,
+        "sells": 35
+       },
+       "h6": {
+        "buys": 83,
+        "sells": 35
+       },
+       "h24": {
+        "buys": 83,
+        "sells": 35
+       }
+      },
+      "volume": {
+       "h24": 23503.45,
+       "h6": 23503.45,
+       "h1": 23503.45,
+       "m5": 6268.04
+      },
+      "priceChange": {
+       "m5": 10.6,
+       "h1": 635,
+       "h6": 635,
+       "h24": 635
+      },
+      "liquidity": {
+       "base": 369087161,
+       "quote": 8.5491,
+       "usd": 36565.86
+      },
+      "fdv": 60743,
+      "marketCap": 60743,
+      "pairCreatedAt": 1795591730000
+     },
+     {
+      "chainId": "robinhood",
+      "dexId": "uniswap",
+      "url": "https://dexscreener.com/robinhood/0xc61284332117c3fb23a2a56cceffd07f7af60029",
+      "pairAddress": "0xc61284332117c3FB23A2A56cceFFD07F7aF60029",
+      "labels": [
+       "v3"
+      ],
+      "baseToken": {
+       "address": "0x4a0E65A3EcceC6dBe60AE065F2e7bb85Fae35eEa",
+       "name": "Space Exploration Technologies Corp. Class A Common Stock • Robinhood Token",
+       "symbol": "SPCX"
+      },
+      "quoteToken": {
+       "address": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+       "name": "Global Dollar",
+       "symbol": "USDG"
+      },
+      "priceNative": "123.04321",
+      "priceUsd": "123.043",
+      "txns": {
+       "m5": {
+        "buys": 7,
+        "sells": 39
+       },
+       "h1": {
+        "buys": 62,
+        "sells": 145
+       },
+       "h6": {
+        "buys": 537,
+        "sells": 675
+       },
+       "h24": {
+        "buys": 6956,
+        "sells": 6925
+       }
+      },
+      "volume": {
+       "h24": 4343275.35,
+       "h6": 315938.72,
+       "h1": 59016.23,
+       "m5": 10007.15
+      },
+      "priceChange": {
+       "m5": -0.27,
+       "h1": -0.9,
+       "h6": -1.98,
+       "h24": -8.4
+      },
+      "liquidity": {
+       "base": 9671.7474,
+       "quote": 263962,
+       "usd": 1454005.65
+      },
+      "fdv": 14794685,
+      "marketCap": 14794685,
+      "pairCreatedAt": 1784807794000
+     },
+     {
+      "chainId": "robinhood",
+      "dexId": "uniswap",
+      "url": "https://dexscreener.com/robinhood/0xa792177a07e834d20c9fb1caa1121748fc3165fdf0387c4863075e86b86c0709",
+      "pairAddress": "0xa792177a07e834d20c9fb1caa1121748fc3165fdf0387c4863075e86b86c0709",
+      "labels": [
+       "v4"
+      ],
+      "baseToken": {
+       "address": "0x2d0F91549405EA681C417fF8fF1d32FE217E7777",
+       "name": "i need u",
+       "symbol": "inu"
+      },
+      "quoteToken": {
+       "address": "0x0000000000000000000000000000000000000000",
+       "name": "Ether",
+       "symbol": "ETH"
+      },
+      "priceNative": "0.00000008325",
+      "priceUsd": "0.0001377",
+      "txns": {
+       "m5": {
+        "buys": 27,
+        "sells": 22
+       },
+       "h1": {
+        "buys": 121,
+        "sells": 103
+       },
+       "h6": {
+        "buys": 121,
+        "sells": 103
+       },
+       "h24": {
+        "buys": 121,
+        "sells": 103
+       }
+      },
+      "volume": {
+       "h24": 32434.73,
+       "h6": 32434.73,
+       "h1": 32434.73,
+       "m5": 8503.97
+      },
+      "priceChange": {
+       "m5": 27.62,
+       "h1": 268,
+       "h6": 268,
+       "h24": 268
+      },
+      "liquidity": {
+       "base": 115122944,
+       "quote": 9.5849,
+       "usd": 31720.94
+      },
+      "fdv": 31478,
+      "marketCap": 31478,
+      "pairCreatedAt": 1795591700000
+     },
+     {
+      "chainId": "robinhood",
+      "dexId": "aero",
+      "url": "https://dexscreener.com/robinhood/0xa1513da56f71b83d98124d645828a14a191b8010",
+      "pairAddress": "0xA1513DA56f71b83D98124D645828A14a191b8010",
+      "baseToken": {
+       "address": "0xd0601CE157Db5bdC3162BbaC2a2C8aF5320D9EEC",
+       "name": "NVIDIA • Robinhood Token",
+       "symbol": "NVDA"
+      },
+      "quoteToken": {
+       "address": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+       "name": "Global Dollar",
+       "symbol": "USDG"
+      },
+      "priceNative": "149.8937",
+      "priceUsd": "149.89",
+      "txns": {
+       "m5": {
+        "buys": 12,
+        "sells": 39
+       },
+       "h1": {
+        "buys": 169,
+        "sells": 272
+       },
+       "h6": {
+        "buys": 1261,
+        "sells": 1366
+       },
+       "h24": {
+        "buys": 5341,
+        "sells": 5796
+       }
+      },
+      "volume": {
+       "h24": 2877743.19,
+       "h6": 929499.13,
+       "h1": 172196.4,
+       "m5": 17894.54
+      },
+      "priceChange": {
+       "m5": -0.41,
+       "h1": -1.44,
+       "h6": -1.96,
+       "h24": -8.26
+      },
+      "liquidity": {
+       "base": 2260.5905,
+       "quote": 51233,
+       "usd": 390081.61
+      },
+      "fdv": 20302242,
+      "marketCap": 18980815,
+      "info": {
+       "imageUrl": "https://cdn.dexscreener.com/cms/images/https%3A%2F%2Fcoin-images.coingecko.com%2Fcoins%2Fimages%2F102174110%2Flarge%2F0xd0601ce157db5bdc3162bbac2a2c8af5320d9eec.png%3F1782444565?width=800&height=800&quality=95&format=auto",
+       "openGraph": "https://cdn.dexscreener.com/token-images/og/robinhood/0xd0601ce157db5bdc3162bbac2a2c8af5320d9eec?timestamp=1795592100000",
+       "websites": [
+        {
+         "url": "https://robinhood.com/us/en/",
+         "label": "robinhood.com"
+        }
+       ],
+       "socials": [
+        {
+         "url": "https://twitter.com/RobinhoodApp",
+         "type": "twitter"
+        }
+       ]
+      }
+     },
+     {
+      "chainId": "robinhood",
+      "dexId": "uniswap",
+      "url": "https://dexscreener.com/robinhood/0x9cc8c4f6118419a27f113723f1dea646685be55f",
+      "pairAddress": "0x9cc8c4F6118419A27f113723F1DeA646685Be55F",
+      "labels": [
+       "v3"
+      ],
+      "baseToken": {
+       "address": "0xc6911796042b15d7Fa4F6CDe69e245DdCd3d9c31",
+       "name": "Virtuals Protocol",
+       "symbol": "VIRTUAL"
+      },
+      "quoteToken": {
+       "address": "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+       "name": "WETH",
+       "symbol": "WETH"
+      },
+      "priceNative": "0.0002144",
+      "priceUsd": "0.3548",
+      "txns": {
+       "m5": {
+        "buys": 29,
+        "sells": 25
+       },
+       "h1": {
+        "buys": 77,
+        "sells": 85
+       },
+       "h6": {
+        "buys": 354,
+        "sells": 290
+       },
+       "h24": {
+        "buys": 1076,
+        "sells": 1799
+       }
+      },
+      "volume": {
+       "h24": 231540.05,
+       "h6": 89096.32,
+       "h1": 26141.27,
+       "m5": 7310.04
+      },
+      "priceChange": {
+       "m5": -0.05,
+       "h1": -1.14,
+       "h6": 1.5,
+       "h24": -3.24
+      },
+      "liquidity": {
+       "base": 472979,
+       "quote": 7.8504,
+       "usd": 180834.12
+      },
+      "fdv": 2599837,
+      "marketCap": 233637861,
+      "pairCreatedAt": 1783155036000,
+      "info": {
+       "imageUrl": "https://cdn.dexscreener.com/cms/images/dRXf25JXQ23dihCf?width=800&height=800&quality=95&format=auto",
+       "header": "https://cdn.dexscreener.com/cms/images/ilMFrSDQUJAQd2i_?width=1500&height=500&quality=95&format=auto",
+       "openGraph": "https://cdn.dexscreener.com/token-images/og/robinhood/0xc6911796042b15d7fa4f6cde69e245ddcd3d9c31?timestamp=1795592100000",
+       "websites": [
+        {
+         "url": "https://www.virtuals.io/",
+         "label": "Website"
+        }
+       ],
+       "socials": [
+        {
+         "url": "https://twitter.com/virtuals_io",
+         "type": "twitter"
+        },
+        {
+         "url": "https://t.me/virtuals",
+         "type": "telegram"
+        }
+       ]
+      }
+     },
+     {
+      "chainId": "robinhood",
+      "dexId": "uniswap",
+      "url": "https://dexscreener.com/robinhood/0x2708a0e381bb922d589e13df92ed2c9b0d1aa0eb",
+      "pairAddress": "0x2708a0E381bb922D589e13df92eD2C9B0D1aA0Eb",
+      "labels": [
+       "v3"
+      ],
+      "baseToken": {
+       "address": "0x38E56e6116699848232a3FEdd0ae5Ea2081a00b8",
+       "name": "Hyphen VIctory GTA 6",
+       "symbol": "Hyphen"
+      },
+      "quoteToken": {
+       "address": "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+       "name": "WETH",
+       "symbol": "WETH"
+      },
+      "priceNative": "0.00000004121",
+      "priceUsd": "0.00006820",
+      "txns": {
+       "m5": {
+        "buys": 31,
+        "sells": 14
+       },
+       "h1": {
+        "buys": 216,
+        "sells": 105
+       },
+       "h6": {
+        "buys": 216,
+        "sells": 105
+       },
+       "h24": {
+        "buys": 216,
+        "sells": 105
+       }
+      },
+      "volume": {
+       "h24": 78991.21,
+       "h6": 78991.21,
+       "h1": 78991.21,
+       "m5": 12240.75
+      },
+      "priceChange": {
+       "m5": 2.07,
+       "h1": 310,
+       "h6": 310,
+       "h24": 310
+      },
+      "liquidity": {
+       "base": 492606657,
+       "quote": 10.3052,
+       "usd": 50650.66
+      },
+      "fdv": 68205,
+      "marketCap": 68205,
+      "pairCreatedAt": 1795590672000
+     },
+     {
+      "chainId": "robinhood",
+      "dexId": "uniswap",
+      "url": "https://dexscreener.com/robinhood/0xc0be1cb0f674d9737c72b2a63fc542361185b807",
+      "pairAddress": "0xC0Be1cb0f674D9737C72B2A63fC542361185b807",
+      "labels": [
+       "v3"
+      ],
+      "baseToken": {
+       "address": "0xd0601CE157Db5bdC3162BbaC2a2C8aF5320D9EEC",
+       "name": "NVIDIA • Robinhood Token",
+       "symbol": "NVDA"
+      },
+      "quoteToken": {
+       "address": "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+       "name": "WETH",
+       "symbol": "WETH"
+      },
+      "priceNative": "0.09163",
+      "priceUsd": "151.63",
+      "txns": {
+       "m5": {
+        "buys": 37,
+        "sells": 0
+       },
+       "h1": {
+        "buys": 37,
+        "sells": 63
+       },
+       "h6": {
+        "buys": 72,
+        "sells": 108
+       },
+       "h24": {
+        "buys": 1253,
+        "sells": 1535
+       }
+      },
+      "volume": {
+       "h24": 851588.21,
+       "h6": 60016.95,
+       "h1": 37281.34,
+       "m5": 16486.49
+      },
+      "priceChange": {
+       "m5": 0.61,
+       "h1": -0.38,
+       "h6": -0.92,
+       "h24": -7.27
+      },
+      "liquidity": {
+       "base": 1387.4026,
+       "quote": 270.6865,
+       "usd": 658285.23
+      },
+      "fdv": 20537694,
+      "marketCap": 19200941,
+      "pairCreatedAt": 1784630610000,
+      "info": {
+       "imageUrl": "https://cdn.dexscreener.com/cms/images/https%3A%2F%2Fcoin-images.coingecko.com%2Fcoins%2Fimages%2F102174110%2Flarge%2F0xd0601ce157db5bdc3162bbac2a2c8af5320d9eec.png%3F1782444565?width=800&height=800&quality=95&format=auto",
+       "openGraph": "https://cdn.dexscreener.com/token-images/og/robinhood/0xd0601ce157db5bdc3162bbac2a2c8af5320d9eec?timestamp=1795592100000",
+       "websites": [
+        {
+         "url": "https://robinhood.com/us/en/",
+         "label": "robinhood.com"
+        }
+       ],
+       "socials": [
+        {
+         "url": "https://twitter.com/RobinhoodApp",
+         "type": "twitter"
+        }
+       ]
+      }
+     },
+     {
+      "chainId": "robinhood",
+      "dexId": "uniswap",
+      "url": "https://dexscreener.com/robinhood/0x4be9657ec9002e528f4f17a5c43edc525a07f888f7b180c2afbf75e096c4f38a",
+      "pairAddress": "0x4be9657ec9002e528f4f17a5c43edc525a07f888f7b180c2afbf75e096c4f38a",
+      "labels": [
+       "v4"
+      ],
+      "baseToken": {
+       "address": "0x39dBED3a2bd333467115dE45665cC57F813C4571",
+       "name": "Pons",
+       "symbol": "PONS"
+      },
+      "quoteToken": {
+       "address": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+       "name": "Global Dollar",
+       "symbol": "USDG"
+      },
+      "priceNative": "0.08689",
+      "priceUsd": "0.08689",
+      "txns": {
+       "m5": {
+        "buys": 1,
+        "sells": 44
+       },
+       "h1": {
+        "buys": 47,
+        "sells": 110
+       },
+       "h6": {
+        "buys": 230,
+        "sells": 246
+       },
+       "h24": {
+        "buys": 934,
+        "sells": 1034
+       }
+      },
+      "volume": {
+       "h24": 212150.08,
+       "h6": 59366.65,
+       "h1": 20971.86,
+       "m5": 7091.96
+      },
+      "priceChange": {
+       "m5": -1.61,
+       "h1": -1.42,
+       "h6": 2.42,
+       "h24": -5.51
+      },
+      "liquidity": {
+       "base": 1990798,
+       "quote": 95805,
+       "usd": 268796.59
+      },
+      "fdv": 58059971,
+      "marketCap": 58059971,
+      "pairCreatedAt": 1784338933000,
+      "info": {
+       "imageUrl": "https://cdn.dexscreener.com/cms/images/dkmXs8KYMyMXjuU1?width=800&height=800&quality=95&format=auto",
+       "header": "https://cdn.dexscreener.com/cms/images/6IKrI-WtX92dxhL0?width=1500&height=500&quality=95&format=auto",
+       "openGraph": "https://cdn.dexscreener.com/token-images/og/robinhood/0x39dbed3a2bd333467115de45665cc57f813c4571?timestamp=1795592100000",
+       "websites": [
+        {
+         "url": "https://ponsfamily.com/launchpad",
+         "label": "Website"
+        }
+       ],
+       "socials": [
+        {
+         "url": "https://x.com/ponsdotfamily",
+         "type": "twitter"
+        }
+       ]
+      }
+     },
+     {
+      "chainId": "robinhood",
+      "dexId": "uniswap",
+      "url": "https://dexscreener.com/robinhood/0xe1ae6a4c6ccc9f037389a8d50a4f577bde1a9fe01d85d88ecbbd39955ce53288",
+      "pairAddress": "0xe1ae6a4c6ccc9f037389a8d50a4f577bde1a9fe01d85d88ecbbd39955ce53288",
+      "labels": [
+       "v4"
+      ],
+      "baseToken": {
+       "address": "0x117cc2133c37B721F49dE2A7a74833232B3B4C0C",
+       "name": "SPDR S&P 500 ETF Trust • Robinhood Token",
+       "symbol": "SPY"
+      },
+      "quoteToken": {
+       "address": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+       "name": "Global Dollar",
+       "symbol": "USDG"
+      },
+      "priceNative": "711.004298",
+      "priceUsd": "711.0042",
+      "txns": {
+       "m5": {
+        "buys": 18,
+        "sells": 25
+       },
+       "h1": {
+        "buys": 119,
+        "sells": 126
+       },
+       "h6": {
+        "buys": 537,
+        "sells": 581
+       },
+       "h24": {
+        "buys": 5813,
+        "sells": 5657
+       }
+      },
+      "volume": {
+       "h24": 1268500.61,
+       "h6": 137066.72,
+       "h1": 23657.83,
+       "m5": 5294.55
+      },
+      "priceChange": {
+       "m5": -0.1,
+       "h1": -0.48,
+       "h6": -0.99,
+       "h24": -1.89
+      },
+      "liquidity": {
+       "base": 131.2437,
+       "quote": 62385,
+       "usd": 155700.04
+      },
+      "fdv": 19459788,
+      "marketCap": 19459788,
+      "pairCreatedAt": 1791604896000
+     },
+     {
+      "chainId": "robinhood",
+      "dexId": "ramses",
+      "url": "https://dexscreener.com/robinhood/0x741ad272ca4fc8d3cb3b08202be4c00d0286d91e",
+      "pairAddress": "0x741Ad272cA4fc8D3cB3B08202be4C00D0286D91E",
+      "labels": [
+       "v3"
+      ],
+      "baseToken": {
+       "address": "0xD5f3879160bc7c32ebb4dC785F8a4F505888de68",
+       "name": "Invesco QQQ • Robinhood Token",
+       "symbol": "QQQ"
+      },
+      "quoteToken": {
+       "address": "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+       "name": "WETH",
+       "symbol": "WETH"
+      },
+      "priceNative": "0.3816",
+      "priceUsd": "631.52",
+      "txns": {
+       "m5": {
+        "buys": 27,
+        "sells": 12
+       },
+       "h1": {
+        "buys": 47,
+        "sells": 38
+       },
+       "h6": {
+        "buys": 179,
+        "sells": 154
+       },
+       "h24": {
+        "buys": 828,
+        "sells": 803
+       }
+      },
+      "volume": {
+       "h24": 91673.16,
+       "h6": 18083.34,
+       "h1": 5479.18,
+       "m5": 2555.38
+      },
+      "priceChange": {
+       "m5": 0.96,
+       "h1": 0.39,
+       "h6": -0.63,
+       "h24": -3.15
+      },
+      "liquidity": {
+       "base": 23.02032,
+       "quote": 16.5778,
+       "usd": 41969.47
+      },
+      "fdv": 9207997,
+      "marketCap": 9207997,
+      "pairCreatedAt": 1787625778000
+     }
+    ],
+    "pair": null
+   }
+  }
+ ]
+}
