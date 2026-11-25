@@ -478,7 +478,9 @@ export const MUTANTS = [
   // answers drops the tail for the quote (M3), each tail request a quarter of its budget, no request after it, and the
   // quote scans by currency; the budget of no measured pools is the depth (L2)
   [QUOTE, "        const top = head - tailLag;", "        const top = head;", R, "TAIL7 "],
-  [QUOTE, "(tail0?.band ?? []).filter(([, y]) => y > top).map(([x, y]): [number, number] => [Math.max(x, top + 1), y])", "([] as Spans)", R, "TAIL2 "],
+  [QUOTE, "band.filter(([, y]) => y > top).map(([x, y]): [number, number] => [Math.max(x, top + 1), y])", "([] as Spans)", R, "TAIL2 "],
+  // card evm-tap-reads-no-block-the-index-holds: the band's blocks at or below the scan's start are read, never asked again
+  [QUOTE, "  const band: Spans = (tail0?.band ?? []).filter(([, y]) => y > start).map(([x, y]): [number, number] => [Math.max(x, start + 1), y]);", "  const band: Spans = tail0?.band ?? [];", R, "TAIL11k "],
   [QUOTE, "    } else if (e.tail && held && unread.length > 0) {", "    } else if (false) {", R, "W2b "],
   [QUOTE, "          if (g.b > top) t.band = withSpan(", "          if (false) t.band = withSpan(", R, "W2b "],
   [QUOTE, "          if (g.spare) continue;\n", "", R, "TAIL4b "],
