@@ -29,7 +29,7 @@ import { readSolanaReference } from "../../kit/src/trade/solana/pool.ts";
 import { solanaPoolNoteFloor } from "../../kit/src/trade/solana/pool-deposit.ts";
 import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { pairDown } from "./outage.ts";
-import { quiet } from "./settle.ts";
+import { quiet, settle as settleUntil } from "./settle.ts";
 import { vaultLabelOf } from "../../kit/src/vault/shapes.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../../wallet/src/notes/secrets.ts";
 import { openNoteStore, refKey, type NoteStore } from "../../wallet/src/notes/store.ts";
@@ -7270,8 +7270,8 @@ test("card nightly-sweep-runs-whole: the device's spacing on an open that never 
     let out: unknown = "still pending";
     call().then(() => (out = "an answer"), (e: unknown) => (out = e));
     t.mock.timers.tick(30);
-    await new Promise((r) => setImmediate(r));
-    assert.ok(out instanceof Error && /^the device's spacing: no answer in 30 ms$/.test(out.message), `${name}: ${String(out)}`);
+    await settleUntil(() => out !== "still pending");
+    assert.ok(out instanceof Error && out.message === "the device's spacing: no answer in 30 ms", `${name}: ${String(out)}`);
   }
 });
 /** Locks as fakeLocks, each name's holds counted, shared ones too: what is still held when a run ends. */
