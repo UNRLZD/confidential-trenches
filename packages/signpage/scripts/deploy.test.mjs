@@ -4,9 +4,9 @@
 // /assets/zk/<sha256>.<ext>; a changed, missing or extra setup file, a stale worker or a worker rule with another
 // policy is refused.
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, test } from "node:test";
@@ -1037,7 +1037,105 @@ test("planted: a build whose app.js names a harness 1Click key, or leaves a pin 
 // "unsettled top-level await"). Every path runs the real script on this tree with stand-ins on PATH for the reads that
 // leave the machine: git ls-remote answers HEAD as main's head and git status a clean tree (every other git call is git's),
 // gh HEAD's passed merge queue run of ci.yml, pnpm an install that did nothing (the clean checkout's is pnpm's own); no CLOUDFLARE_* is set, so nothing is uploaded.
-test("deploy.mjs run as the main module reaches its gate on every path: --dry-run and a deploy through the late import of release-list.mjs, --build, --live-runs", () => {
+// Card signpage-deploy-build-exits-when-done: each run of the script must end once it has printed its result, and one
+// that does not is read before it is stopped. Three merge queue groups failed here (45419100693, 45533147137,
+// 45703666749): --build printed its gate line, then ran on to the 300 s bound (status null, stopped by its signal), where
+// the whole test takes 9.6 to 10.8 s on green runs; on a Mac nothing is left active in the process when deploy() returns
+// (process.getActiveResourcesInfo(): its stdout pipe alone, 2026-11-25 21:5xZ). What holds it is read from /proc on
+// Linux, the runners' system: each thread's name, state, kernel wait and syscall, its open files and its children.
+const EXIT_MS = 30_000;
+
+/** What holds process `pid` (Linux /proc): each thread's name, state, kernel wait channel and syscall number, the
+ *  process's open files and its children; elsewhere, that there is no /proc to read. */
+function heldBy(pid) {
+  const at = `/proc/${pid}`;
+  if (!existsSync(`${at}/task`)) return `no ${at} on ${process.platform}`;
+  const read = (f) => {
+    try {
+      return readFileSync(f, "utf8").trim();
+    } catch (e) {
+      return `(${e.code ?? e.message})`;
+    }
+  };
+  const threads = readdirSync(`${at}/task`).map((tid) => {
+    const t = `${at}/task/${tid}`;
+    const stat = read(`${t}/stat`);
+    const state = stat.slice(stat.lastIndexOf(")") + 2).split(" ")[0];
+    return `${tid} ${read(`${t}/comm`)} ${state} ${read(`${t}/wchan`) || "-"} syscall ${read(`${t}/syscall`).split(" ")[0]}`;
+  });
+  let files;
+  try {
+    files = readdirSync(`${at}/fd`).map((fd) => {
+      try {
+        return `${fd}:${readlinkSync(`${at}/fd/${fd}`)}`;
+      } catch {
+        return `${fd}:?`;
+      }
+    });
+  } catch (e) {
+    files = [`(${e.code ?? e.message})`];
+  }
+  const kids = read(`${at}/task/${pid}/children`).split(/\s+/).filter((k) => /^\d+$/.test(k)).map((k) => `${k} ${read(`/proc/${k}/comm`)}`);
+  return `threads: ${threads.join("; ")}; files: ${files.join(" ")}; children: ${kids.join(", ") || "none"}`;
+}
+
+/** `cmd args` run as spawnSync runs it (status, signal, stdout and stderr, stopped at `ms`), except that one still running
+ *  `exitMs` after its first output, or ended with its output held open by a process it started, is read (heldBy) and
+ *  stopped then: `held` names what held it, null for a run that ended. */
+const runHeld = (cmd, args, { exitMs = EXIT_MS, ms = 300_000, ...opts } = {}) =>
+  new Promise((resolve) => {
+    const c = spawn(cmd, args, { ...opts, stdio: ["pipe", "pipe", "pipe"] });
+    c.stdin.end();
+    let stdout = "";
+    let stderr = "";
+    let held = null;
+    let wait;
+    const watch = () => {
+      wait ??= setTimeout(() => {
+        if (c.exitCode === null && c.signalCode === null) {
+          held = `still running ${exitMs} ms after its first output, stopped: ${heldBy(c.pid)}`;
+          c.kill("SIGKILL");
+        } else {
+          held = `ended (${c.exitCode ?? c.signalCode}) but its output still open ${exitMs} ms after its first output: a process it started holds it`;
+          c.stdout.destroy();
+          c.stderr.destroy();
+        }
+      }, exitMs);
+    };
+    c.stdout.setEncoding("utf8").on("data", (d) => {
+      stdout += d;
+      watch();
+    });
+    c.stderr.setEncoding("utf8").on("data", (d) => {
+      stderr += d;
+      watch();
+    });
+    const bound = setTimeout(() => c.kill("SIGTERM"), ms);
+    c.on("close", (status, signal) => {
+      clearTimeout(wait);
+      clearTimeout(bound);
+      resolve({ status, signal, stdout, stderr, held });
+    });
+  });
+
+test("planted (card signpage-deploy-build-exits-when-done): a run that prints and then runs on is read and stopped at its exit bound, never its 300 s one", async () => {
+  const r = await runHeld(process.execPath, ["-e", "console.log('done'); setInterval(() => {}, 1000)"], { exitMs: 500 });
+  assert.equal(r.status, null);
+  assert.equal(r.signal, "SIGKILL");
+  assert.equal(r.stdout, "done\n");
+  assert.match(r.held, /^still running 500 ms after its first output, stopped: /);
+  if (process.platform === "linux") assert.match(r.held, /threads: \d+ node \S+ \S+ syscall .*; files: .*\b1:pipe:/, r.held);
+  else assert.match(r.held, /stopped: no \/proc\/\d+ on /, r.held);
+});
+
+test("planted (card signpage-deploy-build-exits-when-done): a run that ends while a process it started holds its output is named so, and ends", async () => {
+  const r = await runHeld(process.execPath, ["-e", "require('node:child_process').spawn('sleep', ['3'], { stdio: 'inherit' }).unref(); console.log('done')"], { exitMs: 500 });
+  assert.equal(r.status, 0);
+  assert.equal(r.stdout, "done\n");
+  assert.match(r.held, /^ended \(0\) but its output still open 500 ms after its first output: a process it started holds it$/);
+});
+
+test("deploy.mjs run as the main module reaches its gate on every path: --dry-run and a deploy through the late import of release-list.mjs, --build, --live-runs", async () => {
   const repo = dirname(dirname(PKG));
   const head = execFileSync("git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
   const git = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
@@ -1054,28 +1152,29 @@ test("deploy.mjs run as the main module reaches its gate on every path: --dry-ru
   const env = { ...process.env, PATH: `${bin}:${process.env.PATH}` };
   delete env.CLOUDFLARE_API_TOKEN;
   delete env.CLOUDFLARE_ACCOUNT_ID;
-  const main = (...args) => {
-    const r = spawnSync(process.execPath, [join(PKG, "scripts", "deploy.mjs"), ...args], { cwd: repo, env, encoding: "utf8", timeout: 300_000 });
+  const main = async (...args) => {
+    const r = await runHeld(process.execPath, [join(PKG, "scripts", "deploy.mjs"), ...args], { cwd: repo, env });
     const all = `${r.stdout}${r.stderr}`;
     assert.ok(!/unsettled top-level await/i.test(all), `deploy.mjs ${args.join(" ")} never settled (exit ${r.status}):\n${all}`);
     const kept = /gate ok on (\S+);/.exec(r.stdout)?.[1];
     if (kept && kept.startsWith(tmpdir())) rmSync(kept, { recursive: true, force: true });
+    assert.equal(r.held, null, `deploy.mjs ${args.join(" ")} printed its result and did not end: ${r.held}\n${all}`);
     return { ...r, all, kept };
   };
   try {
-    const dry = main("--dry-run");
+    const dry = await main("--dry-run");
     assert.ok([0, 1].includes(dry.status), `--dry-run exit ${dry.status}:\n${dry.all}`);
     assert.match(dry.stdout, /deploy: gate ok on \S+; --dry-run: nothing was uploaded; a deploy would (go ahead|refuse it:)/, dry.all);
     // a deploy: past the late import, it refuses a build no release names (the newest list was cut from other build
     // inputs than this tree's, as on a branch that changes pnpm-lock.yaml after a release, or its build differs), or
     // stops at the missing token
-    const real = main();
+    const real = await main();
     assert.ok([1, 2].includes(real.status), `a deploy exit ${real.status}:\n${real.all}`);
     assert.match(real.stderr, /deploy: (REFUSED release-\d+ was cut from other SIGN_HOST build inputs than HEAD's|REFUSED release-\d+, the newest release, is not this SIGN_HOST build|REFUSED .*RELEASED|gate ok; CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID not set, nothing was uploaded)/, real.all);
-    const built = main("--build");
+    const built = await main("--build");
     assert.equal(built.status, 0, built.all);
     assert.match(built.stdout, /deploy: gate ok on \S+; --build:/);
-    const runs = main("--live-runs");
+    const runs = await main("--live-runs");
     assert.equal(runs.status, 0, runs.all);
     assert.deepEqual(JSON.parse(runs.stdout).checks, LIVE_CHECKS);
   } finally {
