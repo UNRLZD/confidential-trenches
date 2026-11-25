@@ -189,7 +189,7 @@ test("the summary: a not-yet answer, under a 400 or a 200, then the same call an
     assert.deepEqual(alone.lag, { [LAG_KEY]: { asked: 1, answered: 0 } });
     assert.equal(judge({ ...ANSWERS.release187, ...alone }).ok, false);
   }
-  // answered by another provider: the lagging one never answered
+  // answered by another provider in a log with no request order (an old recording's shape): the lagging one never answered
   const other = summarize([entry(400, UNKNOWN), { ...entry(200, ANSWER), url: "https://rpc.mainnet.chain.robinhood.com/" }], 6);
   assert.deepEqual(other.lag, { [LAG_KEY]: { asked: 1, answered: 0 } });
   // a 400 with any other error, or a revert naming unknown state, or a 403 archive refusal: refused as before
@@ -202,4 +202,42 @@ test("the summary: a not-yet answer, under a 400 or a 200, then the same call an
   }
   // a 429 whose body names unknown state is a throttle, refused
   assert.ok(Object.keys(summarize([entry(429, UNKNOWN), entry(200, ANSWER)], 6).refused).some((k) => k.startsWith("robinhood.drpc.org 429")));
+});
+
+// card evm-lag-answered-on-another-seat: release 204's sign live run 45518167089 (25 Nov 00:27Z) FAILed on
+// rpc-robinhood.globalstake.io answering not yet to the Robinhood pool's five tree views (SCOPE, currentRoot,
+// currentTreeSize, currentLabelRoot, currentLabelTreeSize) at one anchor. The wallet's pair had walked a seat there
+// (wallet pool/evm.ts evmPair); the round's lag (EvmLagError) was read again EVM_LAG_WAIT_MS on, at a new anchor on the
+// pair's seats, by then on another member, so globalstake was never asked those views again. A not-yet answer counts as
+// asked again when the same call is sent to any provider of its chain after that answer came back: the round's other
+// seat, sent before it came back, never counts, nor does another chain's provider.
+const GS = "https://rpc-robinhood.globalstake.io/";
+const POOL = "0x9306359433127c4f3be426f6faeb00a3c41f66db";
+const VIEW = { method: "eth_call", id: 0, to: POOL, sel: "0xfdab463d" };
+const GS_KEY = `rpc-robinhood.globalstake.io eth_call ${POOL}:0xfdab463d`;
+const NOT_YET = JSON.stringify({ jsonrpc: "2.0", id: 0, error: { code: -32000, message: "unknown block" } });
+const ROOT = JSON.stringify({ jsonrpc: "2.0", id: 0, result: "0x" + "11".repeat(32) });
+const at = (url, seq, end, text) => ({ url, method: "POST", status: 200, load: 6, seq, end, calls: [VIEW], ...(errorsOf(text).length > 0 ? { errors: errorsOf(text) } : {}) });
+
+test("the summary: a not-yet answer is asked again when the same call goes to any provider of its chain after it came back; the round's other seat and another chain never count (red at c465c4b74)", () => {
+  assert.deepEqual(errorsOf(NOT_YET), [{ code: -32000, cap: false, lag: true, id: 0 }]);
+  // release 204's walk: globalstake not yet (sent 2, back 4) beside Robinhood's own (sent 1, back 3), then the retry
+  // round on Robinhood's own and the helper's route (sent 5 and 6)
+  const walked = summarize([at("https://rpc.mainnet.chain.robinhood.com/", 1, 3, ROOT), at(GS, 2, 4, NOT_YET), at("https://rpc.mainnet.chain.robinhood.com/", 5, 7, ROOT), at("https://ct-api.unrealized.trade/v1/rpc/robinhood?keyed=only", 6, 8, ROOT)], 6);
+  assert.deepEqual(walked.refused, {});
+  assert.deepEqual(walked.lag, { [GS_KEY]: { asked: 1, answered: 1 } });
+  assert.equal(judge({ ...ANSWERS.good, ...walked, posts: ANSWERS.good.posts }).ok, true);
+  // the same call on the same provider after it, as before
+  assert.deepEqual(summarize([at(GS, 2, 4, NOT_YET), at(GS, 5, 6, ROOT)], 6).lag, { [GS_KEY]: { asked: 1, answered: 1 } });
+  // the round's other seat, sent before the not-yet answer came back (and back after it): never the read again
+  const sameRound = summarize([at(GS, 1, 3, NOT_YET), at("https://rpc.mainnet.chain.robinhood.com/", 2, 5, ROOT)], 6);
+  assert.deepEqual(sameRound.lag, { [GS_KEY]: { asked: 1, answered: 0 } });
+  assert.equal(judge({ ...ANSWERS.good, ...sameRound, posts: ANSWERS.good.posts }).ok, false);
+  // the same contract and selector on another chain's provider after it: not this read
+  assert.deepEqual(summarize([at(GS, 1, 3, NOT_YET), at("https://base-rpc.publicnode.com/", 4, 5, ROOT)], 6).lag, { [GS_KEY]: { asked: 1, answered: 0 } });
+  // a later post of the call that is itself refused answers nothing
+  const refusedAgain = summarize([at(GS, 1, 3, NOT_YET), { ...at("https://rpc.mainnet.chain.robinhood.com/", 4, 5, ROOT), status: 503 }], 6);
+  assert.deepEqual(refusedAgain.lag, { [GS_KEY]: { asked: 1, answered: 0 } });
+  // two not-yet answers, one read again: one of two answered
+  assert.deepEqual(summarize([at(GS, 1, 2, NOT_YET), at(GS, 3, 4, NOT_YET), at("https://robinhood.api.pocket.network/", 5, 6, ROOT)], 6).lag, { [GS_KEY]: { asked: 2, answered: 1 } });
 });
