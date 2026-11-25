@@ -733,13 +733,13 @@ function planOf(hash: string, reads: readonly Read[], lim: ReadLimits, again: nu
     if (r.override === undefined || r.group === undefined) return;
     const hs = Object.keys(r.override);
     // a read that runs as it is a hook it replaces (droppable keeps such a pool out) reads under its own override alone
-    if (r.runs === undefined || hs.some((h) => r.runs!.includes(h))) return void append(groups, r.group, i);
-    shareable.push(i);
-    if (!own || gasOf(r) === undefined) return void append(groups, r.group, i);
+    const shares_ = r.runs !== undefined && !hs.some((h) => r.runs!.includes(h));
+    if (shares_) shareable.push(i);
+    if (!shares_ || !own || gasOf(r) === undefined) return void append(groups, r.group, i);
     let s = shares.find((x) => !hs.some((h) => x.runs.has(h)) && !r.runs!.some((a) => x.hooks.has(a)));
     if (s === undefined) shares.push((s = { hooks: new Set(), runs: new Set(), is: [] }));
     hs.forEach((h) => s.hooks.add(h));
-    r.runs.forEach((a) => s.runs.add(a));
+    r.runs!.forEach((a) => s.runs.add(a));
     s.is.push(i);
   });
   const lone = reads.flatMap((r, i) => (r.override !== undefined && r.group === undefined ? [i] : []));

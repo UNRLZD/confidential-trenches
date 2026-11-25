@@ -334,11 +334,11 @@ export const MUTANTS = [
   [QUOTE, "t - firstSent > EVM_STATE_FRESH_MS;", "t - firstSent >= 0;", R, "LH4 "],
   // card evm-hook-reads-share-a-call: a shareable read shares calls only with its gas kept, in the first set its hooks
   // and the addresses it runs allow, packed by that gas; its gas is kept from its own call; a sale's reads never share
-  [QUOTE, "    if (!own || gasOf(r) === undefined) return void append(groups, r.group, i);", "    if (!own) return void append(groups, r.group, i);", R, "SH1 "],
+  [QUOTE, "    if (!shares_ || !own || gasOf(r) === undefined) return", "    if (!shares_ || !own) return", R, "SH1 "],
   [QUOTE, "  const own = again === undefined && readsOverride === undefined && gasPacking;", "  const own = false;", R, "SH1 "],
   [QUOTE, "    let s = shares.find((x) => !hs.some((h) => x.runs.has(h)) && !r.runs!.some", "    let s = shares.find((x) => !r.runs!.some", R, "SH1 "],
   [QUOTE, " && !r.runs!.some((a) => x.hooks.has(a)));", "));", R, "SH1 "],
-  [QUOTE, "    if (r.runs === undefined || hs.some((h) => r.runs!.includes(h))) return void append(groups, r.group, i);", "    if (r.runs === undefined) return void append(groups, r.group, i);", R, "SH1 "],
+  [QUOTE, "    const shares_ = r.runs !== undefined && !hs.some((h) => r.runs!.includes(h));", "    const shares_ = r.runs !== undefined;", R, "SH1 "],
   [QUOTE, "  for (const i of [...plain, ...shareable]) {", "  for (const i of plain) {", R, "SH2 "],
   [QUOTE, "    for (const part of gasParts(s.is.map((i) => gasOf(reads[i]!)!), sharedOk)) fit(part.map((k) => s.is[k]!));", "    fit(s.is);", R, "SH3 "],
   [QUOTE, "a.sell || !keys.some(replaced) || !keys.every", "true || !keys.every", R, "SH2 "],

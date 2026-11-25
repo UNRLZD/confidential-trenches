@@ -1525,7 +1525,7 @@ test("S3b on Robinhood a Doppler /8 token paired with another currency is held t
   assert.equal((await quoteOn([seeded(token), real], token, seededRoute(token), scanner(5_000_000, [{ key: real.key, at: 4_500_000 }]), undefined, "robinhood")).accepted, true);
 });
 
-test("S1c an override replaces only hooks of the reads under it, and only for a pool the PoolManager holds", async () => {
+test("S1c each override replaces one hook, only in reads of that hook's pools, and only for a pool the PoolManager holds", async () => {
   const token = "0x00000000000000000000000000000000000a77a7";
   const H2 = "0x00000000000000000000000000000000000030cc";
   const GHOST = "0x00000000000000000000000000000000000040cc";
@@ -1538,13 +1538,14 @@ test("S1c an override replaces only hooks of the reads under it, and only for a 
   );
   assert.deepEqual(v, below);
   assert.deepEqual([...new Set(seen.flatMap((o) => o.replaces))].sort(), [UNPINNED, H2].sort(), "the held pools' hooks only: never the pool that does not exist");
-  // every address an override replaces is a hook of a read under it (card evm-hook-reads-share-a-call: reads that run
-  // no hook as it is share a call, its override each of their hooks; SH1, SH2)
-  for (const o of seen.filter((x) => x.hooks.length > 0)) for (const r of o.replaces) assert.ok(o.hooks.some((hs) => hs.includes(r)), `an override of ${r} over reads of hooks ${JSON.stringify(o.hooks)}`);
+  // every address an override replaces is a hook of each read under it
+  for (const o of seen) for (const hs of o.hooks) for (const r of o.replaces) assert.ok(hs.includes(r), `a read of hooks ${hs} under an override of ${r}`);
 });
 
-// card evm-hook-reads-share-a-call: read from the Mac 25 Nov 18:0xZ (scratchpad rh-ov-qqq), QQQ's warm tap on
-// Robinhood sent 44 eth_call a side in 24 overrides, 19 of them one hook's at 2 to 4 reads; shared, 27 (rh-ov-qqq-share)
+// card evm-hook-reads-share-a-call: read from the Mac 25 Nov 18:0xZ, QQQ's warm tap on Robinhood sent 44 eth_call a side
+// in 24 overrides, 19 of them one hook's at 2 to 4 reads; with the reads that have their gas kept sharing calls, warm
+// taps alternating with main's calls at nearby blocks sent 35, 31 and 35 against 35, 41 and 41, each pair quoting the
+// same amount (18:5xZ)
 test("SH1 grouped reads that run no hook as it is, each with its gas kept, share a call whose override replaces each of their hooks; a read that runs as it is a hook the call replaces, one whose hook a read of the call runs, one with a hook left as it is, one that runs its own hook, and any with no gas kept keep their own calls", () => {
   const hk = (n: number) => "0x" + (0x51c0 + n).toString(16).padStart(40, "0");
   const [H1, H2, H3, H4, H5, H6] = [hk(1), hk(2), hk(3), hk(4), hk(5), hk(6)];
@@ -1640,9 +1641,7 @@ test("S3c a market whose hook is not pinned is quoted only once it exists, with 
     await assert.rejects(evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) }, [chain(pools, 0, 5_000_000, seen), chain(pools, 1, 5_000_000, seen)], NOW, scanner(5_000_000, logs)), heldTo(x));
     assert.ok(seen.some((o) => o.replaces.length === 2 && o.replaces.includes(MH) && o.replaces.includes(H2)), `${more} more: ${JSON.stringify(seen)}`);
     assert.ok(!seen.some((o) => o.replaces.includes(GH)), "no override for the market the PoolManager does not hold");
-    // every address an override replaces is a hook of a read under it (reads that run no hook as it is share a call:
-    // card evm-hook-reads-share-a-call)
-    for (const o of seen.filter((x) => x.hooks.length > 0)) for (const r of o.replaces) assert.ok(o.hooks.some((hs) => hs.includes(r)), `an override of ${r} over reads of hooks ${JSON.stringify(o.hooks)}`);
+    for (const o of seen) for (const hs of o.hooks) for (const r of o.replaces) assert.ok(hs.includes(r), `a read of hooks ${hs} under an override of ${r}`);
   }
 });
 
