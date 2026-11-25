@@ -434,6 +434,33 @@ test("candles of a listed token with no bars of ours: the history is asked for i
   t.stop();
 });
 
+test("card sol-chart-failed-walk-reads-again: a listed coin whose first read failed, while the history refuses (its budget, 429), answers the history's 429, which the route answers filling and the page reads again; a 503 is the page's error state at once (red at d7f136d41: the walk's 503 'solana first read failed', 11 listed charts in 10 s on helper 248's live run, 25 Nov)", async () => {
+  let hist: { status: number; body: string; src?: string; asOfMs?: number; retryAfterS?: number; why?: string } = { status: 429, body: '{"error":{"code":"rate_limited"}}', retryAfterS: 12, why: "geckoterminal budget" };
+  const t = createSolanaTrades({
+    fetch: (async () => new Response("down", { status: 503 })) as never,
+    now: () => TS * 1000,
+    listed: async (m) => m === MINT,
+    rpcs: ["https://rpc.test"],
+    source: () => ({ watch: async () => undefined, unwatch: () => undefined, close: () => undefined }),
+    history: async () => hist,
+    tickMs: 0,
+  });
+  const refused = await t.candles(MINT, "15m", null, 500);
+  assert.deepEqual([refused.status, refused.retryAfterS, refused.why], [429, 12, "geckoterminal budget"], refused.body);
+  // the coin waits FAILED_OPEN_MS before its walk opens again: a read meanwhile is the history's answer as well
+  const again = await t.candles(MINT, "15m", null, 500);
+  assert.equal(again.status, 429, again.body);
+  // the history in: its bars
+  hist = { status: 200, body: JSON.stringify({ tf: "15m", candles: [[TS - (TS % 900) - 900, "1", "1", "1", "1", "5"]], src: "coingecko", as_of_ms: TS * 1000 }), src: "coingecko", asOfMs: TS * 1000 };
+  const good = await t.candles(MINT, "15m", null, 500);
+  assert.equal(good.status, 200, good.body);
+  assert.equal(JSON.parse(good.body).candles.length, 1);
+  // both down (the walk's 503, the history's 503): the walk's answer, as before
+  hist = { status: 503, body: '{"error":{"code":"upstream"}}' };
+  assert.equal((await t.candles(MINT, "15m", null, 500)).status, 503);
+  t.stop();
+});
+
 test("card helper-ready-gate: walks that would draw the whole public Solana budget leave a caller's token read its room (200), never the provider's 429", async () => {
   // one provider (the public endpoint) shared by the helper's RPC route and the walks, as on the box: 100 requests per
   // 10 s from our address, then 429 Retry-After 5 (4 Nov 06:24-06:30Z); the clock stands still, so nothing leaves its window

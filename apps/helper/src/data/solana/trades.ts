@@ -2224,11 +2224,14 @@ export function createSolanaTrades(deps: {
       const e = await opening;
       // card helper-candles-never-refuse-a-listed-coin: a token whose walk cannot open (OPEN_MAX walks open, its 429; or
       // nothing held yet, 503) is served the history source's chart, held ahead for every listed coin off our venues
-      // (token.ts ahead), as a token off the lists is, never a refusal while those bars answer
+      // (token.ts ahead), as a token off the lists is, never a refusal while those bars answer. A history refused (429:
+      // its budget, its queue holds the read) is the answer, which the route answers filling, so the page reads again
+      // while the walk waits to open (card sol-chart-failed-walk-reads-again: a walk's 503 was the page's error state at
+      // once, 11 listed charts in 10 s on helper 248's live run, 25 Nov, while the history's next free call served them)
       if (!("mint" in e)) {
         if (deps.history === undefined) return e;
         const h = await deps.history(mint, tf, to, limit, client).catch(() => e);
-        return h.status === 200 ? h : e;
+        return h.status === 200 || h.status === 429 ? h : e;
       }
       const own: Candle[] = folded(e).book === null ? [] : e.book!.candles(tf as Tf, to, limit);
       const ownFrom = e.book === null ? null : e.book.ownFrom(tf as Tf);
