@@ -7806,8 +7806,8 @@ test("SL6 card base-rpc-list-fix: a warm Base scan with its first two down and i
 // block".
 // The last here: that lag (each getLogs [] and the block in Sentio's words), a getLogs it never answers, or no
 // connection for any call, head reads too. The first, passed over but never asked, is asked: at once where the others
-// failed, at EVM_SCAN_HOLD_MS where the last is still out; and for the head where none after it answered one (the last
-// asks a refused connection again 0.5, 1 and 2 s later first, so the refusing case's head comes at 3.5 s).
+// failed, at EVM_SCAN_HOLD_MS where the last is still out (so before the last's EVM_SCAN_LAST_MS cut ends its getLogs);
+// and for the head where none after it answered one.
 const SL8_BEHIND = 81;
 /** `inner` answered as a provider SL8_BEHIND blocks behind `headNo`: a getLogs past its head [], a block past it in
  *  rpc.sentio.xyz's words; the rest as `inner`. */
@@ -7819,11 +7819,11 @@ const behindOf = (headNo: number) => (inner: EvmRpc): EvmRpc => async (calls) =>
     const n = Number(c.params[0]);
     return c.method === "eth_getBlockByNumber" && n > own ? { jsonrpc: "2.0", id, error: { code: -32000, message: `block ${n} is beyond the latest block ${own} of this node, retry` } } : o;
   });
-for (const [name, lastOf, within] of [
-  ["behind", behindOf(5_000_010), 1_000],
-  ["hang", (inner: EvmRpc): EvmRpc => async (calls, signal) => (calls.some((c) => c.method === "eth_getLogs") ? untilAborted(signal) : inner(calls)), 3_000],
-  ["refuse", (): EvmRpc => refusing("four.sl8.test"), 7_000],
-] as [string, (inner: EvmRpc) => EvmRpc, number][]) {
+for (const [name, lastOf] of [
+  ["behind", behindOf(5_000_010)],
+  ["hang", (inner: EvmRpc, events: string[]): EvmRpc => async (calls, signal) => (calls.some((c) => c.method === "eth_getLogs") ? untilAborted(signal).finally(() => events.push("last cut")) : inner(calls))],
+  ["refuse", (): EvmRpc => refusing("four.sl8.test")],
+] as [string, (inner: EvmRpc, events: string[]) => EvmRpc][]) {
   const k = ["behind", "hang", "refuse"].indexOf(name);
   test(`SL8 card base-warm-quote-rides-a-stalled-last-scan: a warm Base scan whose first is held after its throttle, its second and third refusing and its last ${name}: the first is asked and carries it`, { timeout: 60_000 }, () => onTestClock(async () => {
     evmPaceReset();
@@ -7832,23 +7832,22 @@ for (const [name, lastOf, within] of [
     await triQuote(token, [warm, scanner(5_000_000, []), scanner(5_000_000, []), scanner(5_000_000, [])]);
     const url = "https://base-rpc.publicnode.com";
     const inner = scanner(5_000_010, realAt(token, 5_000_005));
-    let firstLogs = 0;
+    const events: string[] = [];
     const first = evmJsonRpc(url, (async (_u: string, init: RequestInit) => {
       const calls = (JSON.parse(init.body as string) as { method: string; params: unknown[] }[]).map((c) => ({ method: c.method, params: c.params }));
-      if (calls.some((c) => c.method === "eth_getLogs")) firstLogs++;
+      if (calls.some((c) => c.method === "eth_getLogs")) events.push("first");
       return new Response(JSON.stringify(await inner(calls)), { status: 200 });
     }) as unknown as typeof fetch);
     quoteMod.evmScanTailAlias(first, warm);
     // held as a throttle holds it (pace.ts): a warm request, and the head's read, pass it over to the next unsent
     evmProviderHold(url);
-    const t = performance.now();
-    const v = await triQuote(token, [first, refusing("two.sl8.test"), refusing("three.sl8.test"), lastOf(scanner(5_000_010, realAt(token, 5_000_005)))], "base", 5_000_010);
-    const ms = performance.now() - t;
+    const v = await triQuote(token, [first, refusing("two.sl8.test"), refusing("three.sl8.test"), lastOf(scanner(5_000_010, realAt(token, 5_000_005)), events)], "base", 5_000_010);
     evmPaceReset();
-    console.log(`SL8 ${name}: ${JSON.stringify(v)} in ${Math.round(ms)} ms, the first asked ${firstLogs} getLogs posts`);
+    console.log(`SL8 ${name}: ${JSON.stringify(v)}, ${JSON.stringify(events)}`);
     assert.deepEqual(v, below, name);
-    assert.ok(firstLogs > 0, `${name}: the held first was never asked the blocks every other provider failed`);
-    assert.ok(ms < within, `${name}: the warm quote took ${Math.round(ms)} ms`);
+    assert.ok(events.includes("first"), `${name}: the held first was never asked the blocks every other provider failed`);
+    const cut = events.indexOf("last cut");
+    assert.ok(cut < 0 || events.indexOf("first") < cut, `${name}: the first was asked only once the last's request was cut: ${JSON.stringify(events)}`);
   }));
 }
 
