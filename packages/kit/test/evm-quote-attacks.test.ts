@@ -12848,6 +12848,36 @@ test("TAIL11k a band block the served index holds is never asked again: a fill f
     evmPoolIndexReset();
   }
 });
+// Card nightly-sweep-runs-whole: with `lagged` gone from the read after the answer, the band's filter by the served N
+// keeps one more thing: P2-1's first block. A band block the index holds, counted as the band's first within maxLag,
+// would set laterFrom more than maxLag before the agreed block and move the read after the answer before it, for blocks
+// the index already holds (TAIL11k's mutant, the band unfiltered, passed TAIL11k once later lost `lagged`)
+test("TAIL11l a band block the served index holds never moves the read after the answer before it: the band [4,999,981, 5,000,000] under N 5,000,005, B's quote at scan head 5,000,010 and agreed block 5,000,040 reads its new blocks [5,000,006, 5,000,010] after its answer", async () => {
+  const { evmPoolIndexUse, evmPoolIndexReset } = quoteMod as unknown as { evmPoolIndexUse: (c: string, s: unknown) => boolean; evmPoolIndexReset: () => void };
+  const b = freshToken();
+  const serve = (n: number) => assert.equal(evmPoolIndexUse("base", { index: { chainId: 8453, poolManager: PM, from: 4_000_001 }, coversThrough: n, pools: [{ key: best(b).key }] }), true);
+  try {
+    evmPoolIndexReset();
+    serve(4_999_980);
+    const m = moving();
+    evmScanFillable(m.rpc);
+    const w = freshToken();
+    assert.equal((await bandQuote([best(w)], w, bestRoute(w), m.to(scanner(5_000_000, [])), 5_000_000)).accepted, true);
+    await evmTailFills(m.rpc);
+    serve(5_000_005);
+    const asked: [number, number][] = [];
+    const answered: [number, number][][] = [];
+    const v = await bandQuote([best(b)], b, bestRoute(b), m.to(scanner(5_000_010, [], asked)), 5_000_010, 5_000_040).finally(() => answered.push([...asked]));
+    assert.equal(v.accepted, true, String((v as { code?: string }).code));
+    assert.deepEqual(answered, [[]], `asked before the answer ${JSON.stringify(answered)}`);
+    await pause(50);
+    await evmTailFills(m.rpc);
+    assert.deepEqual(asked.filter(([a]) => a <= 5_000_005), [], `asked ${JSON.stringify(asked)}`);
+    assert.ok(asked.some(([, z]) => z === 5_000_010), `the new blocks are read after the answer: ${JSON.stringify(asked)}`);
+  } finally {
+    evmPoolIndexReset();
+  }
+});
 test("TAIL11j a taker of a shared tail read waits EVM_SCAN_HOLD_MS for it at most (independent review of 7ed7d86f9, M1): with the read in flight held past it, the second quote reads the blocks itself and answers", async () => {
   const [c, d] = [freshToken(), freshToken()];
   const logs = [best(c), best(d)].map((p, i) => ({ key: p.key, at: 4_100_000 + i }));

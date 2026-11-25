@@ -29,7 +29,7 @@ import { readSolanaReference } from "../../kit/src/trade/solana/pool.ts";
 import { solanaPoolNoteFloor } from "../../kit/src/trade/solana/pool-deposit.ts";
 import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { pairDown } from "./outage.ts";
-import { quiet } from "./settle.ts";
+import { quiet, settle as settleUntil } from "./settle.ts";
 import { vaultLabelOf } from "../../kit/src/vault/shapes.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../../wallet/src/notes/secrets.ts";
 import { openNoteStore, refKey, type NoteStore } from "../../wallet/src/notes/store.ts";
@@ -49,6 +49,7 @@ import { SOL_PIECES } from "../../wallet/src/pool/solana.ts";
 import { isRung } from "../../wallet/src/pool/ladder.ts";
 import { ridePiece } from "../src/pool-withdraw.ts";
 import { poolSellPays } from "../src/pool-sell-dry.ts";
+import { enableTimers, resetTimers } from "./mock-timers.ts";
 
 import { SEED64, L, J, W, PIN, SCOPE, VF, MINT, AMOUNT, SLIPPAGE, ASK, UNITS, FEE, feeOf, N, ENOUGH, enc, be32, beInt, FRONT_RUN, markOf, RETURN, SECOND, W_NOTE, W_NOTE_MARK, preOf, MINT_READ, TOKEN_PROGRAM, ATA, REF, MIN_OUT, nativeAccount, tokenAccount, pageBytes, chain, rentMin, type Acc, type Plant, type Venue } from "./pool-sell-world.ts";
 
@@ -7255,6 +7256,24 @@ test("round-trip-costs-less P2-1: no leftover pass while a trade holds the trade
 /** An IndexedDB whose open never answers (WebKit under storage pressure, some private windows: only onerror and onblocked
  *  reject): the device's spacing on it, raced against `ms`. */
 const neverOpens = (ms = 30) => deviceSpacing({ open: () => ({}) } as unknown as IDBFactory, "never", ms);
+// Card nightly-sweep-runs-whole: each call of the device's spacing on an open that never answers rejects once its bound
+// passes. The tests above see the bound only as a run that ends, so the sweep's c35 (the bound removed) hung them into
+// no verdict (sweep 45612446421 and the 24 Nov nightly); here the bound's own timer is moved on by hand, and a call still
+// pending after it is a failed assertion
+test("card nightly-sweep-runs-whole: the device's spacing on an open that never answers rejects each call once its bound passes", async (t) => {
+  enableTimers(t.mock.timers, { apis: ["setTimeout"] });
+  t.after(() => resetTimers(t.mock.timers));
+  const d = neverOpens(30);
+  const stamp = { at: 700_000, gap: 600_000 };
+  const calls: [string, () => Promise<unknown>][] = [["spacing", () => d.spacing()], ["space", () => d.space(stamp)], ["claim", () => d.claim(stamp)]];
+  for (const [name, call] of calls) {
+    let out: unknown = "still pending";
+    call().then(() => (out = "an answer"), (e: unknown) => (out = e));
+    t.mock.timers.tick(30);
+    await settleUntil(() => out !== "still pending");
+    assert.ok(out instanceof Error && out.message === "the device's spacing: no answer in 30 ms", `${name}: ${String(out)}`);
+  }
+});
 /** Locks as fakeLocks, each name's holds counted, shared ones too: what is still held when a run ends. */
 function countedLocks(): Pick<LockManager, "request" | "query"> & { held: Map<string, number> } {
   const base = fakeLocks();
