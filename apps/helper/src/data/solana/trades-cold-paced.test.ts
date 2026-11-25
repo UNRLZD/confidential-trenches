@@ -14,7 +14,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { onVirtualTime } from "../../../test/evm-swaps/virtual-time.ts";
-import { COLD_SIGS, createSolanaTrades, PYTH_RECEIVER, PYTH_SOL_USD } from "./trades.ts";
+import { COLD_SIGS, COLD_WAIT_MS, createSolanaTrades, PYTH_RECEIVER, PYTH_SOL_USD } from "./trades.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const F = JSON.parse(readFileSync(path.join(HERE, "fixtures/sol-trades-txs.json"), "utf8")) as { txs: Record<string, { signature: string; result: { slot: number; meta: { logMessages: string[] } } }> };
@@ -149,4 +149,92 @@ test("the background share held, a page's first read of a cold coin draws its ow
   assert.equal(value.status, 200, line);
   assert.ok((value.body?.trades.length ?? 0) > 0, `the first answer holds the coin's trades: ${line}`);
   assert.ok(value.drew.includes("page"), `the reads it waited on drew the page's share: ${line}`);
+});
+
+// card sol-first-read-rides-a-providers-hold: helper 70328a60c's live run 45591016872 (25 Nov 10:03Z),
+// solana-tape-rows-at-first-answer: two flooded pump.fun coins' first tapes were CoinGecko's rows, their first reads
+// "listed 0, account unread 0", while publicnode held every Solana caller a second (the box's log at 10:03:24.96Z, "rpc
+// hold solana publicnode.com market 1 s", 30 times) and the trades key was spent. The mint account's read found every
+// provider held and failed at once, inside a first answer whose bound is COLD_WAIT_MS.
+
+/** A coin's first read (the page's, or its chart's: `read`) on `budget`, its fetch answering the mint, the price, the
+ *  coin's COLD_SIGS pump.fun buys and their transactions, on virtual time from TS. */
+async function firstRead(budget: (url: string, method: string, client?: string) => number, read: (t: ReturnType<typeof createSolanaTrades>) => Promise<{ status: number; body: string; timing?: string }>) {
+  const start = TS * 1000;
+  const sigs = Array.from({ length: COLD_SIGS }, (_, i) => ({ signature: `${BUY.signature.slice(0, 80)}${String(i).padStart(8, "1")}`, slot: BUY.result.slot - i, err: null, blockTime: TS - i }));
+  const { value } = await onVirtualTime(start, async () => {
+    const mintData = Buffer.alloc(82);
+    mintData[44] = 6;
+    mintData[45] = 1;
+    const fetch = async (_url: string, init: RequestInit): Promise<Response> => {
+      const req = JSON.parse(String(init.body)) as { method: string; params: [string, Record<string, unknown>] };
+      const ok = (result: unknown) => new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result }), { status: 200 });
+      const acct = (owner: string, data: Buffer) => ok({ context: { slot: BUY.result.slot }, value: { owner, data: [data.toString("base64"), "base64"] } });
+      if (req.method === "getAccountInfo" && req.params[0] === PYTH_SOL_USD) return acct(PYTH_RECEIVER, pyth(9_342_267_796n, Math.floor(Date.now() / 1000)));
+      if (req.method === "getAccountInfo" && req.params[0] === MINT) return acct(TOKEN_PROGRAM, mintData);
+      if (req.method === "getSignaturesForAddress") return ok(req.params[1]?.before === undefined ? sigs : []);
+      if (req.method === "getTransaction") {
+        const s = sigs.find((x) => x.signature === req.params[0]);
+        return ok(s === undefined ? null : { ...BUY.result, slot: s.slot, blockTime: s.blockTime, transaction: { signatures: [s.signature] } });
+      }
+      throw new Error(`unexpected ${req.method}`);
+    };
+    const t = createSolanaTrades({
+      fetch: fetch as never,
+      now: () => Date.now(),
+      listed: async (m) => m === MINT,
+      rpcs: ["https://keyed.test", "https://public.test"],
+      budget,
+      source: () => ({ watch: async () => undefined, unwatch: () => undefined, close: () => undefined }),
+      tickMs: 0,
+    });
+    const a = await read(t);
+    t.stop();
+    return a;
+  });
+  return value;
+}
+
+test("card sol-first-read-rides-a-providers-hold: every Solana provider held a second (a provider's 429 hold, every caller) as a coin's first read begins: its mint and price reads wait the hold inside COLD_WAIT_MS and the first answer holds the coin's own trades (red at 70328a60c: 'account unread 0')", async () => {
+  const until = TS * 1000 + 1_000;
+  const a = await firstRead(() => (Date.now() < until ? 1 : 0), (t) => t.trades(MINT, 50, "page"));
+  const body = a.status === 200 ? (JSON.parse(a.body) as { trades: unknown[]; src?: string }) : null;
+  const line = `${a.status} ${body?.trades.length ?? "-"} rows src ${body?.src} ${a.timing ?? ""}`;
+  console.log(line);
+  assert.equal(a.status, 200, line);
+  assert.ok((body?.trades.length ?? 0) > 0, `the first answer holds the coin's trades: ${line}`);
+  assert.doesNotMatch(a.timing ?? "", /account unread/, line);
+});
+
+test("card sol-first-read-rides-a-providers-hold: a second hold as the SOL price is read, after the mint's: the price read waits it inside COLD_WAIT_MS too", async () => {
+  // the first second held; then the mint's read goes; then every provider is held half a second as the price is asked
+  let h = TS * 1000 + 1_000;
+  let phase = 0;
+  const budget = (): number => {
+    const t = Date.now();
+    if (t < h) return (h - t) / 1_000;
+    if (phase === 0) return (phase = 1), 0;
+    if (phase === 1) return (phase = 2), (h = t + 500), 0.5;
+    return 0;
+  };
+  const a = await firstRead(budget, (t) => t.trades(MINT, 50, "page"));
+  console.log(`${a.status} ${a.timing ?? ""}`);
+  assert.equal(phase, 2, "the price read was held");
+  assert.match(a.timing ?? "", /account \d+, price \d+/, `the mint and the price read: ${a.timing}`);
+  assert.ok(((JSON.parse(a.body) as { trades?: unknown[] }).trades?.length ?? 0) > 0, `the first answer holds the coin's trades: ${a.timing}`);
+});
+
+test(`card sol-first-read-rides-a-providers-hold: a hold that ends past the first answer's bound (COLD_WAIT_MS, ${COLD_WAIT_MS} ms) is not waited: the read fails at once, as before, and the next caller's read is not held behind it`, async () => {
+  const a = await firstRead(() => 5, (t) => t.trades(MINT, 50, "page"));
+  console.log(`${a.status} ${a.timing ?? ""}`);
+  assert.match(a.timing ?? "", /listed 0, account unread 0/, `failed at its first read, 0 ms in: ${a.timing}`);
+});
+
+test("card sol-first-read-rides-a-providers-hold: a coin whose chart is opened first draws the page's share for its first read, as its tape does (red at 70328a60c: candles opened the tape on the background share, held, 'account unread')", async () => {
+  const drew: (string | undefined)[] = [];
+  // the helper's background share held for good; a page's own share open (the first test's above)
+  const a = await firstRead((_u, _m, client) => (drew.push(client), client === undefined ? 10 : 0), (t) => t.candles(MINT, "1m", null, 50, "page"));
+  console.log(`${a.status} ${a.timing ?? ""} drew ${[...new Set(drew)].join(", ")}`);
+  assert.ok(drew.includes("page"), `the chart's first read drew the page's share: ${[...new Set(drew)].join(", ")}`);
+  assert.equal(a.status, 200, `${a.status} ${a.body.slice(0, 200)}`);
 });

@@ -810,14 +810,17 @@ export function createSolanaTrades(deps: {
    *  (WHOLE_RPCS), outside the shared budget and the keyed slot; a provider's 429 holds only it (card
    *  meteora-whole-reads-second-provider), and a held one is not asked. */
   const slot = deps.slot !== undefined && deps.slot.state() !== "public" ? deps.slot : undefined;
-  async function rpc(method: string, params: unknown[], lane?: Lane, client?: string, patient = false): Promise<unknown> {
+  async function rpc(method: string, params: unknown[], lane?: Lane, client?: string, patient = false, until?: number): Promise<unknown> {
     // card helper-fresh-tapes-whole-from-the-first-minute: a walk's read (`patient`) our own budget kept from every
     // provider (none sent to) waits the shortest hold it named and asks again, up to PACED_WAIT_MAX_MS in all: no
     // provider failed it. Before, it threw, and one such read of a cold walk's COLD_SIGS failed the whole walk, begun
     // again from its first page after a wait that doubled (live run 45032297159: two listed tapes still filling at
     // 45.9 s while the public endpoint's background budget was held 10 s at a time; trades-cold-paced.test.ts). Every
     // other read is answered at once, as before: a pool round behind held rows that waited would hold the round a page
-    // joins (tape-from-our-reads.test.ts).
+    // joins (tape-from-our-reads.test.ts). Card sol-first-read-rides-a-providers-hold: a read a first answer waits on
+    // (`until`, that answer's bound) waits the shortest hold when it ends by the bound, and asks again; one that ends
+    // past it fails at once, as before (live run 45591016872: publicnode held every Solana caller a second, and two
+    // flooded coins' first reads failed "account unread 0", their first tapes CoinGecko's rows).
     for (let waited = 0; ; ) {
       let held = Number.POSITIVE_INFINITY;
       for (const url of lane?.urls ?? (slot !== undefined && !slot.useKeyed() ? rpcs.slice(1) : rpcs)) {
@@ -832,8 +835,8 @@ export function createSolanaTrades(deps: {
         const r = await rpcAt(url, key, method, params, lane);
         if (r !== NO_ANSWER) return r;
       }
-      if (!(held < Number.POSITIVE_INFINITY) || !patient || client !== undefined || stopped || waited >= PACED_WAIT_MAX_MS) throw new Error(`${method}: no provider answered`);
-      const ms = Math.min(held * 1_000, PACED_WAIT_MAX_MS - waited);
+      const ms = !(held < Number.POSITIVE_INFINITY) || stopped ? null : until !== undefined ? (now() + held * 1_000 <= until ? held * 1_000 : null) : patient && client === undefined && waited < PACED_WAIT_MAX_MS ? Math.min(held * 1_000, PACED_WAIT_MAX_MS - waited) : null;
+      if (ms === null) throw new Error(`${method}: no provider answered`);
       await new Promise((go) => setTimeout(go, ms).unref?.());
       waited += ms;
     }
@@ -923,18 +926,19 @@ export function createSolanaTrades(deps: {
     return trades.map((x) => (x.ts === t ? x : { ...x, ts: t }));
   }
 
-  /** `client`: the caller a pool round reads it for (round), whose share it draws. */
-  async function account(key: string, client?: string): Promise<{ owner: unknown; data: Buffer; slot: number } | null> {
-    const r = (await rpc("getAccountInfo", [key, { encoding: "base64", commitment: "confirmed" }], undefined, client)) as Record<string, unknown>;
+  /** `client`: the caller a pool round reads it for (round), whose share it draws; `until`: the bound of the first answer
+   *  it is read for (rpc). */
+  async function account(key: string, client?: string, until?: number): Promise<{ owner: unknown; data: Buffer; slot: number } | null> {
+    const r = (await rpc("getAccountInfo", [key, { encoding: "base64", commitment: "confirmed" }], undefined, client, false, until)) as Record<string, unknown>;
     const v = r?.value as Record<string, unknown> | null;
     const slot = (r?.context as Record<string, unknown> | undefined)?.slot;
     if (v === null || v === undefined || !Array.isArray(v.data) || typeof v.data[0] !== "string" || !Number.isSafeInteger(slot)) return null;
     return { owner: v.owner, data: Buffer.from(v.data[0], "base64"), slot: slot as number };
   }
 
-  async function readRef(client?: string): Promise<void> {
+  async function readRef(client?: string, until?: number): Promise<void> {
     refAt = now(); // one try every REF_MS, answered or not
-    const a = await account(PYTH_SOL_USD, client);
+    const a = await account(PYTH_SOL_USD, client, until);
     const v = a === null ? null : pythSolUsd(a.owner, a.data, Math.floor(now() / 1000));
     if (a === null || v === null) return;
     solUsd = { slot: a.slot, v };
@@ -1749,12 +1753,14 @@ export function createSolanaTrades(deps: {
     if (!listed) return NOT_FOUND;
     if (entries.size >= OPEN_MAX) return { ...err(429, "rate_limited"), retryAfterS: 5, why: "solana trades open" };
     let decimals: number;
+    // card sol-first-read-rides-a-providers-hold: the mint and price reads wait a provider's hold that ends by the bound
+    const answerBy = began + COLD_WAIT_MS;
     try {
-      const a = await account(mint, client);
+      const a = await account(mint, client, answerBy);
       if (a === null || !TOKEN_PROGRAMS.includes(a.owner as string) || a.data.length < 82 || a.data[45] !== 1) return NOT_FOUND;
       decimals = a.data[44]!;
       mark("account");
-      if (solUsd === null) (await readRef(client), mark("price"));
+      if (solUsd === null) (await readRef(client, answerBy), mark("price"));
     } catch {
       return failed("account unread");
     }
@@ -2207,7 +2213,9 @@ export function createSolanaTrades(deps: {
       if (mint === null || !(TFS as readonly string[]).includes(tf) || !Number.isSafeInteger(limit) || limit < 1 || limit > CANDLES_MAX) return NOT_FOUND;
       // a mint the lists do not hold has no bars of ours: its candles are the history source's own answer, as before
       if (!entries.has(mint) && deps.history !== undefined && (await deps.listed(mint)) !== true) return deps.history(mint, tf, to, limit, client);
-      const opening = open(mint);
+      // card sol-first-read-rides-a-providers-hold: the chart's caller opens the tape on its own share, as trades() does
+      // (opened on the background share, a held one failed the coin's first read for the tape read beside it too)
+      const opening = open(mint, client);
       // card helper-listed-charts-own-reads round 3: a walk still opening (its first round waits up to COLD_WAIT_MS) and
       // the history's bars held answer now, filling, and the walk goes on; the page reads a filling chart again 2 s on
       // (warm live run of 16 Nov 00:33Z: Solana's listed charts p95 4,241 ms)
