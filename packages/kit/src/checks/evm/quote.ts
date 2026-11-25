@@ -3172,8 +3172,13 @@ async function scanPools(
   // all: --record read, 2026-11-21 15:5xZ). A request waiting at the gate or the provider's pace is not late: its time
   // runs from its send. Both failing, the next's failure is the scan's, as before; a ScanStop of the first stops it.
   // A first that passed the request over unsent (ScanPassed) is asked it too, through its hold and at its turn (`again`),
-  // where the stand-in fails it or has not answered it whole within EVM_SCAN_HOLD_MS of the pass, and the first of the
-  // two to answer whole is kept (card base-warm-quote-rides-a-stalled-last-scan).
+  // where the stand-in fails it or has not answered it whole within the first's own time for a getLogs of the pass
+  // (EVM_SCAN_HOLD_MS before it has any), and the first of the two to answer whole is kept (cards
+  // base-warm-quote-rides-a-stalled-last-scan, evm-held-first-asked-at-its-own-time). That time is the first's own warm
+  // requests', each from its post's leaving to its whole answer (scanTook): the device's scan providers are no quote
+  // provider's `timed`, and their URL is RPC_URL's, so before this card every warm request's stand-in on the device
+  // waited EVM_SCAN_HOLD_MS from the request's start (evmHedgeAfter(url, "logs") null for every Base scan provider after
+  // a cold and two warm quotes, read from the Mac 2026-11-25 21:3xZ).
   const raced = (j: Job): Promise<void> =>
     new Promise<void>((resolve, reject) => {
       const next = j.on.next!;
@@ -3228,29 +3233,36 @@ async function scanPools(
         clearTimeout(back);
         firstOut = undefined;
         const ours: Got[] = [];
-        one({ ...j, into: ours, force: true, hedge: { sent: () => undefined, lost, signal: stop.signal } }).then(
-          () => win(ours),
+        one({ ...j, into: ours, force: true, hedge: { sent: () => void (wire ??= performance.now()), lost, signal: stop.signal } }).then(
+          () => (took(), win(ours)),
           (e) => {
             firstOut = { e };
             if (nextOut !== undefined) fail(nextOut.e);
           },
         );
       };
-      const url = URL_OF.get(j.on.rpc);
+      // the device's scan providers are evmJsonRpc's (RPC_URL); a quote provider's is evmProviders' (URL_OF)
+      const url = RPC_URL.get(j.on.rpc) ?? URL_OF.get(j.on.rpc);
+      // when the first's post left: its whole answer then gives its own time for a warm request (scanTook)
+      let wire: number | undefined;
+      const took = () => {
+        if (url !== undefined && wire !== undefined) scanTook(url, performance.now() - wire);
+      };
       const sent = () => {
+        wire ??= performance.now();
         if (timer !== undefined || stood) return;
         timer = setTimeout(standIn, evmHedgeAfter(url, "logs") ?? EVM_SCAN_HOLD_MS);
       };
       // a provider with no URL (a test's model) says no send: timed from the request's start
       if (url === undefined) sent();
       one({ ...j, into: mine, hedge: { sent, lost, signal: stop.signal } }).then(
-        () => win(mine),
+        () => (took(), win(mine)),
         (e) => {
           firstOut = { e };
           if (e instanceof ScanStop) return fail(e);
           if (!stood) standIn();
           else if (nextOut !== undefined) return e instanceof ScanPassed ? again() : fail(nextOut.e);
-          if (e instanceof ScanPassed) back ??= setTimeout(again, EVM_SCAN_HOLD_MS);
+          if (e instanceof ScanPassed) back ??= setTimeout(again, evmHedgeAfter(url, "logs") ?? EVM_SCAN_HOLD_MS);
         },
       );
     });
@@ -3543,6 +3555,16 @@ const EVM_HEDGE_KEPT = 32;
  *  gate and pace), never under EVM_HEDGE_MS; null before the kind's first answer. A hung
  *  post held a warm tap until its 10 s timeout where the round's spares were spent (card
  *  evm-warm-tap-ends-inside-two-seconds, round E). */
+/** A warm scan request's own time on `url`, from its post's leaving to its whole answer (scanPools raced): the provider's
+ *  getLogs times, which evmHedgeAfter(url, "logs") reads, its newest EVM_HEDGE_KEPT (card
+ *  evm-held-first-asked-at-its-own-time). A cold scan's requests, up to its span, are not its warm ones' measure. */
+const scanTook = (url: string, ms: number): void => {
+  const times = speedOf(url).times;
+  const t = times.get("logs") ?? [];
+  times.set("logs", t);
+  t.push(ms);
+  if (t.length > EVM_HEDGE_KEPT) t.shift();
+};
 export function evmHedgeAfter(url: string | undefined, kind: string): number | null {
   const t = url === undefined ? undefined : SPEED.get(url)?.times.get(kind);
   if (t === undefined || t.length === 0) return null;

@@ -7877,6 +7877,47 @@ test("SL9 card base-warm-quote-rides-a-stalled-last-scan: a scan's request its h
   assert.ok(firstAsked.some(([a, b]) => a <= 5_011_990 && b >= 5_011_990), `block 5,011,990 never asked of the held first: ${JSON.stringify(firstAsked)}`);
 }));
 
+// card evm-held-first-asked-at-its-own-time: with the fix above, 10 of 10 warm Base quotes from the Mac with
+// base-rpc.publicnode.com held ended ok in 2,163 to 2,172 ms (2026-11-25 20:5xZ): the first was asked at EVM_SCAN_HOLD_MS
+// and answered in 153 ms, while the stand-in's last answered each block beyond its head. A first that passed a warm
+// request over is asked once the stand-in has been out past the first's own time for a getLogs (evmHedgeAfter), the rule
+// the stand-in itself is asked by; EVM_SCAN_HOLD_MS only before the first has any. Here the first answers two quotes (its
+// time measured), is held, the next two refuse and the last never answers a getLogs: the first is asked before
+// EVM_SCAN_HOLD_MS on the test clock (a timer just short of it marks it).
+test("SL10 card evm-held-first-asked-at-its-own-time: a warm scan's held first, its time measured, is asked at that time where the stand-in has not answered, never at EVM_SCAN_HOLD_MS", { timeout: 60_000 }, () => onTestClock(async () => {
+  evmPaceReset();
+  quoteMod.evmSpeedReset();
+  const token = "0x00000000000000000000000000000000005c4650";
+  const url = "https://base-rpc.publicnode.com";
+  let inner = scanner(5_000_000, []);
+  const events: string[] = [];
+  const first = evmJsonRpc(url, (async (_u: string, init: RequestInit) => {
+    const calls = (JSON.parse(init.body as string) as { method: string; params: unknown[] }[]).map((c) => ({ method: c.method, params: c.params }));
+    if (calls.some((c) => c.method === "eth_getLogs")) events.push("first");
+    return new Response(JSON.stringify(await inner(calls)), { status: 200 });
+  }) as unknown as typeof fetch);
+  // the first's own time for a getLogs, measured: a cold quote and a warm one it answers
+  await triQuote(token, [first, scanner(5_000_000, []), scanner(5_000_000, []), scanner(5_000_000, [])]);
+  inner = scanner(5_000_005, []);
+  await triQuote(token, [first, scanner(5_000_005, []), scanner(5_000_005, []), scanner(5_000_005, [])], "base", 5_000_005);
+  const own = quoteMod.evmHedgeAfter(url, "logs");
+  assert.ok(own !== null && own < quoteMod.EVM_SCAN_HOLD_MS, `the first's own time for a getLogs: ${own}`);
+  inner = scanner(5_000_010, realAt(token, 5_000_008));
+  events.length = 0;
+  // held as a throttle holds it (pace.ts); the last answers its head and block, never a getLogs
+  evmProviderHold(url);
+  const last = scanner(5_000_010, realAt(token, 5_000_008));
+  const hang: EvmRpc = async (calls, signal) => (calls.some((c) => c.method === "eth_getLogs") ? untilAborted(signal) : last(calls));
+  const mark = setTimeout(() => events.push("hold"), quoteMod.EVM_SCAN_HOLD_MS - 1);
+  const v = await triQuote(token, [first, refusing("two.sl10.test"), refusing("three.sl10.test"), hang], "base", 5_000_010);
+  clearTimeout(mark);
+  evmPaceReset();
+  console.log(`SL10: ${JSON.stringify(v)}, own ${own} ms, ${JSON.stringify(events)}`);
+  assert.deepEqual(v, below);
+  assert.ok(events.includes("first"), "the held first was never asked");
+  assert.ok(!events.includes("hold") || events.indexOf("first") < events.indexOf("hold"), `the held first was asked only at EVM_SCAN_HOLD_MS: ${JSON.stringify(events)}`);
+}));
+
 test("TAIL4 card evm-scan-chain-tail (independent review of 92717c7, MEDIUM 1): blocks a spare answered no logs of are never kept as read for another coin: a pool of B made there is found by B's quote on the first", { timeout: 60_000 }, () => onTestClock(async () => {
   const [A, B] = ["0x00000000000000000000000000000000005c4631", "0x00000000000000000000000000000000005c4632"];
   // the chain's tail up to 5,000,000, on the first

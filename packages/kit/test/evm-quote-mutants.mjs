@@ -264,13 +264,19 @@ export const MUTANTS = [
   // the head's read)
   [QUOTE, "!spare || provider === undefined || force", "!spare || provider === undefined", R, "SL8 "],
   [QUOTE, "    const rs = await on.gate.ask(rpc, calls, last ? SCAN_TRIES : 1, fast, hedge, force).then(", "    const rs = await on.gate.ask(rpc, calls, last ? SCAN_TRIES : 1, fast, hedge).then(", R, "SL8 "],
-  [QUOTE, "          if (e instanceof ScanPassed) back ??= setTimeout(again, EVM_SCAN_HOLD_MS);", "          if (false) back ??= setTimeout(again, EVM_SCAN_HOLD_MS);", R, "SL8 "],
+  [QUOTE, "          if (e instanceof ScanPassed) back ??= setTimeout(again,", "          if (false) back ??= setTimeout(again,", R, "SL8 "],
   [QUOTE, "            if (firstOut.e instanceof ScanPassed && !backed) return again();", "            if (false) return again();", R, "SL8 "],
   [QUOTE, "        one({ ...j, into: ours, force: true, hedge:", "        one({ ...j, into: ours, force: false, hedge:", R, "SL8 "],
   [QUOTE, "        backOf(o, first, spare()).then(win, (e: unknown) => {", "        spare().then(win, (e: unknown) => {", R, "SL8 "],
   [QUOTE, "scanHeadOf(o.rpc, o.gate, true).catch(() => Promise.reject(x))", "scanHeadOf(o.rpc, o.gate).catch(() => Promise.reject(x))", R, "SL8 "],
   [QUOTE, "      if (!(e instanceof ScanPassed)) return onNext;", "      return onNext;", R, "SL9 "],
   [QUOTE, "        return settle(back.map((r) => one({ ...r, into: j.into, force: true }))).catch(() => Promise.reject(no));", "        return settle(back.map((r) => one({ ...r, into: j.into, force: false }))).catch(() => Promise.reject(no));", R, "SL9 "],
+  // card evm-held-first-asked-at-its-own-time: a warm request's stand-in and a passed-over first are asked at the first's
+  // own time for a getLogs, which its warm requests measure, read by the device's scan providers' own URL
+  [QUOTE, "      const url = RPC_URL.get(j.on.rpc) ?? URL_OF.get(j.on.rpc);", "      const url = URL_OF.get(j.on.rpc);", R, "SL10 "],
+  [QUOTE, "        if (url !== undefined && wire !== undefined) scanTook(url, performance.now() - wire);", "        if (false) scanTook(url, performance.now() - wire);", R, "SL10 "],
+  [QUOTE, "          if (e instanceof ScanPassed) back ??= setTimeout(again, evmHedgeAfter(url, \"logs\") ?? EVM_SCAN_HOLD_MS);", "          if (e instanceof ScanPassed) back ??= setTimeout(again, EVM_SCAN_HOLD_MS);", R, "SL10 "],
+  [QUOTE, "  t.push(ms);\n  if (t.length > EVM_HEDGE_KEPT) t.shift();\n};\nexport function evmHedgeAfter(", "  if (t.length > EVM_HEDGE_KEPT) t.shift();\n};\nexport function evmHedgeAfter(", R, "SL10 "],
   // re-anchored (card evm-unreachable-moves-on): the 5xx test is serverFault's since card evm-5xx-holds-the-provider-
   // for-the-round; SL1 passes on it (the request still reaches the next after its tries), SP5xx does not
   [QUOTE, "          if (spareNext && out5xx && !deepCall) {", "          if (false && out5xx && !deepCall) {", R, "SP5xx "],
