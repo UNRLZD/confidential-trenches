@@ -1018,7 +1018,7 @@ export function ownTrending(evmLists: EvmLists, swaps: Partial<Record<EvmChain, 
   return wired;
 }
 
-export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmLists: EvmLists, gecko?: GeckoBudget, holds?: ProviderHolds, keyed?: Keyed | null, evmNamed: Partial<Record<EvmChain, EvmNamed>> = {}, disk?: { storeDir: string; writable: Promise<unknown> }, quoteIndex: Partial<Record<EvmChain, (token: string) => readonly IndexedPool[]>> = {}): Swaps {
+export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmLists: EvmLists, gecko?: GeckoBudget, holds?: ProviderHolds, keyed?: Keyed | null, evmNamed: Partial<Record<EvmChain, EvmNamed>> = {}, disk?: { storeDir: string; writable: Promise<unknown> }, quoteIndex: Partial<Record<EvmChain, (token: string) => readonly IndexedPool[]>> = {}, dex?: ReturnType<typeof upstreamBudget>): Swaps {
   const out: Swaps = {};
   for (const chain of ["base", "robinhood"] as const) {
     const lists = evmLists[chain];
@@ -1047,6 +1047,8 @@ export function evmSwapsFromEnv(env: Record<string, string | undefined>, evmList
       gecko,
       holds,
       keyed,
+      // a third quote token's pool list from DexScreener's budget first (card evm-quote-token-priced-from-our-reads)
+      ...(dex === undefined ? {} : { dex }),
       rpcs: evmSwapRpcs(env, chain),
       spares: evmSwapSpares(env, chain),
       index: INDEX_RPCS[chain],
@@ -1584,7 +1586,7 @@ if (import.meta.main) {
     // Robinhood's pool index (poolIndexes, opened below) names any v4 pool's key to the tapes' pool search, read through
     // this holder: empty until it opens (card robinhood-few-trade-tapes-fill-inside-45s)
     const indexOf: { robinhood?: Pick<PoolIndex, "pools"> } = {};
-    const swaps: Swaps = { ...evmSwapsFromEnv(process.env, evmLists, gecko, holds, keyed, evmNamed, { storeDir, writable: senders.held }, { base: quoteIndexFromSign("base"), robinhood: (t) => indexOf.robinhood?.pools(t).pools ?? [] }), solana: solanaTradesFromEnv(process.env, lists, token, rpc, slots) };
+    const swaps: Swaps = { ...evmSwapsFromEnv(process.env, evmLists, gecko, holds, keyed, evmNamed, { storeDir, writable: senders.held }, { base: quoteIndexFromSign("base"), robinhood: (t) => indexOf.robinhood?.pools(t).pools ?? [] }, dex), solana: solanaTradesFromEnv(process.env, lists, token, rpc, slots) };
     ownTrending(evmLists, swaps, dex);
     // card market-data-evm-token: each EVM chain's token page and holders, its rows the lists', its info CoinGecko's keyed
     // on-chain read, never GeckoTerminal's keyless window (card evm-token-page-off-the-5-call-window), its pool and

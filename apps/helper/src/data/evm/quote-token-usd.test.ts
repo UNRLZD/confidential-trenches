@@ -16,13 +16,17 @@ import { after, test } from "node:test";
 import { fakeChain, REC, URLS } from "../../../test/evm-swaps/robinhood.ts";
 import { CG_ONCHAIN, coingeckoPace, createKeyed } from "../coingecko.ts";
 import { geckoBudget } from "../gecko.ts";
-import { providerHolds } from "../../limits/limits.ts";
+import { providerHolds, upstreamBudget } from "../../limits/limits.ts";
+import { DEX_BASE, DEX_LIMITS } from "../held.ts";
 import { GT_BASE } from "./lists.ts";
 import {
+  BEHIND_MAX,
   createSwaps,
+  dexPairsList,
   poolStateLegs,
   quoteCands,
   refStateUsd,
+  STALE_MS,
   TOPIC,
   usdThrough,
   v4StateSlot,
@@ -52,6 +56,8 @@ type Case = {
     { blockNumber: string; logs: Record<string, unknown>[] }
   >;
   calls: Record<string, string | null>;
+  /** DexScreener's token-pairs answers, by token (robinhood: r33 and RAM). */
+  dex?: { answers: Record<string, unknown[]> };
 };
 const FIX = JSON.parse(readFileSync(FILE, "utf8")) as Record<
   "base" | "robinhood",
@@ -70,9 +76,18 @@ const settle = async () => {
 const BALANCE_OF = "0x70a08231";
 const EXTSLOAD = "0x1e2eaeaf";
 
+const SLOT0 = "0x3850c7bd";
+/** RAM on Robinhood: r33's route goes through it (r33/RAM, then RAM/WETH). */
+const RAM = "0x5173d45a1191ee33cbb7d8c7e65f21b04ed54802";
+
 /** `thin`: every quote-side read of a candidate pool answers under LIQ_MIN_USD (a balance of 999 of the USD token, no
- *  v4 liquidity), as a pool of a few dollars does. */
-function harness(chain: "base" | "robinhood", o: { thin?: boolean } = {}) {
+ *  v4 liquidity), as a pool of a few dollars does. `stateDown` (on): a post of pool-state reads alone (slot0) at the
+ *  row's block is refused, as a provider that keeps no state that old refuses it, each one counted. `pickDelay`: the
+ *  quote token's pool list answers that many real ms late, so its pick outlasts HEDGE_MS and still lands (`out`: the
+ *  asks of it not answered yet). `dex`: the swaps hold DexScreener's budget, its token-pairs answered from the case's
+ *  recorded answers (none for any other token). `gtListsDown`: GeckoTerminal's keyless list of any token's pools answers
+ *  429, as its refresh lane refused them on helper aed6d6482. */
+function harness(chain: "base" | "robinhood", o: { thin?: boolean; stateDown?: { on: boolean; refused: number }; pickDelay?: { ms: number; out?: number }; dex?: boolean; gtListsDown?: boolean } = {}) {
   const f = FIX[chain];
   const c = fakeChain();
   const head = REC.lastHead;
@@ -144,7 +159,18 @@ function harness(chain: "base" | "robinhood", o: { thin?: boolean } = {}) {
       return `0x${"0".repeat(64)}`;
     return got;
   };
+  const dexCalls: string[] = [];
+  /** GeckoTerminal's keyless asks of a token's pools other than the coin's. */
+  const gtListAsks: string[] = [];
   const fetch = async (url: string, init: RequestInit): Promise<Response> => {
+    if (url.startsWith(`${DEX_BASE}/`)) {
+      dexCalls.push(url);
+      const t = /\/token-pairs\/v1\/[a-z]+\/(0x[0-9a-f]{40})$/.exec(url)?.[1];
+      return new Response(JSON.stringify(t === undefined ? [] : (f.dex?.answers[t] ?? [])), { status: 200 });
+    }
+    const gtList = url.startsWith(GT_BASE) && /\/tokens\/0x[0-9a-f]{40}\/pools\?page=1$/.test(url) && !url.includes(`/tokens/${f.coin}/`);
+    if (gtList) gtListAsks.push(url);
+    if (gtList && o.gtListsDown) return new Response("{}", { status: 429, headers: { "retry-after": "60" } });
     if (url.startsWith(CG_ONCHAIN)) {
       keyedCalls.push(url);
       // the key's share: its first answers of the coin, then spent
@@ -195,8 +221,14 @@ function harness(chain: "base" | "robinhood", o: { thin?: boolean } = {}) {
       if (
         url.startsWith(GT_BASE) &&
         url.includes(`/tokens/${f.quote}/pools?page=1`)
-      )
+      ) {
+        if ((o.pickDelay?.ms ?? 0) > 0) {
+          o.pickDelay!.out = (o.pickDelay!.out ?? 0) + 1;
+          await new Promise((ok) => setTimeout(ok, o.pickDelay!.ms));
+          o.pickDelay!.out--;
+        }
         return new Response(JSON.stringify(f.quotePools), { status: 200 });
+      }
       const other = /\/tokens\/(0x[0-9a-f]{40})\/pools\?page=1$/.exec(url)?.[1];
       if (url.startsWith(GT_BASE) && other !== undefined && other !== f.coin) {
         if (!(other in f.lists) && RECORD)
@@ -214,7 +246,27 @@ function harness(chain: "base" | "robinhood", o: { thin?: boolean } = {}) {
     const reqs = JSON.parse(String(init.body ?? "null")) as
       | { id: number; method: string; params: Record<string, unknown>[] }[]
       | null;
-    if (!Array.isArray(reqs)) return c.fetch(url, init);
+    if (!Array.isArray(reqs)) {
+      const one = JSON.parse(String(init.body ?? "null")) as { method?: string } | null;
+      if (one?.method !== "eth_getBlockByNumber") return c.fetch(url, init);
+      return new Response(JSON.stringify(aged((await (await c.fetch(url, init)).json()) as Rpc)), { status: 200 });
+    }
+    // a post of pool-state reads alone at the row's block (the price of a third quote's route there), refused while down
+    const stateOnly =
+      reqs.length > 0 &&
+      reqs.every(
+        (r) =>
+          r.method === "eth_call" &&
+          (r.params[0] as { data?: string }).data === SLOT0 &&
+          parseInt(r.params[1] as unknown as string, 16) === placedAt,
+      );
+    if (o.stateDown?.on && stateOnly) {
+      o.stateDown.refused++;
+      return new Response(
+        JSON.stringify(reqs.map((r) => ({ jsonrpc: "2.0", id: r.id, error: { code: -32000, message: "missing trie node" } }))),
+        { status: 200 },
+      );
+    }
     const out = [];
     for (const r of reqs) {
       const ok = (result: unknown) => ({ jsonrpc: "2.0", id: r.id, result });
@@ -282,10 +334,19 @@ function harness(chain: "base" | "robinhood", o: { thin?: boolean } = {}) {
       }
       const one = (await (
         await c.fetch(url, { ...init, body: JSON.stringify([r]) })
-      ).json()) as unknown[];
-      out.push(one[0]);
+      ).json()) as Rpc[];
+      out.push(r.method === "eth_getBlockByNumber" ? aged(one[0]!) : one[0]);
     }
     return new Response(JSON.stringify(out), { status: 200 });
+  };
+  type Rpc = { result?: { number: string; timestamp: string } | null };
+  /** A block past the row's (ahead) is Robinhood's 100 ms on from the row's trade time (the fake chain's own times are
+   *  another recording's), so the row ages as the head moves. */
+  const aged = (a: Rpc): Rpc => {
+    const b = a.result;
+    const past = b == null ? 0 : parseInt(b.number, 16) - placedAt;
+    const t = Date.parse(newest!.attributes.block_timestamp!) / 1_000 + Math.floor(past / 10);
+    return past > 0 ? { ...a, result: { ...b!, timestamp: `0x${t.toString(16)}` } } : a;
   };
   const env = { COINGECKO_API_KEY: KEY, COINGECKO_CALLS_PER_MIN: "300" };
   const holds = providerHolds(() => clock.t, coingeckoPace(env));
@@ -300,6 +361,7 @@ function harness(chain: "base" | "robinhood", o: { thin?: boolean } = {}) {
     tickMs: 0,
     gecko,
     keyed,
+    ...(o.dex ? { dex: upstreamBudget(() => DEX_LIMITS, () => clock.t) } : {}),
     sleep: async (ms: number) => void (clock.t += ms),
   });
   after(() => s.stop());
@@ -318,6 +380,10 @@ function harness(chain: "base" | "robinhood", o: { thin?: boolean } = {}) {
     newest: newest!,
     refuse: () => void (refused = true),
     keyedCalls,
+    dexCalls,
+    gtListAsks,
+    /** The chain's head `n` blocks on, nothing traded in them. */
+    ahead: (n: number) => void (c.st.head += n),
   };
 }
 
@@ -424,6 +490,134 @@ test("robinhood: the newest fBOMB trade (r33/fBOMB, Ramses Legacy), renewed by o
     usd !== null && Math.abs(Number(usd) / 1e18 - want) / want < 0.02,
     `usd ${Number(usd) / 1e18} vs the vendor's ${want} (via ${ram})`,
   );
+});
+
+type Answer = Awaited<ReturnType<ReturnType<typeof harness>["tape"]>>;
+/** The tape read every 2 s of the helper's clock, `realMs` of real time between (a pick waits HEDGE_MS of real time),
+ *  until `done` or `n` reads; after the cold read and the vendor's refusals, as run() reads it. */
+async function reads(h: ReturnType<typeof harness>, n: number, done: (a: Answer) => boolean, realMs = 0): Promise<Answer[]> {
+  const seen: Answer[] = [];
+  for (let i = 0; i < n; i++) {
+    h.clock.t += 2_000;
+    await settle();
+    if (realMs > 0) await new Promise((ok) => setTimeout(ok, realMs));
+    const a = await h.tape();
+    seen.push(a);
+    if (done(a)) break;
+  }
+  return seen;
+}
+const priced = (a: Answer) => a.through !== undefined || a.price !== undefined;
+const atRate = (seen: Answer[]) => seen.filter((a) => a.price !== undefined).map((a) => a.timing);
+async function opened(h: ReturnType<typeof harness>) {
+  await h.tape();
+  await settle();
+  await h.tape();
+  h.refuse();
+}
+
+// card evm-quote-token-priced-from-our-reads, live run 45558216482 on helper 9beef52db: Robinhood fBOMB (r33/fBOMB,
+// r33's route r33/RAM then RAM/WETH) had 2 of 29 answers at the vendor's rate, each a round with the route known but no
+// price at the row's block: the pick past HEDGE_MS (the route's first, or its next once GT_POOL_FRESH_MS old) or the
+// state read not agreed. Each is red at f0d70be0d (the vendor's rate, evm-vendor-price named).
+test("card evm-quote-token-priced-from-our-reads: robinhood: a row whose route's state at its block no two providers agree on is not placed, its round read again, never at the vendor's rate; once the state reads answer it is priced through the route", async () => {
+  const down = { on: true, refused: 0 };
+  const h = harness("robinhood", { stateDown: down });
+  await opened(h);
+  const during = await reads(h, 10, () => false);
+  assert.ok(down.refused > 1, `the route's state asked again each round: ${down.refused}`);
+  assert.deepEqual(during.filter(priced).map((a) => a.timing), [], "no row priced while its route's price is not read, none at the vendor's rate");
+  down.on = false;
+  const after = await reads(h, 30, priced);
+  assert.deepEqual(atRate(after), []);
+  assert.equal(after.at(-1)!.through, "1", after.at(-1)!.timing);
+});
+
+test("card evm-quote-token-priced-from-our-reads: robinhood: a row whose route's state is never agreed is priced at the vendor's rate, its age named, once its block is STALE_MS behind the head, so a route that never reads holds no coin's tape", async () => {
+  const down = { on: true, refused: 0 };
+  const h = harness("robinhood", { stateDown: down });
+  await opened(h);
+  const waiting = await reads(h, 20, () => down.refused > 1, 100);
+  assert.deepEqual(waiting.filter(priced).map((a) => a.timing), []);
+  // 1.5 STALE_MS of Robinhood's blocks on (100 ms each, BEHIND_MAX's, no BLOCK_CLOCK), inside one round's span
+  h.ahead((1.5 * STALE_MS) / (BEHIND_MAX.robinhood.ms / BEHIND_MAX.robinhood.blocks));
+  const seen = await reads(h, 20, priced);
+  assert.ok(seen.at(-1)!.price !== undefined, `the vendor's rate, its age named: ${seen.at(-1)!.timing}`);
+});
+
+test("card evm-quote-token-priced-from-our-reads: robinhood: with GeckoTerminal's keyless lists and the key's share both refusing a quote token's pools (helper aed6d6482 after its deploy: the refresh lane refused 10 to 13 calls a window, fBOMB 27 of 27 at the vendor's rate in live run 45576485995), r33's route is picked from DexScreener's token-pairs of r33 and RAM, each pool confirmed on chain, and the newest fBOMB row is priced through it, never at the vendor's rate", async () => {
+  const h = harness("robinhood", { dex: true, gtListsDown: true });
+  await opened(h);
+  const seen = await reads(h, 30, priced);
+  assert.deepEqual(atRate(seen), [], "no answer at the vendor's rate");
+  assert.equal(seen.at(-1)!.through, "1", seen.at(-1)!.timing);
+  const asked = h.dexCalls.map((u) => u.split("/").at(-1));
+  assert.ok(asked.includes(FIX.robinhood.quote) && asked.includes(RAM), `DexScreener asked for r33's pools and RAM's: ${asked.join(", ")}`);
+  // DexScreener answering, GeckoTerminal's 5 calls in 75 s are never spent on these lists
+  const gtAsked = h.gtListAsks.filter((u) => u.includes(FIX.robinhood.quote) || u.includes(RAM));
+  assert.deepEqual(gtAsked, [], "no GeckoTerminal list of r33 or RAM asked");
+});
+
+test("dexPairsList: DexScreener's token-pairs as a list of the token's pools on the chain, deepest first, each pool and token lower case; an entry of another chain, or whose pool or tokens are not addresses, is dropped; none left (or no list) is null", () => {
+  const r33 = FIX.robinhood.quote;
+  const list = dexPairsList(FIX.robinhood.dex!.answers[r33], "robinhood");
+  assert.deepEqual(quoteCands(list, r33, null), [
+    "0xc8da473ac83ed71d1715264976c3ef422b73ed1d", // fBOMB/r33, the deepest
+    "0xb2f5a2eef7cca3d0057f95352b2d0cf6e084bb96", // r33/RAM, the route's hop
+    "0xd8b66ac1a247db8f32ce0ea9770ce6966eb9f567",
+    "0x84b3e225cef9d40ef3b5b4652776be8878a37249",
+  ]);
+  const ok = { chainId: "robinhood", pairAddress: "0xB2F5A2EEF7cCA3d0057f95352B2D0cf6e084bb96", baseToken: { address: r33 }, quoteToken: { address: RAM }, liquidity: { usd: 1 } };
+  const hostile = [
+    { ...ok, chainId: "base" },
+    { ...ok, pairAddress: "0xzz" },
+    { ...ok, pairAddress: `${ok.pairAddress}00` },
+    { ...ok, baseToken: { address: "r33" } },
+    { ...ok, quoteToken: {} },
+    null,
+    "0xb2f5a2eef7cca3d0057f95352b2d0cf6e084bb96",
+  ];
+  assert.equal(dexPairsList(hostile, "robinhood"), null);
+  assert.deepEqual(quoteCands(dexPairsList([...hostile, ok], "robinhood"), r33, null), [ok.pairAddress.toLowerCase()]);
+  assert.equal(dexPairsList({ pairs: [ok] }, "robinhood"), null);
+  // a v4 pool by its id
+  const v4 = { ...ok, pairAddress: "0x680eb556f5d466e1fee8468b93cbdd6c426e2136c369a6ab70ca36a5204cd471" };
+  assert.deepEqual(quoteCands(dexPairsList([v4], "robinhood"), r33, null), [v4.pairAddress]);
+});
+
+test("card evm-quote-token-priced-from-our-reads: robinhood: a row whose quote's first route pick is still out past HEDGE_MS (its pool list 2.5 s late) is not placed and read again, then priced through the route, never at the vendor's rate", async () => {
+  const h = harness("robinhood", { pickDelay: { ms: 2_500 } });
+  // the vendor answering (a 429 holds every GT call its retry-after, and a pick that cannot read its lists is unread)
+  await h.tape();
+  await settle();
+  await h.tape();
+  // 500 ms of real time a read: the round waits HEDGE_MS on the pick, and the pick lands 2.5 s on
+  const seen = await reads(h, 20, priced, 500);
+  assert.ok(seen.length > 1, "the first answers wait on the pick");
+  assert.deepEqual(atRate(seen), [], "no answer at the vendor's rate");
+  assert.equal(seen.at(-1)!.through, "1", seen.at(-1)!.timing);
+});
+
+test("card evm-quote-token-priced-from-our-reads: robinhood: a held route past GT_POOL_FRESH_MS is served while its next pick is out (its pool list 6 s late), so a row then is priced through it, never at the vendor's rate", async () => {
+  const delay: { ms: number; out?: number } = { ms: 0 };
+  const down = { on: true, refused: 0 };
+  const h = harness("robinhood", { stateDown: down, pickDelay: delay });
+  await h.tape();
+  await settle();
+  await h.tape();
+  // the route picked, the row's state at its block not read: the row waits
+  const waiting = await reads(h, 20, () => down.refused > 1, 100);
+  assert.deepEqual(waiting.filter(priced).map((a) => a.timing), []);
+  assert.ok(down.refused > 1, `the row's state asked: ${down.refused}`);
+  // the route's hold over, its next pick slow, the state read again: the row is priced through the held route while
+  // that pick's list is still out (an answer that waited on the pick comes back only once it is in)
+  h.clock.t += 600_000;
+  delay.ms = 6_000;
+  down.on = false;
+  const later = await reads(h, 20, priced, 100);
+  assert.deepEqual(atRate(later), [], "no answer at the vendor's rate");
+  assert.equal(later.at(-1)!.through, "1", later.map((a) => a.timing).join(" | "));
+  assert.equal(delay.out, 1, "priced while the next pick's list is still out");
 });
 
 for (const chain of ["base", "robinhood"] as const)
