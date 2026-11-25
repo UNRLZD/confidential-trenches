@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { gunzipSync } from "node:zlib";
 import { EVM_NOOP_HOOK_CODE, evmAgreedReset, evmJsonRpc, evmPoolBuyQuoteWith, evmPoolIndexReset, evmPoolIndexUse, evmProviders, evmQuoteWarmReset, evmRanked, evmSpeedReset, type EvmPoolBuyQuoteRequest } from "../src/checks/evm/quote.ts";
-import { evmPaceReset } from "../src/checks/evm/pace.ts";
+import { evmPaceReset, evmProviderHold } from "../src/checks/evm/pace.ts";
 import { evmPoolVenues } from "../src/trade/evm/buy-unpinned.ts";
 import { callKey, hookSpeculation } from "./evm-quote-calls-record.ts";
 import { onTestClock } from "./test-clock.ts";
@@ -216,3 +216,53 @@ test("RP3 the replay sets apart only a read with a hook of its plan replaced by 
   await post(r, call(quoteOf(STRANGER, 3), { [HOOK]: { code: EVM_NOOP_HOOK_CODE } }));
   assert.deepEqual([r.spec.length, r.missed.length], [1, 5], "a read replacing a hook outside the plan, other code, or a hook the read does not name, was set apart");
 }));
+
+// Card evm-quote-fewer-rounds: a warm tap's reads beside its first round (the kept swap fits, the plan's early and held
+// reads, the pruned pools') were sent before the round's own, so at a paced provider they took its turns first. With
+// dRPC held after its own 429s, a warm Robinhood ANT tap's 17 kept fits held bloXroute (6 calls a second) until 3.1 s
+// and the round's own posts left it from 3.6 to 10.7 s (read only from the Mac, 2026-11-25 23:0xZ). Here, dRPC held
+// for the recorded warm tap: 2,402 ms of the test clock with them sent first, 1,868 behind the round's own
+const WARM_HELD_MS = 2_000;
+test("BS1 card evm-quote-fewer-rounds: with dRPC held, the recorded warm PONS tap's reads beside its first round wait behind the round's own at bloXroute's pace, so it ends inside 2,000 ms of the test clock, quoting what the recording quoted", { timeout: 120_000 }, async () => {
+  // its own instance of the quote module, so no scan, plan or measure of the replay above reaches it (as
+  // test/evm-scan-last-provider.test.ts runs each replay); the pace module is the one both share, reset here
+  const run = "bs1";
+  const q = (await import(`../src/checks/evm/quote.ts?run=${run}`)) as typeof import("../src/checks/evm/quote.ts");
+  await onTestClock(async () => {
+    q.evmSpeedReset();
+    evmPaceReset();
+    q.evmPoolIndexReset();
+    q.evmAgreedReset();
+    q.evmQuoteWarmReset();
+    const ix = F.index;
+    q.evmPoolIndexUse("robinhood", {
+      index: { chainId: ix.chainId, poolManager: ix.poolManager, from: ix.from },
+      coversThrough: ix.coversThrough,
+      pools: ix.pools.map(([currency0, currency1, fee, tickSpacing, hooks]: [string, string, number, number, string]) => ({ key: { currency0, currency1, fee, tickSpacing, hooks } })),
+    });
+    const v = evmPoolVenues().robinhood;
+    const r = replay();
+    const scans = [v.scan!.url, ...(v.scan!.spares ?? []).map((s) => s.url)].map((u) => q.evmJsonRpc(u, r.fetchFn, 16 << 20));
+    let providers = q.evmProviders(q.evmRanked(v.providers!), r.fetchFn);
+    const outcomes: string[] = [];
+    let warmMs = -1;
+    for (const [k, x] of (F.quotes as { phase: Phase; now: number; request: Record<string, unknown>; outcome: string }[]).entries()) {
+      r.at(x.phase, k);
+      if (x.phase === "warm") {
+        // dRPC held as its 429 holds it, and the device's order taken again for the tap, as each tap takes it
+        evmProviderHold("https://robinhood.drpc.org", 120_000);
+        providers = q.evmProviders(q.evmRanked(v.providers!), r.fetchFn);
+        assert.deepEqual(q.evmRanked(v.providers!).slice(0, 2), ["https://robinhood-rpc.publicnode.com", "https://robinhood.rpc.blxrbdn.com"], "with dRPC held, bloXroute is the second seat");
+      }
+      const t0 = performance.now();
+      const { buys, ...rest } = x.request;
+      const req = { ...rest, token: buys, amountIn: BigInt(String(x.request.amountIn)) } as EvmPoolBuyQuoteRequest;
+      outcomes.push(await q.evmPoolBuyQuoteWith(req, providers, x.now, scans).then((a) => `ok ${a.amountOut} ${a.block.hash}`, (e) => String((e as { code?: unknown }).code ?? e)));
+      if (x.phase === "warm") warmMs = performance.now() - t0;
+    }
+    evmPaceReset();
+    assert.deepEqual(r.missed, []);
+    assert.deepEqual(outcomes, F.quotes.map((x: { outcome: string }) => x.outcome), "every quote of the replay ends as the recording's did");
+    assert.ok(warmMs >= 0 && warmMs <= WARM_HELD_MS, `the warm tap with dRPC held took ${Math.round(warmMs)} ms of the test clock, past ${WARM_HELD_MS}`);
+  });
+});
