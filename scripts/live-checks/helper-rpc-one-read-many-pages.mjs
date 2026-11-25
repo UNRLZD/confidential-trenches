@@ -37,11 +37,31 @@ async function post(base, id, account, fetchFn) {
   return { id, account, ms: Math.round(performance.now() - t0), answer: a };
 }
 
+/** A page's connection, opened as the signing page opens it before its first read: the browser's CORS preflight of the
+ *  POST (OPTIONS /v1/rpc/solana with Origin SIGN_HOST), its status, or the error it met. */
+async function preflight(base, fetchFn) {
+  try {
+    const r = await fetchFn(`${base.replace(/\/$/, "")}/v1/rpc/solana`, { method: "OPTIONS", headers: { origin: SIGN, "access-control-request-method": "POST", "access-control-request-headers": "content-type" }, redirect: "manual", signal: AbortSignal.timeout(20_000) });
+    await r.arrayBuffer();
+    return r.status;
+  } catch (e) {
+    return String(e?.cause?.code ?? e?.name ?? "error");
+  }
+}
+
 export async function read(base = BASE, fetchFn = fetch) {
   const at = new Date().toISOString();
   const asks = [...Array.from({ length: PAGES }, (_, i) => [`price-${i}`, PYTH]), ["other-0", OTHER], ["other-1", OTHER]];
+  // card helper-checks-read-over-the-pages-connection: every page holds its connection before the reads go at once, as
+  // a page that asks the SOL price does, so the reads reach the helper together and SHARED_HOLD_MS (400 ms) judges the
+  // helper, never a connect's time (helper live run 45538634464: the reads, each on a new connection from one machine,
+  // came back as 2 results, 2 of 4 shared)
+  const opened = await Promise.all(asks.map(() => preflight(base, fetchFn)));
+  // fetch's pool takes a connection back a turn after its answer is read: until then a read sent opens a new one (the
+  // test's sixth read did, before this turn)
+  await new Promise((ok) => setImmediate(ok));
   const reads = await Promise.all(asks.map(([id, a]) => post(base, id, a, fetchFn)));
-  return { base, at, reads };
+  return { base, at, opened, reads };
 }
 
 /** A read's result as text and its one account, or what is wrong. */
