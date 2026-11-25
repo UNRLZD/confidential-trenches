@@ -4031,8 +4031,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       return { l, lo, gaps };
     });
     const from = Math.min(...plan.map((x) => x.lo));
-    const logs = from > head.n ? [] : await agreedRange(head.with, (lo, hi) => heldFilters(held, lo, hi, V.poolManager), from, head.n);
-    if (logs == null) {
+    const logs = from > head.n ? [] : await agreedRange(head.with, (lo, hi) => heldFilters(held, lo, hi, V.poolManager), from, head.n);    if (logs == null) {
       for (const l of held) done.set(l.token, false);
       return done;
     }
@@ -4065,8 +4064,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const through = new Set<string>();
       let placed = true;
       for (const t of mine) {
-        const usd = usdOf(l, t, eth, px.at);
-        if (usd === null) {
+        const usd = usdOf(l, t, eth, px.at, (head.n - t.block) * bms > STALE_MS);        if (usd === null) {
           placed = false;
           break;
         }
@@ -4102,8 +4100,9 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   }
   /** A trade's USD as decimal text and how it was priced: the chain's USD token's amount, WETH's or native ETH's at the
    *  ETH price before its block ("exact"); any other quote through that token's own pool at the trade's block
-   *  ("through", thirdPrices' `at`); else at the layout's vendor rate ("rate"); null when none is known. */
-  function usdOf(l: Layout, t: PoolTrade, eth: boolean, at: ThirdAt): { usd: string; how: "exact" | "through" | "rate" } | null {
+   *  ("through", thirdPrices' `at`); else at the layout's vendor rate ("rate"); null when none is known. `old`: the
+   *  trade's block is more than STALE_MS behind the head. */
+  function usdOf(l: Layout, t: PoolTrade, eth: boolean, at: ThirdAt, old: boolean): { usd: string; how: "exact" | "through" | "rate" } | null {
     const refAt = (n: number) => (eth ? [...refEvents].reverse().find((r) => r.block <= n) : undefined);
     if (l.quote === V.usd) return { usd: fixed(t.quote, 6), how: "exact" };
     if (l.quote === V.weth || (l.v4 && l.quote === ZERO)) {
@@ -4117,6 +4116,12 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const usd = raw === null ? null : usdThrough(p.end, p.legs, raw, p.end.quote.kind === "eth" ? (refAt(t.block)?.ethUsd ?? null) : null);
       if (usd !== null) return { usd: fixed(usd, 18), how: "through" };
     }
+    // a third token whose route is held, or whose pick is still out past HEDGE_MS, prices a row through that route or not
+    // at all: the round is not placed and is read again, as the chain tape's fold waits (quoteReady). Only a token with no
+    // route held keeps the vendor's rate, its age named (live run 45558216482: Robinhood fBOMB, quoted in r33 whose route
+    // is r33/RAM then RAM/WETH, had 2 of 29 answers at the vendor's rate), and a row STALE_MS behind the head, so a route
+    // whose state never reads cannot hold the coin's tape
+    if (l.quote !== undefined && l.quote !== V.usd && l.quote !== V.weth && l.quote !== ZERO && !routeNone(l.quote) && !old) return null;
     if (l.rate === null) return null;
     const usd = Number(t.quote) * l.rate.usd;
     return Number.isFinite(usd) && usd >= 0 ? { usd: usd.toFixed(6).replace(/\.?0+$/, "") || "0", how: "rate" } : null;
@@ -4130,9 +4135,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   // no vendor call, so a pick is made while the vendor refuses), its depth its quote side as it holds it (quoteSideUsd),
   // one under LIQ_MIN_USD never pricing (a pool of a few dollars can be pushed to any price: ../near/lists.ts); picked
   // once a token and held GT_POOL_FRESH_MS, as a pool name is. A token with no such route keeps the vendor's rate, its
-  // age named. A row's block older than a provider keeps state for is read on the others or, not agreed, priced at that
-  // rate too (Robinhood's, slot0 read 19 Nov 14:1xZ: robinhood.daybreak-rpc.network refused it 600 blocks back,
-  // api.blockvectra.com 1,200, rpc.mainnet.chain.robinhood.com and rpc-robinhood.blockmachine.io 20,000; pocket served all).
+  // age named. A row's block older than a provider keeps state for is read on the others or, not agreed, its round is
+  // read again, never priced at that rate (Robinhood's, slot0 read 19 Nov 14:1xZ: robinhood.daybreak-rpc.network refused
+  // it 600 blocks back, api.blockvectra.com 1,200, rpc.mainnet.chain.robinhood.com and rpc-robinhood.blockmachine.io
+  // 20,000; pocket served all).
   // ---------------------------------------------------------------------------------------------------------------
   /** A third quote token's route: `end`, a pool of a token against the chain's USD token or WETH (the quote token's
    *  own, or, `hop` set, the token the hop pairs it with). */
@@ -4217,6 +4223,11 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   async function priceable(c: Pool): Promise<boolean> {
     return c.quote.kind !== "token" || (await quotePool(c.quote.token)) !== null;
   }
+  /** Whether third quote token `q` holds no route and none is being picked: its picks found none, or were not read (the
+   *  vendor refusing its list, card helper-vendor-tapes-refresh-inside-15s), so a row has no route to be priced through. */
+  function routeNone(q: string): boolean {
+    return quotePools.has(q) && quotePools.get(q)!.route === null && !quotePicking.has(q);
+  }
   function quotePool(q: string): Promise<Route | null> {
     const held = quotePools.get(q);
     if (held !== undefined && now() - held.at < GT_POOL_FRESH_MS) return Promise.resolve(held.route);
@@ -4235,6 +4246,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
         .finally(() => quotePicking.delete(q));
       quotePicking.set(q, p);
     }
+    // a held route past GT_POOL_FRESH_MS is served while its next pick is out: a pick reads the vendor's lists and
+    // several pools, often past HEDGE_MS, and a round that waited for it priced its rows at the vendor's rate meanwhile
+    // (card evm-quote-token-priced-from-our-reads, live run 45558216482)
+    if (held?.route != null) return Promise.resolve(held.route);
     return p;
   }
   /** Each third quote token's USD price as its route moved (card index-evm-swaps-v4-route-tape): one span of blocks
@@ -4562,8 +4577,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   async function vendorPoolsOf(q: string): Promise<unknown> {
     const path = `/networks/${chain}/tokens/${q}/pools?page=1`;
     let j: unknown = deps.keyed == null ? undefined : await deps.keyed.read(path, (x) => Array.isArray((x as { data?: unknown } | null)?.data), true);
-    if (j === undefined && deps.gecko !== undefined && (await gtTake("refresh", `${chain} quote pools`))) j = await gtJson(path);
-    return j === "failed" ? undefined : j;
+    if (j === undefined && deps.gecko !== undefined && (await gtTake("refresh", `${chain} quote pools`))) j = await gtJson(path);    return j === "failed" ? undefined : j;
   }
   /** `q`'s route: its deepest pool against the chain's USD token or WETH (pickEnd); else, none at or above LIQ_MIN_USD,
    *  a hop: the deepest of its vendor-named pools of a venue of ours against another token X (confirmed: hopOf) whose
