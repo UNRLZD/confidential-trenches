@@ -8,10 +8,12 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import http from "node:http";
+import http2 from "node:http2";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { APP, judge, P99_MAX_MS, PAGES, pagePaths, PUSH, read, READS, SOCKETS, upgrade } from "./helper-answers-through-a-burst.mjs";
+import { gzipSync } from "node:zlib";
+import { APP, fetchPage, h2Page, judge, P99_MAX_MS, PAGES, pageOf, pagePaths, PUSH, read, READS, SOCKETS, upgrade } from "./helper-answers-through-a-burst.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "helper-answers-through-a-burst.answers.json"), "utf8"));
@@ -142,4 +144,71 @@ test("card helper-stays-fast-under-the-live-run: a slow read names when it was s
   const run = { ...got, answers: got.answers.map((a) => (a.route === PUSH ? a : a.chain === "base" ? { ...a, at: 1_040, head: 3_000, ms: 3_010, timing: "total;dur=1" } : { ...a, at: 1_000, head: 50, ms: 60 })) };
   const slow = judge(run).lines.filter((l) => l.startsWith("    slow: "));
   assert.equal(slow[0], "    slow: /v1/market/lists?chain=base 200 3010 ms, sent +40 ms, headers at 3000 ms (total;dur=1)", slow.join("\n"));
+});
+
+// card helper-checks-read-over-the-pages-connection: a page is read as a browser reads it, one HTTP/2 connection carrying
+// its first reads at once (red at 3019996c8: each read was a fetch of its own, 84 new connections from one machine, and
+// helper live run 45538634464's reads waited 3.9 s for headers the helper answered in 0 ms)
+test("h2Page: a page's first reads ride one HTTP/2 connection, all sent at once with Origin APP_HOST, each named with when its page connected", async (t) => {
+  const sessions = [];
+  const streams = [];
+  const server = http2.createServer();
+  server.on("session", (s) => sessions.push(s));
+  server.on("stream", (stream, h) => {
+    streams.push({ path: h[":path"], origin: h.origin, session: stream.session });
+    // the chart's read is shed (a 503 Caddy gzips, as it gzips every answer a caller asks to have compressed); the rest
+    // answer 200 with the helper's Server-Timing
+    if (h[":path"].startsWith("/v1/market/candles")) {
+      stream.respond({ ":status": 503, "access-control-allow-origin": APP, "content-encoding": "gzip" });
+      return stream.end(gzipSync(JSON.stringify({ error: { code: "busy" } })));
+    }
+    stream.respond({ ":status": 200, "access-control-allow-origin": APP, "server-timing": "total;dur=0" });
+    stream.end("{}");
+  });
+  await new Promise((ok) => server.listen(0, "127.0.0.1", ok));
+  t.after(() => server.close());
+  const paths = pagePaths("C0in");
+  const got = await h2Page(`http://127.0.0.1:${server.address().port}`, paths);
+  assert.equal(sessions.length, 1, "one connection for the page");
+  assert.equal(streams.length, READS);
+  assert.deepEqual(streams.map((s) => s.path), paths);
+  assert.ok(streams.every((s) => s.origin === APP && s.session === streams[0].session), "every read on the page's one connection, with Origin APP_HOST");
+  assert.deepEqual(got.map((a) => a.route), paths.map((p) => p.split("?")[0]));
+  assert.deepEqual(got.filter((a) => a.chain).map((a) => a.chain), ["solana", "base", "robinhood", "near"]);
+  assert.ok(got.every((a) => a.cors === APP && Number.isFinite(a.ms) && Number.isFinite(a.head) && Number.isFinite(a.at) && Number.isFinite(a.conn)), JSON.stringify(got));
+  const shed = got.find((a) => a.route === "/v1/market/candles");
+  assert.equal(shed.status, 503);
+  assert.equal(shed.body, JSON.stringify({ error: { code: "busy" } }), "a gzipped answer's body is read as text");
+  assert.ok(got.filter((a) => a !== shed).every((a) => a.status === 200 && a.body === undefined && a.timing === "total;dur=0"));
+  assert.equal(judge({ coin: "C0in", answers: got }).lines.some((l) => l.includes("page connected at")), true, "a slow read names when its page connected");
+});
+
+test("h2Page: a refused connection leaves every read of the page unanswered, named by its code", async () => {
+  const s = http.createServer();
+  await new Promise((ok) => s.listen(0, "127.0.0.1", ok));
+  const port = s.address().port;
+  await new Promise((ok) => s.close(ok));
+  const got = await h2Page(`http://127.0.0.1:${port}`, pagePaths("C0in"));
+  assert.equal(got.length, READS);
+  assert.ok(got.every((a) => a.status === null && a.error === "ECONNREFUSED"), JSON.stringify(got));
+  assert.equal(judge({ coin: "C0in", answers: got }).ok, false);
+});
+
+test("pageOf: the deployed helper over HTTPS is read with one HTTP/2 connection a page; a plain http base (the local burst proof's Caddy) or a fetch a test hands in reads one fetch a read", () => {
+  assert.equal(pageOf("https://ct-api.unrealized.trade", fetch), h2Page);
+  assert.notEqual(pageOf("http://127.0.0.1:18090", fetch), h2Page);
+  assert.notEqual(pageOf("https://ct-api.unrealized.trade", async () => new Response("{}")), h2Page);
+  assert.equal(typeof fetchPage(fetch), "function");
+});
+
+// its hang bound is the test's own timeout, which the runner enforces (scripts/ci/no-wall-clock-asserts.mjs)
+test("h2Page: a page whose connection never answers ends at its timeout, every read a TimeoutError, so the run always ends", { timeout: 5_000 }, async (t) => {
+  const net = await import("node:net");
+  const held = [];
+  const silent = net.createServer((sock) => held.push(sock)); // takes the connection and never answers
+  await new Promise((ok) => silent.listen(0, "127.0.0.1", ok));
+  t.after(() => (held.forEach((s) => s.destroy()), silent.close()));
+  const got = await h2Page(`http://127.0.0.1:${silent.address().port}`, pagePaths("C0in"), () => performance.now(), 300);
+  assert.equal(got.length, READS);
+  assert.ok(got.every((a) => a.status === null && a.error === "TimeoutError"), JSON.stringify(got));
 });

@@ -5,6 +5,7 @@
 //   bad:  the deployed helper at 27c4d830a: 4 price reads at once, 2 different results, none shared: FAIL.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import http from "node:http";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -54,6 +55,7 @@ test("planted: a price answer with another caller's id, or not one account, fail
 test("read: the price reads and the off-list reads go out at once, each its own id, on POST /v1/rpc/solana with the signing page's Origin", async () => {
   const seen = [];
   const fetchFn = async (url, init) => {
+    if (init.method === "OPTIONS") return new Response(null, { status: 204 });
     const b = JSON.parse(init.body);
     seen.push({ url, origin: init.headers.origin, id: b.id, account: b.params[0][0] });
     return new Response(JSON.stringify({ jsonrpc: "2.0", id: b.id, result: { context: { slot: 1 }, value: [{}] } }), { status: 200, headers: { "server-timing": 'rpc-cache;desc="hit"' } });
@@ -65,4 +67,45 @@ test("read: the price reads and the off-list reads go out at once, each its own 
   assert.equal(run.reads.filter((r) => r.account === OTHER).length, 2);
   // each read through the shared module, its own id and Server-Timing back beside the answer
   assert.ok(run.reads.every((r) => r.answer.answerId === r.id && r.answer.tries === 1 && r.answer.kept["server-timing"] === 'rpc-cache;desc="hit"'));
+});
+
+// card helper-checks-read-over-the-pages-connection (red at 3019996c8: each read opened its own connection as it was
+// sent, so on helper live run 45538634464 the reads at once reached the helper apart, 2 results, 2 of 4 shared)
+test("read: every page opens its connection with the browser's preflight before the reads go at once, and each read rides a connection its page opened", async (t) => {
+  const order = [];
+  let sockets = 0;
+  const server = http.createServer((req, res) => {
+    const sock = (req.socket.id ??= ++sockets);
+    if (req.method === "OPTIONS") {
+      order.push({ m: "OPTIONS", sock, origin: req.headers.origin, method: req.headers["access-control-request-method"] });
+      res.writeHead(204, { "access-control-allow-origin": req.headers.origin, "access-control-allow-methods": "POST", "access-control-allow-headers": "content-type" });
+      return res.end();
+    }
+    let body = "";
+    req.on("data", (c) => (body += c));
+    req.on("end", () => {
+      const b = JSON.parse(body);
+      order.push({ m: "POST", sock, id: b.id });
+      // the helper's shared read: the first price read goes upstream, the price reads after it are its answer, and a
+      // read of an account off the list is its own
+      const shared = b.params[0][0] === PYTH && order.some((x) => x.m === "POST" && x !== order.at(-1) && x.pyth);
+      order.at(-1).pyth = b.params[0][0] === PYTH;
+      res.writeHead(200, { "content-type": "application/json", "server-timing": shared ? 'rpc-cache;desc="hit"' : "rpc;dur=1" });
+      res.end(JSON.stringify({ jsonrpc: "2.0", id: b.id, result: { context: { slot: 1 }, value: [{}] } }));
+    });
+  });
+  await new Promise((ok) => server.listen(0, "127.0.0.1", ok));
+  t.after(() => server.close());
+  const run = await read(`http://127.0.0.1:${server.address().port}`, fetch);
+  const pre = order.filter((x) => x.m === "OPTIONS");
+  const posts = order.filter((x) => x.m === "POST");
+  assert.equal(pre.length, PAGES + 2, "one preflight a page");
+  assert.ok(pre.every((x) => x.origin === "https://confidential.unrealized.trade" && x.method === "POST"));
+  assert.equal(order.findIndex((x) => x.m === "POST"), PAGES + 2, "every preflight answered before the first read");
+  assert.equal(posts.length, PAGES + 2);
+  const opened = new Set(pre.map((x) => x.sock));
+  assert.ok(posts.every((x) => opened.has(x.sock)), `each read on a connection its page opened: ${JSON.stringify(order)}`);
+  assert.equal(new Set(posts.map((x) => x.sock)).size, PAGES + 2, "each page its own connection");
+  assert.deepEqual(run.opened, Array.from({ length: PAGES + 2 }, () => 204));
+  assert.equal(judge(run).verdict, "PASS", judge(run).lines.join("\n"));
 });
