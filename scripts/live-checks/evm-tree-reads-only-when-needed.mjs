@@ -13,9 +13,12 @@
 // the browser's temporary profile, deleted on close. The answer keeps hosts, methods, counts and statuses only;
 // a refused answer is named by its method and, for an eth_call, the contract it asks and its 4-byte selector (callName),
 // never the call's arguments. A not-yet answer (the kit's evmNotYetWords: a provider a block behind, whatever its HTTP
-// status) is no refusal when the same call to the same provider is answered later in the walk (askAt asked it again): a
-// lag line; one never answered is BAD (card evm-lag-answer-read-again, release 187's sign run 44912189713: robinhood.drpc.org
-// HTTP 400 code 27 "Unknown state" to ArbGasInfo's getL1BaseFeeEstimate).
+// status) is no refusal when the same call is answered later in the walk (askAt asked it again): a lag line; one never
+// answered is BAD (card evm-lag-answer-read-again, release 187's sign run 44912189713: robinhood.drpc.org HTTP 400 code 27
+// "Unknown state" to ArbGasInfo's getL1BaseFeeEstimate). Asked again is the same call sent to any provider of its chain
+// after the not-yet answer came back (card evm-lag-answered-on-another-seat, release 204's sign run 45518167089: the
+// wallet's pair walked a seat onto rpc-robinhood.globalstake.io, its not-yet tree views were read again 2 s on at a new
+// anchor on the pair's seats, by then another member); the round's other seat, sent before it came back, never counts.
 //   --sign-dir <dir>: SIGN_HOST's files answered from a local build (packages/signpage/scripts/build-app.mjs --out),
 //   every other request live: how the good answer was recorded before the deploy. Its headers are not the host's.
 // After: sign
@@ -73,8 +76,9 @@ function logKind(filter) {
   return t.slice(1).some((x) => x !== null && x !== undefined) ? "scan" : "index";
 }
 
-/** The answer from a request log: each entry { url, method, status, failed, load, calls: [{ method, params }] }, the
- *  calls a post's JSON-RPC body asked and the page load it was sent in (1 the sign-up's). Only posts that ask an eth_
+/** The answer from a request log: each entry { url, method, status, failed, load, calls: [{ method, params }], seq?,
+ *  end? }, the calls a post's JSON-RPC body asked, the page load it was sent in (1 the sign-up's) and its order (`seq`
+ *  when it was sent and `end` when its answer came back, on one counter: read() sets both). Only posts that ask an eth_
  *  method count; `loads` is the walk's page loads; `byLoad` each chain's eth_getLogs a load, from the first. */
 export function summarize(requests, loads, extra = {}) {
   const posts = {};
@@ -82,8 +86,11 @@ export function summarize(requests, loads, extra = {}) {
   const logs = { index: 0, scan: 0, other: 0 };
   const refused = {};
   const byLoad = {};
-  // card evm-lag-answer-read-again: each provider's call answered not yet, and how many of them it answered later
+  // card evm-lag-answer-read-again: each provider's call answered not yet, and how many of them were answered later
   const lag = {};
+  // the not-yet answers still waiting, by chain and call (card evm-lag-answered-on-another-seat): an ordered one is
+  // answered by the call sent to any provider of its chain after it came back; one with no order (an old recording's
+  // entry), or of no named chain, only by its own provider later in the log
   const waiting = {};
   for (const r of requests) {
     const calls = (r.calls ?? []).filter((c) => typeof c?.method === "string" && c.method.startsWith("eth_"));
@@ -107,15 +114,20 @@ export function summarize(requests, loads, extra = {}) {
     }
     for (const bad of refusalsOf(r)) refused[`${host} ${bad}`] = (refused[`${host} ${bad}`] ?? 0) + 1;
     const answered = !r.failed && Number.isInteger(r.status) && r.status >= 200 && r.status < 300;
+    const ordered = Number.isInteger(r.seq) && Number.isInteger(r.end);
+    const chain = chainOf(r.url);
     for (const [c, e] of callErrors(r)) {
       const k = `${host} ${callName(c)}`;
+      const w = chain === "other" ? k : `${chain} ${callName(c)}`;
       if (e?.lag && (answered || lagOnly(r))) {
         lag[k] ??= { asked: 0, answered: 0 };
         lag[k].asked++;
-        waiting[k] = (waiting[k] ?? 0) + 1;
-      } else if (e === undefined && answered && (waiting[k] ?? 0) > 0) {
-        waiting[k]--;
-        lag[k].answered++;
+        (waiting[w] ??= []).push({ k, host, end: ordered ? r.end : null });
+      } else if (e === undefined && answered) {
+        // the oldest not-yet answer this post comes after
+        const q = waiting[w] ?? [];
+        const i = q.findIndex((x) => (x.end !== null && ordered ? r.seq > x.end : x.host === host));
+        if (i >= 0) lag[q.splice(i, 1)[0].k].answered++;
       }
     }
   }
@@ -273,10 +285,13 @@ export async function read({ signDir = null } = {}) {
     let loads = 1;
     if (signDir) await routeSign(ctx, path.resolve(signDir));
     const open = new Map();
+    // each post's order, sent and back, on one counter (summarize: a not-yet answer is asked again by a post sent after it)
+    let clock = 0;
     ctx.on("request", (req) => {
       if (req.method() !== "POST") return;
       const r = { url: req.url(), method: "POST", load: loads, calls: shapeCalls(req.postData()) };
       if (r.calls.length === 0) return;
+      r.seq = ++clock;
       open.set(req, r);
       requests.push(r);
     });
@@ -284,6 +299,7 @@ export async function read({ signDir = null } = {}) {
       const r = open.get(req);
       if (!r) return;
       open.delete(req);
+      r.end = ++clock;
       if (failed) r.failed = req.failure()?.errorText ?? "failed";
       const res = await req.response().catch(() => null);
       if (res) {
