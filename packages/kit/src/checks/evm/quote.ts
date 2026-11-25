@@ -2783,7 +2783,11 @@ async function scanPools(
     // Those within maxLag are counted read against the scan head, so they go with the read after the answer, and P2-1
     // below counts from the first of them against the agreed block (independent review of 7ed7d86f9, H1: a band block 80
     // blocks before an agreed block 40 past the scan head was never read again, and the coin quoted against a seeded
-    // pool, RVW3; RVW4 on a tail with kept spans, as on main)
+    // pool, RVW3; RVW4 on a tail with kept spans, as on main). The read after the answer takes them through `kept`: since
+    // the band left `kept` (card evm-scan-dead-band-term, ef2960c5b) it holds every band block the scan's spans do not,
+    // and one they hold (this quote's own read within the margin, or a span an earlier commit kept) is read already. So
+    // `lagged` added to `later` again changed no read, and is gone (card nightly-sweep-runs-whole: the sweep's RVW5 and
+    // RVW3 mutants, that term dropped, passed every test at 7996166b9, and no test reached a scan where it differed)
     const lagged: Spans = e.tail ? band.filter(([, y]) => y > head - lag).map(([x, y]): [number, number] => [Math.max(x, head - lag + 1), y]) : [];
     const unread = e.tail ? gapsOf(lagged.reduce((sp, [x, y]) => withSpan(sp, x, y), e.spans), floor, head) : e.gaps;
     const laggedFrom = lagged.length > 0 ? Math.min(...lagged.map(([x]) => x)) : undefined;
@@ -2795,7 +2799,7 @@ async function scanPools(
     // sweep's TAIL2 mutant, that band emptied, passed every test at 2232c2c2c) and is gone
     const kept = e.tail ? gapsOf(e.spans, floor, head) : e.gaps;
     if (held && e.gaps.length > 0 && unread.every(([a]) => a > head - lag)) {
-      e.later = lagged.reduce((sp, [x, y]) => withSpan(sp, x, y), kept);
+      e.later = kept;
       e.gaps = [];
       // the first block of it no provider answered, or the band's counted read within maxLag (P2-1 below counts those
       // alone)
@@ -2808,7 +2812,7 @@ async function scanPools(
       // the band's past the margin go with the read after it (a Robinhood quote 31 s after the last read the margin's
       // 7,119 blocks with the 547 new ones before its answer, where main read the 547)
       const now = unread.filter(([a]) => a <= head - lag);
-      e.later = lagged.reduce((sp, [x, y]) => withSpan(sp, x, y), gapsOf(now.reduce((sp, [x, y]) => withSpan(sp, x, y), gapsOf(kept, floor, head)), floor, head));
+      e.later = gapsOf(now.reduce((sp, [x, y]) => withSpan(sp, x, y), gapsOf(kept, floor, head)), floor, head);
       e.gaps = now;
       e.laterFrom = Math.min(unread.find(([a]) => a > head - lag)?.[0] ?? head + 1, laggedFrom ?? head + 1);
     }

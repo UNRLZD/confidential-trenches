@@ -507,11 +507,10 @@ export const MUTANTS = [
   // the shared answer is the taker's whole, a stand-in's included, and a spare's stays a spare's
   [QUOTE, "g.a >= j.a && g.b <= j.b && j.part.every((e) => g.part.includes(e))", "g.part === j.part && g.a >= j.a && g.b <= j.b", R, "TAIL11g "],
   [QUOTE, "void got.push(...gs.map((g) => ({ ...g, part: j.part })))", "void got.push(...gs.map((g) => ({ ...g, spare: false, part: j.part })))", R, "TAIL11g "],
-  // the band counted read within maxLag of the scan head goes with the read after the answer, and P2-1 counts from its
-  // first block against the agreed block (independent review of 7ed7d86f9, H1); a taker waits EVM_SCAN_HOLD_MS (M1)
-  [QUOTE, "      e.later = lagged.reduce((sp, [x, y]) => withSpan(sp, x, y), kept);", "      e.later = kept;", R, "RVW5 "],
+  // P2-1 counts from the first block of the band counted read within maxLag of the scan head against the agreed block
+  // (independent review of 7ed7d86f9, H1); a taker waits EVM_SCAN_HOLD_MS (M1). The read after the answer takes those
+  // blocks through `kept` (card nightly-sweep-runs-whole: the term that added them again changed no read)
   [QUOTE, "      const from = Math.min(unread[0]?.[0] ?? Infinity, laggedFrom ?? Infinity);", "      const from = unread[0]?.[0] ?? Infinity;", R, "RVW5 "],
-  [QUOTE, "      e.later = lagged.reduce((sp, [x, y]) => withSpan(sp, x, y), gapsOf(now.reduce(", "      e.later = ([] as Spans).reduce((sp, [x, y]) => withSpan(sp, x, y), gapsOf(now.reduce(", R, "RVW3 "],
   [QUOTE, "      e.laterFrom = Math.min(unread.find(([a]) => a > head - lag)?.[0] ?? head + 1, laggedFrom ?? head + 1);", "      e.laterFrom = unread.find(([a]) => a > head - lag)?.[0] ?? head + 1;", R, "RVW6 "],
   [QUOTE, "      return Promise.race([led, held]).then((gs) => {", "      return led.then((gs) => {", R, "TAIL11j "],
   [QUOTE, "reach(fill === true ? e.ix : e.spans)", "reach(e.spans)", R, "TAILF1 "],
@@ -1384,7 +1383,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       dirs.push(dir);
       for (const p of ["src", "test", "package.json"]) cpSync(join(KIT, p), join(dir, p), { recursive: true });
     }
-    const src = new Map([QUOTE, BUY, BUYU, SELLQ, SELLU, QD, PF, SR].map((f) => [f, readFileSync(join(dirs[0], f), "utf8")]));
+    // every file a mutant plants into, read from the mutants themselves: a list kept by hand missed pace.ts, and its
+    // mutant threw in the worker and ended the part with no verdict for the rest (sweep 45612446421, part 2/2)
+    const src = new Map([...new Set(MUTANTS.map((m) => m[0]))].map((f) => [f, readFileSync(join(dirs[0], f), "utf8")]));
     const byFile = new Map();
     for (const m of part.at.map((i) => MUTANTS[i])) byFile.set(m[3], [...new Set([...(byFile.get(m[3]) ?? []), m[4]])]);
     const tb = performance.now();

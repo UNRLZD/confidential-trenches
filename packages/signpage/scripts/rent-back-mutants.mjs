@@ -230,7 +230,9 @@ export const M = [
   ["c32 the trade lock let go before the sale's stamp is in", SELL, T, "}).finally(() => stamped(laters, ran?.storeMs ?? TRADE_STORE_MS));", "});"],
   ["c33 a late older stamp put over a newer one", SPACING, T, "if (was === undefined || v.at > was.at || !trusted(was, v.at)) s.put(", "s.put("],
   ["c34 a clock set back closes the gap", SPACING, T, "s.at !== own && trusted(s, now) && now < s.at + s.gap", "s.at !== own && now < s.at + s.gap && s.at + s.gap <= now + POOL_RENT_BACK_SPACE_MAX_MS"],
-  ["c35 the device's spacing with no bound", SPACING, T, "return within(go(), ms, \"the device's spacing\").catch(", "return go().catch("],
+  // killed by its own test's assertion (card nightly-sweep-runs-whole): the file's other tests see the bound only as a
+  // run that ends, and hung into no verdict
+  ["c35 the device's spacing with no bound", SPACING, T, "return within(go(), ms, \"the device's spacing\").catch(", "return go().catch(", "card nightly-sweep-runs-whole: the device's spacing on an open"],
 ];
 // every mutant's name, in the order the parts take them
 export const NAMES = M.map(([name]) => name);
