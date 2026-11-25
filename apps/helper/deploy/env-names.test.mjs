@@ -14,7 +14,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { test } from "node:test";
+import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { checkVendorPlans, createProxy } from "../src/proxy/proxy.ts";
 import { createRpc, keyedPaces } from "../src/rpc/rpc.ts";
@@ -56,6 +56,16 @@ export function envNamesIn(text) {
 
 /** The computed process.env[...] reads in a source text: names the text scan cannot see. */
 export const computedEnvReads = (text) => [...text.matchAll(/process\.env\[(?!\s*["'][A-Z][A-Z0-9_]*["']\s*\])/g)].length;
+
+// the readers run here start their own reads (evmSwapsFromEnv's quote seeds read Base's head on the default
+// providers, BASE_RPC_URL unset): each is refused as an unplugged network answers, never sent, for this file's whole
+// run, the reads outliving the test that started them (card tests-make-no-late-reads: they reached mainnet.base.org
+// and base-pokt.nodies.app). Only the names read count here
+const realFetch = globalThis.fetch;
+globalThis.fetch = async () => {
+  throw new TypeError("fetch failed");
+};
+after(() => void (globalThis.fetch = realFetch));
 
 /** The functions server.ts hands process.env to, each run here with a recording env. */
 // withdrawSenderFromEnv takes the server's fee quoter (fee.ts opens its store once); its own names are read with a stub quoter

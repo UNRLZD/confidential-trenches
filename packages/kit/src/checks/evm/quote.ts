@@ -1587,6 +1587,9 @@ export type EvmHeadWatch = {
   /** A block this watch confirmed (one of its newest EVM_FOLLOW_BLOCKS), by its hash, while at most
    *  EVM_FOLLOW_MAX_AGE_MS old on the device's clock (a request's `at`); else null. */
   held?(hash: string, nowMs: number): Block | null;
+  /** Ends the background refresh: no tick after this, and the read in flight has ended once it settles (for the tests,
+   *  evmPinnedQuoteStop). */
+  stop?(): Promise<void>;
 };
 /** The oldest block a follow (a request's `at`) reads at: half of EVM_QUOTE_MAX_AGE_MS, so a buy built from its quote
  *  has as long again before the 30 s rule (trade/evm/buy.ts) as a quote at a new head would have left after a slow
@@ -1678,6 +1681,12 @@ export function evmHeadWatch(order: readonly EvmRpc[] | (() => readonly EvmRpc[]
           hold(a.block, m, t);
         },
       };
+    },
+    async stop() {
+      until = 0;
+      if (timer !== null) clearTimeout(timer);
+      timer = null;
+      await refreshing;
     },
   };
 }
@@ -3702,6 +3711,19 @@ const scanRpcOf = (u: string, later = false): EvmRpc => {
   return r;
 };
 const scansOf = (s: EvmPoolVenue["scan"], later = false): EvmRpc[] | undefined => (s === undefined ? undefined : [s.url, ...(s.spares ?? []).map((x) => x.url)].map((u) => scanRpcOf(u, later)));
+/** For the tests (card tests-make-no-late-reads): ends what the pinned quote (evmPoolBuyQuote) leaves running after its
+ *  answer, so none of its reads outlives the test that asked it, reaching a real provider once the test's fetch is
+ *  restored or another test's planted answers: each chain's head watch is stopped once its read in flight ends, and every
+ *  read of a pinned scan provider's tail ends. Not in the kit's index. */
+export const evmPinnedQuoteStop = async (): Promise<void> => {
+  const watches = [...WATCHES.values()];
+  WATCHES.clear();
+  await Promise.all(watches.map((w) => w.stop?.()));
+  for (const src of SCAN_SOURCE.values()) {
+    const ps = RUNNING_FILLS.get(src);
+    while (ps !== undefined && ps.size > 0) await Promise.all([...ps]);
+  }
+};
 
 /** evmPoolBuyQuote on the providers `rpcs`, with the device's clock at `nowMs`: what the kit's index exports runs this
  *  with the pinned providers and Date.now(); the tests run it on recorded and planted answers. Not in the index. */

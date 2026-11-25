@@ -10,6 +10,15 @@ import { entropyToWords, wordsToSeed64 } from "@blindfill/wallet/derive";
 import { openWalletStore, type WalletStore } from "@blindfill/wallet/store";
 import type { EvmPoolPin, EvmRpc } from "../../wallet/src/pool/evm.ts";
 
+// the page's own reads on its default lists (Solana devnet and the helper's routes: its start check's, its pass's, its
+// queue's clock), which no test here plants, are refused as an unplugged network answers, never sent (card
+// tests-make-no-late-reads: they reached api.devnet.solana.com and the helper, and every test passes without them)
+const realFetch = globalThis.fetch;
+globalThis.fetch = (async () => {
+  throw new TypeError("fetch failed");
+}) as typeof fetch;
+after(() => void (globalThis.fetch = realFetch));
+
 // the network is set before any pool module loads (the wallet's network.ts reads it once, and evm.ts imports it): a
 // static import of one would load it first, as mainnet, so they are imported after the set, and the file checks it
 (globalThis as { __SIGN_NETWORK__?: string }).__SIGN_NETWORK__ = "testnet";

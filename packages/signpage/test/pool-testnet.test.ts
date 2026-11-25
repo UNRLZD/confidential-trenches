@@ -24,6 +24,15 @@ import type { SolanaPoolCache } from "../../wallet/src/pool/solana-restore.ts";
 import { SOLANA_PROVIDER_A, SOLANA_PUBLIC_SEAT } from "../src/trade.ts";
 import { signalsProver } from "../../wallet/test/withdraw-fixture.ts";
 
+// the page's own reads on its default lists (Solana devnet and the helper's routes: its start check's, its pass's, its
+// queue's clock), which no test here plants, are refused as an unplugged network answers, never sent (card
+// tests-make-no-late-reads: they reached api.devnet.solana.com and the helper, and every test passes without them)
+const realFetch = globalThis.fetch;
+globalThis.fetch = (async () => {
+  throw new TypeError("fetch failed");
+}) as typeof fetch;
+after(() => void (globalThis.fetch = realFetch));
+
 (globalThis as { __SIGN_NETWORK__?: string }).__SIGN_NETWORK__ = "testnet";
 const { SOL_POOLS, SOL_POOL_TABLES, solanaPoolOf, SOL_LADDER, SOL_EPOCH_MS, SOL_LIFE_MS, SOL_SEND_MARGIN_MS } = await import("../../wallet/src/pool/solana.ts");
 const { POOL_TESTNET } = await import("../../wallet/src/pool/network.ts");

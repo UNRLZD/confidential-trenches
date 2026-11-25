@@ -39,6 +39,17 @@ const CTX = { id: "dep", sha: "00", progress: () => {} };
 
 const closers: (() => void)[] = [];
 after(() => closers.forEach((f) => f()));
+// the page's own pool reads on its default lists (the pass's and the deposit's lists are two only when a test names no
+// RPCs, as twoSyncs does) answer here, a planted head at the device's clock, never on the network: the rounds below
+// read Base Sepolia's providers before (card tests-make-no-late-reads)
+const realFetch = globalThis.fetch;
+globalThis.fetch = (async (_u: unknown, init?: RequestInit) => {
+  const asked = JSON.parse(String(init?.body)) as { id: number; method: string } | { id: number; method: string }[];
+  const head = { number: "0x10", hash: `0x${"ab".repeat(32)}`, parentHash: `0x${"00".repeat(32)}`, timestamp: `0x${Math.floor(Date.now() / 1000).toString(16)}`, baseFeePerGas: "0x1" };
+  const one = (c: { id: number; method: string }) => ({ jsonrpc: "2.0", id: c.id, ...(c.method === "eth_getBlockByNumber" ? { result: head } : { error: { code: -32601, message: `${c.method} is not planted` } }) });
+  return new Response(JSON.stringify(Array.isArray(asked) ? asked.map(one) : one(asked)));
+}) as typeof fetch;
+after(() => void (globalThis.fetch = realFetch));
 async function wallet(): Promise<{ w: WalletStore; ns: NoteStore }> {
   const w = await openWalletStore({ indexedDB: new IDBFactory() });
   closers.push(() => w.close());
