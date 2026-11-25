@@ -2787,12 +2787,12 @@ async function scanPools(
     const unread = e.tail ? gapsOf(lagged.reduce((sp, [x, y]) => withSpan(sp, x, y), e.spans), floor, head) : e.gaps;
     const laggedFrom = lagged.length > 0 ? Math.min(...lagged.map(([x]) => x)) : undefined;
     const held = (e.tail ? each.every((x) => x.pools.length > 0) : e.pools.length > 0) || kind === "markets";
-    // read to be kept on the tail: the blocks no provider answered, and those of the band now past the index's margin
-    // below the head; the band's others give an answer kept for no quote, so they are read before an answer that needs
-    // them and never again after one (a burst of five Robinhood quotes asked 28 to 63 getLogs, 10 to 23 of them 429,
-    // where main asked 10)
-    const top = head - tailLag;
-    const kept = e.tail ? gapsOf(band.filter(([, y]) => y > top).map(([x, y]): [number, number] => [Math.max(x, top + 1), y]).reduce((sp, [x, y]) => withSpan(sp, x, y), e.spans), floor, head) : e.gaps;
+    // read to be kept on the tail: the blocks no provider answered. A band block is read once either way, never again
+    // after an answer (a burst of five Robinhood quotes asked 28 to 63 getLogs, 10 to 23 of them 429, where main asked
+    // 10): one within maxLag of the head is `lagged`, read right after the answer below, and one past it the scan's
+    // spans do not hold is in `now`, read before it. So the band counted as read here too changed no read (the nightly
+    // sweep's TAIL2 mutant, that band emptied, passed every test at 2232c2c2c) and is gone
+    const kept = e.tail ? gapsOf(e.spans, floor, head) : e.gaps;
     if (held && e.gaps.length > 0 && unread.every(([a]) => a > head - lag)) {
       e.later = lagged.reduce((sp, [x, y]) => withSpan(sp, x, y), kept);
       e.gaps = [];

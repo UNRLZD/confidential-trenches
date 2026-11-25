@@ -478,7 +478,8 @@ export const MUTANTS = [
   // answers drops the tail for the quote (M3), each tail request a quarter of its budget, no request after it, and the
   // quote scans by currency; the budget of no measured pools is the depth (L2)
   [QUOTE, "        const top = head - tailLag;", "        const top = head;", R, "TAIL7 "],
-  [QUOTE, "band.filter(([, y]) => y > top).map(([x, y]): [number, number] => [Math.max(x, top + 1), y])", "([] as Spans)", R, "TAIL2 "],
+  // TAIL2 (the band counted as read in what the read after the answer keeps) is gone with that term, which changed no
+  // read: `lagged` and `now` hold every band block it took out (the nightly sweep at 2232c2c2c)
   // card evm-tap-reads-no-block-the-index-holds: the band's blocks at or below the scan's start are read, never asked again
   [QUOTE, "  const band: Spans = (tail0?.band ?? []).filter(([, y]) => y > start).map(([x, y]): [number, number] => [Math.max(x, start + 1), y]);", "  const band: Spans = tail0?.band ?? [];", R, "TAIL11k "],
   [QUOTE, "    } else if (e.tail && held && unread.length > 0) {", "    } else if (false) {", R, "W2b "],
