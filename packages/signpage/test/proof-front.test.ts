@@ -5,7 +5,7 @@
 // a tab without it takes it and waits for its queue's pass; a buy under way keeps its tab's queues to its take.
 //   node --test test/proof-front.test.ts      (from packages/signpage)
 import assert from "node:assert/strict";
-import { afterEach, mock, test } from "node:test";
+import { after, afterEach, mock, test } from "node:test";
 import { untilAborted } from "../../kit/src/abort.ts";
 import { enableTimers, resetTimers } from "./mock-timers.ts";
 import { IDBFactory } from "fake-indexeddb";
@@ -19,6 +19,15 @@ import { openNoteStore, type NoteStore } from "../../wallet/src/notes/store.ts";
 import type { Pool } from "../../wallet/src/pool/pool.ts";
 import { signalsProver } from "../../wallet/test/withdraw-fixture.ts";
 import { PROOF_FRONT_LOCK, PROOF_QUEUES_LOCK, proofFront } from "../src/proof-front.ts";
+
+// the page's own reads on its default lists (Solana devnet and the helper's routes: its start check's, its pass's, its
+// queue's clock), which no test here plants, are refused as an unplugged network answers, never sent (card
+// tests-make-no-late-reads: they reached api.devnet.solana.com and the helper, and every test passes without them)
+const realFetch = globalThis.fetch;
+globalThis.fetch = (async () => {
+  throw new TypeError("fetch failed");
+}) as typeof fetch;
+after(() => void (globalThis.fetch = realFetch));
 
 (globalThis as { __SIGN_NETWORK__?: string }).__SIGN_NETWORK__ = "testnet";
 const { testnetPool } = await import("../src/pool-testnet.ts");

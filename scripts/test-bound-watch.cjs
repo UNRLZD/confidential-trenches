@@ -18,6 +18,10 @@ if (process.env.NODE_COMPILE_CACHE === undefined && process.env.NODE_DISABLE_COM
   require("node:module").enableCompileCache?.(process.env.NODE_COMPILE_CACHE);
 }
 
+// Card tests-make-no-late-reads: a connection to a host off this machine is refused and fails the file
+// (scripts/test-no-network.cjs)
+require("./test-no-network.cjs");
+
 // TEST_BOUND_FILE_MS and TEST_BOUND_RUN_MS may only lower a bound, so the planted hangs of scripts/ci/test-bound.test.mjs
 // end in seconds; a value that is not a lower whole number of ms is ignored
 const lower = (name, ms) => {

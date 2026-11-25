@@ -290,6 +290,8 @@ test("N2 a caller's fetch makes no device quote: the public entry reads only the
   } catch (e) {
     q = e;
   } finally {
+    // the chain's head watch this quote made reads on in the background: stopped before the real fetch is back
+    await quoteMod.evmPinnedQuoteStop();
     net.mock.restore();
   }
   assert.equal(forgedCalls, 0, "the caller's fetch is never called");
@@ -5384,8 +5386,34 @@ test("V9 the pinned quote asks the kit's providers in their measured order: the 
     assert.equal((v as { accepted: boolean }).accepted, true, big(v));
     assert.equal(reads, 0, "the held provider is not asked while the others agree");
   } finally {
+    // its head watch and its tail's reads after the answer, ended before the real fetch is back (card
+    // tests-make-no-late-reads: they read Base's pinned providers on the network for the rest of the file)
+    await quoteMod.evmPinnedQuoteStop();
     net.mock.restore();
     evmPoolIndexReset();
+    evmPaceReset();
+  }
+}));
+
+test("V9b no read of the pinned quote outlives its stop: the chain's head watch it made asks nothing more (card tests-make-no-late-reads)", () => onTestClock(async () => {
+  const asked: string[] = [];
+  const net = mock.method(globalThis, "fetch", async (u: string) => {
+    asked.push(hostOf(u));
+    throw new TypeError("fetch failed");
+  });
+  try {
+    await verdict(evmPoolBuyQuote(warmReq(freshToken())));
+    assert.ok(asked.length > 0, "the quote asked the pinned providers");
+    // a tap's read of the held head keeps the watch reading in the background, as the sign page's does
+    assert.equal(quoteMod.evmHeldHead("base"), null);
+    await quoteMod.evmPinnedQuoteStop();
+    const n = asked.length;
+    // past the watch's idle bound (EVM_HEAD_IDLE_MS, 60 s) several times over: a watch left running asks its providers
+    // every EVM_HEAD_EVERY_MS
+    await pause(300_000);
+    assert.deepEqual(asked.slice(n), [], "no read after the stop");
+  } finally {
+    net.mock.restore();
     evmPaceReset();
   }
 }));
