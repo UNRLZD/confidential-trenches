@@ -1124,7 +1124,10 @@ test("planted (card signpage-deploy-build-exits-when-done): a run that prints an
   assert.equal(r.signal, "SIGKILL");
   assert.equal(r.stdout, "done\n");
   assert.match(r.held, /^still running 500 ms after its first output, stopped: /);
-  if (process.platform === "linux") assert.match(r.held, /threads: \d+ node \S+ \S+ syscall .*; files: .*\b1:pipe:/, r.held);
+  // each thread by its own name (node's main one is MainThread), and the output as libuv hands a child it: a socket pair
+  // on Linux, a pipe where the parent passed one (merge queue run 45710984415: "5263 MainThread S ep_poll syscall 281",
+  // "1:socket:[24944]")
+  if (process.platform === "linux") assert.match(r.held, /threads: \d+ \S+ \S+ \S+ syscall \d+;.* files: .*\b1:(pipe|socket):\[\d+\]/, r.held);
   else assert.match(r.held, /stopped: no \/proc\/\d+ on /, r.held);
 });
 
