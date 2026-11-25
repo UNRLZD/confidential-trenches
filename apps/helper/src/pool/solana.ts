@@ -41,8 +41,8 @@
 //                       not verify over the message, checked here before anything leaves, so nothing is sent;
 //   blockhash_not_found the provider does not know the transaction's own blockhash (simulated without replacing it);
 //   simulation_failed   the simulation of W's transaction (no signature check, its own blockhash) failed;
-//   upstream (503)      the simulation or the blockhash read could not be made, or this epoch's rent could not be
-//                       read; a provider that throttled one of those reads (its HTTP 429, a rate-limit error) is
+//   upstream (503)      the simulation or the blockhash read could not be made (on B either, when A gave no answer:
+//                       aThenB), or this epoch's rent could not be read; a provider that throttled one of those reads (its HTTP 429, a rate-limit error) is
 //                       rate_limited (429) instead, never 503 (a block engine's answer is never one: the bundle is the
 //                       extra, the plain copy carries the send);
 //   in_flight (429)     mainnet tag 3: this client already holds POOL_JITO_IN_FLIGHT_MAX requests open waiting for a
@@ -509,7 +509,17 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
   // 429 rate_limited while B had room): a read only A makes (the simulation, the blockhash, its height and validity) that
   // A throttles (limits.ts throttleOf) is asked of B once, so a release is a 429 only while both providers throttle. The
   // reads made on both (the rent, the fills, a landed failure) and the sends keep A and B as they are.
-  const aThenB: SolanaRpc = (method, params, signal) => a(method, params, signal).catch((e: unknown) => (throttleOf(e) > 0 ? b(method, params, signal) : Promise.reject(e)));
+  // card helper-pool-reads-past-a-stalled-provider (helper live run 45526898423, 25 Nov 01:36-01:37Z: twelve simulations
+  // answered 503 upstream at the kit client's 5 s timeout on A, B never asked): such a read A gave no answer to (no
+  // answer in time, no connection, HTTP 5xx, as send.ts solanaJsonRpc throws them without a retry) is asked of B once
+  // too, so a release is a 503 only while both providers fail. An answer A gave (a JSON-RPC error, a bad shape) stays
+  // A's, and a caller's abort is never asked again.
+  const unanswered = (e: unknown): boolean => {
+    const name = (e as Error | undefined)?.name;
+    return name === "TimeoutError" || name === "AbortError" || e instanceof TypeError || /^HTTP 5\d\d$/.test(String((e as Error | undefined)?.message ?? ""));
+  };
+  const aThenB: SolanaRpc = (method, params, signal) =>
+    a(method, params, signal).catch((e: unknown) => (!signal?.aborted && (throttleOf(e) > 0 || unanswered(e)) ? b(method, params, signal) : Promise.reject(e)));
   // M356 (6), N3: the fee and the priority budget from the kit's one definition, for the rent both providers read once
   // an epoch, as the device does: a Rent sysvar change moves the fee at the next epoch with no restart. Each epoch's
   // read is kept for a proof's life (a proof made in an earlier epoch carries that epoch's fee); a failed read is
