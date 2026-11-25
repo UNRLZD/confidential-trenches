@@ -7468,7 +7468,8 @@ test("SP6 a first scan provider whose head read takes 2.5 s: the head is the sec
   const slowHead: EvmRpc = async (calls, signal) => {
     if (calls.some((c) => c.method === "eth_blockNumber")) {
       const t0 = performance.now();
-      signal?.addEventListener("abort", () => (headCut ??= performance.now() - t0));
+      if (signal?.aborted) headCut ??= 0;
+      else signal?.addEventListener("abort", () => (headCut ??= performance.now() - t0));
       await pause(2_500);
     }
     for (const f of getLogsOf(calls)) firstLogs.push([Number(f.fromBlock), Number(f.toBlock)]);
