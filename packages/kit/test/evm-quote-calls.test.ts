@@ -16,7 +16,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { gunzipSync } from "node:zlib";
-import { evmJsonRpc, evmPoolBuyQuoteWith, evmPoolIndexReset, evmPoolIndexUse, evmProviders, evmRanked, evmSpeedReset, type EvmPoolBuyQuoteRequest } from "../src/checks/evm/quote.ts";
+import { evmGasPacking, evmJsonRpc, evmPoolBuyQuoteWith, evmPoolIndexReset, evmPoolIndexUse, evmProviders, evmRanked, evmSpeedReset, type EvmPoolBuyQuoteRequest } from "../src/checks/evm/quote.ts";
 import { evmPaceReset } from "../src/checks/evm/pace.ts";
 import { evmPoolVenues } from "../src/trade/evm/buy-unpinned.ts";
 import { callKey, withEventOnly } from "./evm-quote-calls-record.ts";
@@ -64,6 +64,9 @@ const replay = () => {
 };
 
 test("the recorded USDG quote's reads finish inside the bound through each provider's own in-flight limit and pace, and pick the same quote", () => onTestClock(async () => {
+  // recorded before reads through replaced hooks with their gas kept shared calls (card evm-hook-reads-share-a-call),
+  // matched call for call
+  evmGasPacking(false);
   evmSpeedReset();
   evmPaceReset();
   evmPoolIndexReset();

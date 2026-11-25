@@ -1542,6 +1542,62 @@ test("S1c each override replaces one hook, only in reads of that hook's pools, a
   for (const o of seen) for (const hs of o.hooks) for (const r of o.replaces) assert.ok(hs.includes(r), `a read of hooks ${hs} under an override of ${r}`);
 });
 
+// card evm-hook-reads-share-a-call: read from the Mac 25 Nov 18:0xZ, QQQ's warm tap on Robinhood sent 44 eth_call a side
+// in 24 overrides, 19 of them one hook's at 2 to 4 reads; with the reads that have their gas kept sharing calls, warm
+// taps alternating with main's calls at nearby blocks sent 35, 31 and 35 against 35, 41 and 41, each pair quoting the
+// same amount (18:5xZ)
+test("SH1 grouped reads that run no hook as it is, each with its gas kept, share a call whose override replaces each of their hooks; a read that runs as it is a hook the call replaces, one whose hook a read of the call runs, one with a hook left as it is, one that runs its own hook, and any with no gas kept keep their own calls", () => {
+  const hk = (n: number) => "0x" + (0x51c0 + n).toString(16).padStart(40, "0");
+  const [H1, H2, H3, H4, H5, H6] = [hk(1), hk(2), hk(3), hk(4), hk(5), hk(6)];
+  const C = "0x" + "c1".repeat(20);
+  const T = "0x" + "71".repeat(20);
+  const read = (h: string, runs?: string[]) => ({ to: QUOTER_V4, data: "0xca253dc9" + h.slice(2).padStart(64, "0"), override: { [h]: { code: quoteMod.EVM_NOOP_HOOK_CODE } }, group: h, ...(runs === undefined ? {} : { runs }) });
+  const reads = [read(H1, [C, T, H6]), read(H2, [C, T]), read(H3, [H1, T]), read(H4), read(H5, [H5, T]), read(H6, [T])];
+  const lim = { perCall: 64, maxBytes: 200_000 };
+  const replacedOf = (calls: EvmRpcCall[]) => calls.map((c) => Object.keys(c.params[2] as object).filter((a) => a.toLowerCase() !== MC3).sort());
+  const countOf = (c: EvmRpcCall) => Number(BigInt("0x" + String((c.params[0] as { data: string }).data).slice(74, 138)));
+  // with no gas kept (a cold quote) each hook's reads keep their own call, in order, as before sharing
+  assert.deepEqual(replacedOf(quoteMod.evmReadCallsOf(NEW, reads, lim)), [[H1], [H2], [H3], [H4], [H5], [H6]]);
+  const calls = quoteMod.evmReadCallsOf(NEW, reads, lim, () => 100_000);
+  // H4's read keeps a hook as it is (no `runs`), H5's runs its own hook; H1's and H2's share; H3's runs H1, so not with
+  // it; H6 is run by H1's read, so not with it either, and joins H3's
+  assert.deepEqual(replacedOf(calls), [[H4], [H5], [H1, H2].sort(), [H3, H6].sort()]);
+  assert.deepEqual(calls.map(countOf), [1, 1, 2, 2], "each shared call holds both its reads");
+  for (const c of calls) {
+    const o = Object.fromEntries(Object.entries(c.params[2] as Record<string, { code: string }>).map(([a, x]) => [a.toLowerCase(), x]));
+    assert.equal(o[MC3]?.code, quoteMod.EVM_READ_GAS_CODE, "every call runs the per-read gas code");
+    for (const [a, x] of Object.entries(o)) if (a !== MC3) assert.equal(x.code, quoteMod.EVM_NOOP_HOOK_CODE, `${a} is given the no-op hook`);
+  }
+});
+
+test("SH2 a cold quote reads each replaced hook's pool in its own call; the warm quote after it, with their gas kept, shares one call for both, and both decide as each read alone", () => onTestClock(async () => {
+  const token = "0x00000000000000000000000000000000000a77b7";
+  const H2 = "0x00000000000000000000000000000000000031cc";
+  const second: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, H2), give: (a) => a / 2n };
+  const pools = [seeded(token), real(token), second];
+  for (const warm of [false, true]) {
+    const seen: Overridden[] = [];
+    const v = await verdict(evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token), pools: [second.key] } as EvmPoolBuyQuoteRequest, [chain(pools, 0, 5_000_000, seen), chain(pools, 1, 5_000_000, seen)], NOW, scanner(5_000_000, [{ key: real(token).key, at: 4_500_000 }])));
+    assert.deepEqual(v, below, `warm ${warm}`);
+    const both = seen.some((o) => o.replaces.includes(UNPINNED) && o.replaces.includes(H2));
+    assert.equal(both, warm, `warm ${warm}: a call replaced both hooks ${both}: ${JSON.stringify(seen.map((o) => o.replaces))}`);
+  }
+}));
+
+test("SH3 a shared set's calls are filled by its reads' gas kept (gasParts), never by count: ten thin pools' swaps of 3,000,000 gas each go 5 a call, and a shareable read with no gas kept reads in its own call", () => {
+  const hk = (n: number) => "0x" + (0x52c0 + n).toString(16).padStart(40, "0");
+  const C = "0x" + "c2".repeat(20);
+  const read = (h: string) => ({ to: QUOTER_V4, data: "0xca253dc9" + h.slice(2).padStart(64, "0"), override: { [h]: { code: quoteMod.EVM_NOOP_HOOK_CODE } }, group: h, runs: [C] });
+  const reads = Array.from({ length: 11 }, (_, n) => read(hk(n)));
+  // from the Mac 25 Nov 18:1xZ and 18:3xZ: shared calls of 6 to 22 thin pools' reads, packed by count, answered 2 for
+  // reads that revert alone (Robinhood's 0xad3ecdd4 and NVDA)
+  const calls = quoteMod.evmReadCallsOf(NEW, reads, { perCall: 64, maxBytes: 200_000 }, (r) => (r.group === hk(10) ? undefined : 3_000_000));
+  const countOf = (c: EvmRpcCall) => Number(BigInt("0x" + String((c.params[0] as { data: string }).data).slice(74, 138)));
+  assert.deepEqual(calls.map(countOf), [1, ...quoteMod.gasParts(Array(10).fill(3_000_000)).map((p) => p.length)]);
+  assert.deepEqual(calls.map(countOf), [1, 5, 5]);
+  assert.deepEqual(Object.keys(calls[0]!.params[2] as object).filter((a) => a.toLowerCase() !== MC3), [hk(10)]);
+});
+
 test("S1d a route whose hook is an address the quote calls is refused before any read", async () => {
   const token = "0x00000000000000000000000000000000000a88a8";
   const route: EvmRoute = { venue: "uniswap-v4", currencyIn: NATIVE, hops: [{ currency: token, fee: 0, tickSpacing: 60, hooks: QUOTER_V4, hookData: "0x" }] };
