@@ -1367,9 +1367,10 @@ const notYetError = (a: unknown) => {
   return !reverted(a) && typeof m === "string" && evmNotYetWords(m);
 };
 /** Words of a provider's answer that it does not hold the block or its state yet: "block not found: canonical hash",
- *  "header not found", "unknown block", "Unknown state. First available state is 1" (askAt's notYet). One copy, read by
- *  the live checks too. */
-export const evmNotYetWords = (m: string): boolean => /(block|header).*not found|unknown block|unknown state/i.test(m);
+ *  "header not found", "unknown block", "Unknown state. First available state is 1", and go-ethereum's "block range
+ *  extends beyond current head block" to logs past its head (base.api.pocket.network a block behind, card
+ *  evm-lag-past-head-is-not-yet) (askAt's notYet). One copy, read by the live checks too. */
+export const evmNotYetWords = (m: string): boolean => /(block|header).*not found|unknown block|unknown state|beyond current head/i.test(m);
 
 /** A block header from a provider's answer: number, hash, timestamp and base fee (null when it gives none), or a
  *  refusal. */

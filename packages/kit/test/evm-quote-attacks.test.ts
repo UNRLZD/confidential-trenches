@@ -12950,3 +12950,14 @@ test("KPI3 the next asked beside a held first is hedged no further: a third scan
   assert.equal((v2 as { accepted: boolean }).accepted, true, big(v2));
   assert.deepEqual(heads, { second: 2, third: 1 });
 });
+
+test("card evm-lag-past-head-is-not-yet: go-ethereum's answer to logs past its head is a not-yet answer, asked again as a lagging 'header not found' is, and holds no provider", async () => {
+  // base.api.pocket.network a block behind base-rpc.publicnode.com, asked eth_getLogs to the head that one gave
+  // (sign live run 45609363391; read again 2026-11-25 12:0xZ)
+  const m = "invalid argument 0: block range extends beyond current head block";
+  assert.equal(quoteMod.evmNotYetWords(m), true);
+  assert.equal(quoteMod.evmNotYetWords("execution reverted: " + m), true, "the words alone; askAt's notYetError rules out a revert");
+  const g = answering("lagpast.test", 200, errs(1, -32602, m), {});
+  await quoteMod.evmProviders(["https://lagpast.test", "https://x.lagpast.test"], g)[0]!([{ method: "eth_call", params: [{ to: NATIVE, data: "0x" }, "latest"] }]);
+  assert.equal(isHeld(["https://lagpast.test"], "lagpast.test"), false);
+});

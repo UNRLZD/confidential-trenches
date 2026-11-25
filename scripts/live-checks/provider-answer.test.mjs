@@ -287,17 +287,17 @@ test("the rate-limit, not-yet and stateless words are the kit's own", () => {
   assert.deepEqual(words("stateless"), [String(STATELESS)]);
   // the not-yet words have one copy, the kit's exported evmNotYetWords (card evm-lag-answer-read-again), which its EVM
   // quote's notYet reads and this module calls: no other file the entry loads holds them, and this module copies none
-  const NOT_YET_WORDS = "/(block|header).*not found|unknown block|unknown state/i";
+  const NOT_YET_WORDS = "/(block|header).*not found|unknown block|unknown state|beyond current head/i";
   const holders = files.filter((f) => f.text.includes(NOT_YET_WORDS));
   assert.deepEqual(holders.map((f) => f.fileName.replace(/.*\/packages\//, "packages/")), ["packages/kit/src/checks/evm/quote.ts"]);
   assert.equal(holders[0].text.split(NOT_YET_WORDS).length, 2);
-  assert.match(holders[0].text, /\nexport const evmNotYetWords = \(m: string\): boolean => \/\(block\|header\)\.\*not found\|unknown block\|unknown state\/i\.test\(m\);\n/);
+  assert.match(holders[0].text, /\nexport const evmNotYetWords = \(m: string\): boolean => \/\(block\|header\)\.\*not found\|unknown block\|unknown state\|beyond current head\/i\.test\(m\);\n/);
   assert.match(holders[0].text, /\nconst notYetError = [\s\S]*?evmNotYetWords\(m\);\n/);
   const self = readFileSync(new URL("./provider-answer.mjs", import.meta.url), "utf8");
   assert.equal(self.includes("not found|unknown block"), false);
   assert.match(self, /\nimport \{ evmNotYetWords \} from "\.\.\/\.\.\/packages\/kit\/src\/index\.ts";\n/);
   for (const m of ["header not found", "Unknown state. First available state is 1", "unknown block", "block 5 not found", "execution reverted", "rate limit", ""]) {
-    assert.equal(notYetWords(m), /(block|header).*not found|unknown block|unknown state/i.test(m), m);
+    assert.equal(notYetWords(m), /(block|header).*not found|unknown block|unknown state|beyond current head/i.test(m), m);
   }
   assert.equal(notYetWords(undefined), false);
 });
@@ -358,4 +358,16 @@ test("nothing to judge: the live run reads it as inconclusive, and no live check
   const dir = fileURLToPath(new URL(".", import.meta.url));
   const errs = readdirSync(dir).filter((f) => f.endsWith(".mjs") && !f.endsWith(".test.mjs") && /ERROR: nothing to judge/.test(readFileSync(`${dir}${f}`, "utf8")));
   assert.deepEqual(errs, []);
+});
+
+test("card evm-lag-past-head-is-not-yet: go-ethereum's answer to logs past its own head is the provider's no-answer (it does not hold the block yet), never a refusal; another -32602 is still judged", () => {
+  // base.api.pocket.network, a block behind base-rpc.publicnode.com, asked eth_getLogs to the head that one gave (sign
+  // live run 45609363391, evm-cut-logs-only-where-served; read again 2026-11-25 12:0xZ)
+  const m = "invalid argument 0: block range extends beyond current head block";
+  assert.equal(notYetWords(m), true, m);
+  assert.match(classify("p", 200, rpcErr(-32602, m)).noAnswer ?? "", /^p HTTP 200: no state for the read /);
+  // a state check judges it as it judges every not-yet answer (judgeStateMiss)
+  assert.deepEqual(classify("p", 200, rpcErr(-32602, m), { judgeStateMiss: true }), { error: { code: -32602, message: m } });
+  assert.deepEqual(classify("p", 200, rpcErr(-32602, "invalid argument 2: state override not supported")), { error: { code: -32602, message: "invalid argument 2: state override not supported" } });
+  assert.deepEqual(classify("p", 200, rpcErr(3, "execution reverted: block range extends beyond current head block")), { error: { code: 3, message: "execution reverted: block range extends beyond current head block" } });
 });
