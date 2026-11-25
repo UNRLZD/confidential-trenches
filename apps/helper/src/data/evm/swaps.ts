@@ -77,7 +77,8 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { BUCKETS_MAX, change4h, createBook, fixed, joinBars, PRICE_SCALE, TFS, type Book, type BookState, type Candle, type Event, type Ref, type Swap, type Tf } from "../candles.ts";
 import { createWanted, GT_PAGE_WAIT_MS, GT_SERVE_MS, refreshLane, SEED_LANE, takeOrWait, throttledUntil, type GeckoBudget, type Later } from "../gecko.ts";
-import { CALLER_ROOM, evmThrottleS, LOGS_REFUSED, providerHolds, RETRY_AFTER_MAX_S, upstreamRetryAfterS, type ProviderHolds } from "../../limits/limits.ts";
+import { CALLER_ROOM, evmThrottleS, LOGS_REFUSED, providerHolds, RETRY_AFTER_MAX_S, upstreamBudget, upstreamRetryAfterS, type ProviderHolds } from "../../limits/limits.ts";
+import { DEX_BASE, DEX_CHAIN, DEX_KEY, DEX_LIMITS } from "../held.ts";
 import { pass } from "../../limits/turn.ts";
 import { operatorOf } from "../../rpc/rpc.ts";
 import { BATCH_SIZES, batchRefusal, readWords } from "../../rpc/batch-sizes.ts";
@@ -1335,6 +1336,26 @@ export function quoteCands(json: unknown, token: string, quotes: readonly string
   return out;
 }
 
+/** DexScreener's token-pairs answer (GET /token-pairs/v1/<chainId>/<token>, "the pools of a given token address", read
+ *  25 Nov 09:2xZ for Robinhood's r33 and RAM: a list of {chainId, dexId, pairAddress, baseToken {address}, quoteToken
+ *  {address}, liquidity {usd}}, a v4 pool by its id) as GeckoTerminal's list of a token's pools, quoteCands' shape,
+ *  deepest first; null when it names no pool on `chain`. Hostile input: an entry of another chain, or whose pool or
+ *  tokens are not addresses, is dropped, and a pool named is only a candidate, confirmed on chain before it prices. */
+export function dexPairsList(json: unknown, chain: EvmChain): { data: unknown[] } | null {
+  if (!Array.isArray(json)) return null;
+  const addr = (x: unknown): string | null => (typeof x === "string" && /^0x[0-9a-fA-F]{40}$/.test(x) ? x.toLowerCase() : null);
+  const rows = json.slice(0, 100).flatMap((p) => {
+    const o = (typeof p === "object" && p !== null ? p : {}) as { chainId?: unknown; pairAddress?: unknown; baseToken?: { address?: unknown }; quoteToken?: { address?: unknown }; liquidity?: { usd?: unknown } };
+    const id = typeof o.pairAddress === "string" && /^0x[0-9a-fA-F]{40}([0-9a-fA-F]{24})?$/.test(o.pairAddress) ? o.pairAddress.toLowerCase() : null;
+    const [b, q] = [addr(o.baseToken?.address), addr(o.quoteToken?.address)];
+    const liq = typeof o.liquidity?.usd === "number" && Number.isFinite(o.liquidity.usd) ? o.liquidity.usd : 0;
+    return o.chainId === DEX_CHAIN[chain] && id !== null && b !== null && q !== null ? [{ id, b, q, liq }] : [];
+  });
+  if (rows.length === 0) return null;
+  rows.sort((x, y) => y.liq - x.liq);
+  return { data: rows.map((r) => ({ attributes: { address: r.id }, relationships: { base_token: { data: { id: `${chain}_${r.b}` } }, quote_token: { data: { id: `${chain}_${r.q}` } } } })) };
+}
+
 /** `raw` of a pool's token (a trade's quote token, priced through the token's own pool) in USD times 10^18 at that
  *  pool's price `legs` (poolStateLegs: the token's amount against its quote's), an ETH quote at `ethUsd`; null when a leg
  *  is 0 or the ETH price is not known. */
@@ -1380,7 +1401,7 @@ const isRevert = (e: unknown): boolean => {
  *  no value (undefined), as a call not agreed is. */
 const REVERTED = "reverted";
 
-export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => number; listed: (token: string, client?: string) => Promise<boolean>; hint?: (token: string) => Promise<string | null>; price?: (token: string) => number | null; log?: (line: string) => void; gecko?: GeckoBudget; sleep?: (ms: number) => Promise<unknown>; later?: Later; rpcs?: readonly string[]; spares?: readonly string[]; headerTimed?: ReadonlySet<string>; pools?: ReadonlyMap<string, { pool: Pool; decimals: number }>; tickMs?: number; holds?: ProviderHolds; index?: readonly string[]; keyed?: Keyed | null; indexFile?: string; writable?: Promise<unknown>; restMax?: number; busy?: () => boolean; pass?: () => Promise<void> | null; quoteIndex?: (token: string) => readonly IndexedPool[] }) {
+export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => number; listed: (token: string, client?: string) => Promise<boolean>; hint?: (token: string) => Promise<string | null>; price?: (token: string) => number | null; log?: (line: string) => void; gecko?: GeckoBudget; sleep?: (ms: number) => Promise<unknown>; later?: Later; rpcs?: readonly string[]; spares?: readonly string[]; headerTimed?: ReadonlySet<string>; pools?: ReadonlyMap<string, { pool: Pool; decimals: number }>; tickMs?: number; holds?: ProviderHolds; index?: readonly string[]; keyed?: Keyed | null; dex?: ReturnType<typeof upstreamBudget>; indexFile?: string; writable?: Promise<unknown>; restMax?: number; busy?: () => boolean; pass?: () => Promise<void> | null; quoteIndex?: (token: string) => readonly IndexedPool[] }) {
   const now = deps.now ?? Date.now;
   /** Whether the helper's event loop is busy now (limits/loop-busy.ts): the reads ahead stand down while it is. */
   const busy = deps.busy ?? ((): boolean => false);
@@ -4031,7 +4052,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       return { l, lo, gaps };
     });
     const from = Math.min(...plan.map((x) => x.lo));
-    const logs = from > head.n ? [] : await agreedRange(head.with, (lo, hi) => heldFilters(held, lo, hi, V.poolManager), from, head.n);    if (logs == null) {
+    const logs = from > head.n ? [] : await agreedRange(head.with, (lo, hi) => heldFilters(held, lo, hi, V.poolManager), from, head.n);
+    if (logs == null) {
       for (const l of held) done.set(l.token, false);
       return done;
     }
@@ -4064,7 +4086,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const through = new Set<string>();
       let placed = true;
       for (const t of mine) {
-        const usd = usdOf(l, t, eth, px.at, (head.n - t.block) * bms > STALE_MS);        if (usd === null) {
+        const usd = usdOf(l, t, eth, px.at, (head.n - t.block) * bms > STALE_MS);
+        if (usd === null) {
           placed = false;
           break;
         }
@@ -4572,12 +4595,41 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const refs: Event[] = [{ kind: "ref", block: first.block, index: -1, ethUsd: seed.usd }, ...s.pts.filter((p) => pos(p, first) > 0 && pos(p, last) < 0).map((p): Event => ({ kind: "ref", block: p.block, index: p.index, ethUsd: p.usd }))];
     return [...blockRefs, ...refs, ...kept].sort((a, b) => a.block - b.block || a.index - b.index);
   }
-  /** The vendor's list of `q`'s pools (GeckoTerminal's answer shape), undefined when not had: one call, the key's
-   *  background share first, else the keyless refresh lane (renamePool's). */
+  /** The vendor's list of `q`'s pools (GeckoTerminal's answer shape), undefined when not had: DexScreener's token-pairs
+   *  first, on its own budget (`dex`, DEX_LIMITS' 240 calls a minute against GeckoTerminal's 5 in 75 s for the whole
+   *  helper, whose refresh lane refused 10 to 13 of these a window on helper aed6d6482, 25 Nov 09:1xZ: r33's route was
+   *  never picked after the deploy and fBOMB's rows took the vendor's rate, 27 of 27 in live run 45576485995); else one
+   *  call, the key's background share first, else the keyless refresh lane (renamePool's). A list only names pools: each
+   *  is confirmed on chain before it prices a row (fromHint, hopOf). */
   async function vendorPoolsOf(q: string): Promise<unknown> {
+    const dexList = await dexPoolsOf(q);
+    if (dexList !== undefined) return dexList;
     const path = `/networks/${chain}/tokens/${q}/pools?page=1`;
     let j: unknown = deps.keyed == null ? undefined : await deps.keyed.read(path, (x) => Array.isArray((x as { data?: unknown } | null)?.data), true);
-    if (j === undefined && deps.gecko !== undefined && (await gtTake("refresh", `${chain} quote pools`))) j = await gtJson(path);    return j === "failed" ? undefined : j;
+    if (j === undefined && deps.gecko !== undefined && (await gtTake("refresh", `${chain} quote pools`))) j = await gtJson(path);
+    return j === "failed" ? undefined : j;
+  }
+  /** DexScreener's token-pairs of `q` as a list of its pools (dexPairsList), undefined when not had: no budget given, its
+   *  share or a 429's hold refusing, the call failed, or no pool of the chain named. */
+  async function dexPoolsOf(q: string): Promise<unknown> {
+    const dex = deps.dex;
+    if (dex === undefined || dex.take(DEX_KEY, `${chain} quote pools`) > 0) return undefined;
+    try {
+      const r = await doFetch(`${DEX_BASE}/token-pairs/v1/${DEX_CHAIN[chain]}/${q}`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
+      if (r.status === 429) {
+        const ra = Number(r.headers.get("retry-after"));
+        dex.hold(DEX_KEY, now() + (Number.isFinite(ra) && ra > 0 ? ra * 1000 : DEX_LIMITS.windowMs!));
+      }
+      if (r.status !== 200 || Number(r.headers.get("content-length") ?? "0") > ANSWER_MAX) {
+        await r.body?.cancel();
+        return undefined;
+      }
+      const text = await r.text();
+      if (text.length > ANSWER_MAX) return undefined;
+      return dexPairsList(JSON.parse(text), chain) ?? undefined;
+    } catch {
+      return undefined;
+    }
   }
   /** `q`'s route: its deepest pool against the chain's USD token or WETH (pickEnd); else, none at or above LIQ_MIN_USD,
    *  a hop: the deepest of its vendor-named pools of a venue of ours against another token X (confirmed: hopOf) whose
