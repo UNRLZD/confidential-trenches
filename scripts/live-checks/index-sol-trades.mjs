@@ -55,6 +55,10 @@ export const APP = "https://ct-app.unrealized.trade";
 export const WS = "wss://api.mainnet-beta.solana.com";
 const RPC = "https://api.mainnet-beta.solana.com";
 export const FRESH_MS = 2_000;
+/** Card sol-stream-refuses-unsigned-notes: Signature::default(), 64 zero bytes in base58, which no transaction on chain
+ *  carries: the public websocket sent one with a pump.fun trade's logs and err null (live run 45602902162, GEJvXD3R), and
+ *  this check held it as the fresh trade. A note under it is no trade (the helper drops it too, trades.ts DEFAULT_SIG). */
+export const DEFAULT_SIG = "1".repeat(64);
 export const OPEN = 8;
 const POLL_MS = 200;
 const WAIT_MS = 90_000;
@@ -180,7 +184,7 @@ async function poolBase(pool) {
 }
 
 /** The first trade of `open` tokens the public websocket sends, decoded from its venue's event. */
-function watchOnce(open, ws) {
+export function watchOnce(open, ws) {
   return new Promise((resolve, reject) => {
     const s = new WebSocket(ws);
     const subs = new Map();
@@ -192,7 +196,7 @@ function watchOnce(open, ws) {
       if (j.method !== "logsNotification") return;
       const coin = subs.get(j.params.subscription);
       const v = j.params.result.value;
-      if (coin === undefined || v.err !== null) return;
+      if (coin === undefined || v.err !== null || v.signature === DEFAULT_SIG) return;
       const heldAtMs = Date.now();
       const done = (t) => {
         clearTimeout(timer);
@@ -333,7 +337,7 @@ export function watchMeteora(tokens, ws = WS, waitMs = METEORA_WAIT_MS, onFound 
       const coin = subs.get(j.params.subscription);
       const v = j.params.result.value;
       const ran = Object.entries(METEORA).filter(([k, p]) => want.has(k) && v.logs.some((l) => l.startsWith(`Program ${p} invoke`)));
-      if (coin === undefined || v.err !== null || ran.length === 0 || !eventsInInner(v.logs) || busy >= 2 || passOver(coin)) return;
+      if (coin === undefined || v.err !== null || v.signature === DEFAULT_SIG || ran.length === 0 || !eventsInInner(v.logs) || busy >= 2 || passOver(coin)) return;
       const heldAtMs = Date.now();
       busy++;
       void (async () => {

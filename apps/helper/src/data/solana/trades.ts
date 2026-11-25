@@ -571,6 +571,10 @@ const FOLLOWS_MAX = 300;
  *  CLMM 1,544); a bigger account is no pool we read (unplaced). */
 const POOL_DATA_MAX = 10_240;
 const SIG_TEXT = /^[1-9A-HJ-NP-Za-km-z]{64,88}$/;
+/** Card sol-stream-refuses-unsigned-notes: Signature::default(), 64 zero bytes in base58. No transaction on chain carries
+ *  it, yet the public websocket sent one with a trade's logs and err null (live run 45602902162 on helper 14f8ab810:
+ *  index-sol-trades held it as GEJvXD3R's fresh trade; no RPC knows it). A note under it is no trade. */
+export const DEFAULT_SIG = "1".repeat(64);
 const AMOUNT = /^\d{1,30}$/;
 
 /** One pool trade as a transaction's token balances show it: the pool's two vaults, the token accounts the pool
@@ -1395,7 +1399,7 @@ export function createSolanaTrades(deps: {
   const source = (deps.source ?? ((on) => wsSource(deps.wsUrl ?? STREAM_WS, on, deps.wsUrl !== undefined && deps.streamSlot !== undefined ? { fallback: { url: STREAM_WS, slot: deps.streamSlot } } : {})))({
     note(mint, n) {
       const e = entries.get(mint);
-      if (e !== undefined) void onNote(e, n).catch(() => undefined);
+      if (e !== undefined && n.sig !== DEFAULT_SIG) void onNote(e, n).catch(() => undefined);
     },
     down() {
       deps.log?.(`solana stream: down, ${entries.size} tokens to walk again`);

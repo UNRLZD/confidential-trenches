@@ -491,3 +491,56 @@ test("card helper-sol-tape-checks-hold: a recorded run at this card judges every
   s.cut["meteora-dlmm"] = [0, check.CUT_KEEP_MS + 1].map((d, i) => ({ ...cuts[0], sig: `${cuts[0].sig.slice(0, -1)}${i + 2}`, atMs: cuts[0].atMs + d, timing: cuts[0].timing.replace("past the coin's own 20 a 10 s", "past every coin's 10 a second") }));
   assert.ok(bad(check.judgeMeteora(s)).some((l) => l.startsWith("BAD meteora-dlmm: every sampled coin (1 coin(s), 2 trade(s)") && l.endsWith("the budget starved the venue")), bad(check.judgeMeteora(s)).join("\n"));
 });
+
+test("card sol-stream-refuses-unsigned-notes: a note signed with the default signature (64 ones) is no trade to either watch; the next real one is judged", async () => {
+  // live run 45602902162: the public websocket sent GEJvXD3R a pump.fun trade's logs under 1111...1111, err null, and
+  // the check held it as the fresh trade, then failed it on 16 tape reads (no transaction carries that signature)
+  const DEFAULT_SIG = "1".repeat(64);
+  const F = JSON.parse(readFileSync(path.join(HERE, "../../apps/helper/src/data/solana/fixtures/sol-trades-txs.json"), "utf8"));
+  const BUY = F.txs["pump-buy"];
+  const MINT = "4Tdj8MDuQ7Nx1drP1fkf1H4FVvUDrgZ3kbgQpHWXpump";
+  const sent = [];
+  class FakeWs {
+    constructor() {
+      FakeWs.last = this;
+      setImmediate(() => this.onopen?.());
+    }
+    send(m) {
+      sent.push(JSON.parse(m));
+    }
+    close() {}
+  }
+  const realWs = globalThis.WebSocket;
+  const realFetch = globalThis.fetch;
+  const asked = [];
+  globalThis.WebSocket = FakeWs;
+  globalThis.fetch = async (url, init) => {
+    asked.push(JSON.parse(String(init.body)).params[0]);
+    throw new Error("no network in the test");
+  };
+  try {
+    const once = check.watchOnce([MINT], "ws://fake");
+    await new Promise((r) => setImmediate(r));
+    const ws = FakeWs.last;
+    sent.forEach((m, i) => ws.onmessage({ data: JSON.stringify({ jsonrpc: "2.0", id: m.id, result: 100 + i }) }));
+    const note = (sig, logs) => ws.onmessage({ data: JSON.stringify({ method: "logsNotification", params: { subscription: 100, result: { value: { signature: sig, err: null, logs } } } }) });
+    note(DEFAULT_SIG, BUY.result.meta.logMessages);
+    note(BUY.signature, BUY.result.meta.logMessages);
+    assert.equal((await once).sig, BUY.signature, "the real trade, never the default signature's");
+
+    sent.length = 0;
+    const FZ2 = "GM8EysYT8NRSsoULdeYShbRsUdhoUoiB9EN4eW3YETCH";
+    const done = check.watchMeteora([FZ2], "ws://fake", 200);
+    await new Promise((r) => setImmediate(r));
+    const ws2 = FakeWs.last;
+    sent.forEach((m, i) => ws2.onmessage({ data: JSON.stringify({ jsonrpc: "2.0", id: m.id, result: 200 + i }) }));
+    const meteoraLogs = [`Program ${check.METEORA["meteora-dbc"]} invoke [1]`, `Program ${check.METEORA["meteora-dbc"]} invoke [2]`];
+    ws2.onmessage({ data: JSON.stringify({ method: "logsNotification", params: { subscription: 200, result: { value: { signature: DEFAULT_SIG, err: null, logs: meteoraLogs } } } }) });
+    ws2.onmessage({ data: JSON.stringify({ method: "logsNotification", params: { subscription: 200, result: { value: { signature: "sigOfAReal", err: null, logs: meteoraLogs } } } }) });
+    await done;
+    assert.deepEqual([...new Set(asked)], ["sigOfAReal"], "only the real signature is read");
+  } finally {
+    globalThis.WebSocket = realWs;
+    globalThis.fetch = realFetch;
+  }
+});
