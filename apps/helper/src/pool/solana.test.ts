@@ -912,3 +912,65 @@ test("both providers throttle: 429 rate_limited as before, nothing signed or sen
   assert.equal(code(a), "rate_limited");
   assert.equal(sent.length, 0);
 });
+
+// ---- card helper-pool-reads-past-a-stalled-provider: a read A gives no answer to goes to B ----
+// Helper live run 45526898423 (25 Nov 01:36:48-01:37:30Z): twelve releases of owners-solana-buy-lands, relayer-cost-guards,
+// pool-senders-next-page-helper, buy-carry-helper-round, buy-spends-several-pieces and sol-pool-buy-lands-on-mainnet-helper
+// answered 503 upstream at 5,007-5,019 ms, the kit client's 5 s timeout (send.ts SOLANA_CALL_TIMEOUT_MS) on provider A's
+// simulation, B never asked; the same releases answered 422 at 23:32Z and at 01:56Z.
+
+/** A provider whose every read fails as the kit's client throws it without a retry (send.ts solanaJsonRpc: the fetch's
+ *  own error for no answer in time or no connection, "HTTP 5xx" for a server error, "RPC error ..." for an answer). */
+function failingStub(error: () => unknown, calls: Calls = []): SolanaRpc {
+  return Object.assign(
+    async (method: string, params: readonly unknown[]) => {
+      calls.push({ method, params });
+      throw error();
+    },
+    { url: `https://failing.invalid/${Math.random()}` },
+  );
+}
+const NO_ANSWER: readonly [string, () => unknown][] = [
+  ["no answer in 5 s", () => new DOMException("The operation was aborted due to timeout", "TimeoutError")],
+  ["no connection", () => new TypeError("fetch failed")],
+  ["HTTP 503", () => new Error("HTTP 503")],
+];
+
+for (const [what, error] of NO_ANSWER) {
+  test(`provider A gives no answer (${what}): B simulates it, so a release whose program fails is refused 422 simulation_failed, never 503`, async () => {
+    const onA: Calls = [];
+    const onB: Calls = [];
+    const sent: Uint8Array[] = [];
+    const a = await senderOn([failingStub(error, onA), rpcStub({ InstructionError: [1, { Custom: 9 }] }, onB)], sent).carry(body(build()));
+    assert.equal(code(a), "simulation_failed", JSON.stringify(a.body));
+    assert.equal(a.status, 422);
+    assert.equal(sent.length, 0);
+    assert.ok(onA.some((c) => c.method === "simulateTransaction"), "A was asked first");
+    assert.ok(onB.some((c) => c.method === "simulateTransaction"), "B simulated it");
+  });
+
+  test(`provider A gives no answer (${what}): B's passing simulation lets a good release be carried and sent`, async () => {
+    const sent: Uint8Array[] = [];
+    const a = await senderOn([failingStub(error), rpcStub()], sent).carry(body(build({ tag: 3 })));
+    assert.equal(a.status, 200, JSON.stringify(a.body));
+    assert.equal(sent.length, 1);
+  });
+}
+
+test("both providers give no answer: 503 upstream as before, nothing signed or sent", async () => {
+  const sent: Uint8Array[] = [];
+  const a = await senderOn([failingStub(NO_ANSWER[0]![1]), failingStub(NO_ANSWER[1]![1])], sent).carry(body(build()));
+  assert.equal(a.status, 503);
+  assert.equal(code(a), "upstream");
+  assert.equal(sent.length, 0);
+});
+
+test("an answer A gave (a JSON-RPC error) stays A's: 503 upstream, B never asked, nothing signed or sent", async () => {
+  const onB: Calls = [];
+  const sent: Uint8Array[] = [];
+  const a = await senderOn([failingStub(() => new Error("RPC error -32603: Internal error")), rpcStub(null, onB)], sent).carry(body(build()));
+  assert.equal(a.status, 503);
+  assert.equal(code(a), "upstream");
+  assert.equal(onB.length, 0, "B was never asked");
+  assert.equal(sent.length, 0);
+});
