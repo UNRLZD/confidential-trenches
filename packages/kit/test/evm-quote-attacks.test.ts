@@ -1525,7 +1525,7 @@ test("S3b on Robinhood a Doppler /8 token paired with another currency is held t
   assert.equal((await quoteOn([seeded(token), real], token, seededRoute(token), scanner(5_000_000, [{ key: real.key, at: 4_500_000 }]), undefined, "robinhood")).accepted, true);
 });
 
-test("S1c each override replaces one hook, only in reads of that hook's pools, and only for a pool the PoolManager holds", async () => {
+test("S1c an override replaces only hooks of the reads under it, and only for a pool the PoolManager holds", async () => {
   const token = "0x00000000000000000000000000000000000a77a7";
   const H2 = "0x00000000000000000000000000000000000030cc";
   const GHOST = "0x00000000000000000000000000000000000040cc";
@@ -1538,8 +1538,50 @@ test("S1c each override replaces one hook, only in reads of that hook's pools, a
   );
   assert.deepEqual(v, below);
   assert.deepEqual([...new Set(seen.flatMap((o) => o.replaces))].sort(), [UNPINNED, H2].sort(), "the held pools' hooks only: never the pool that does not exist");
-  // every address an override replaces is a hook of each read under it
-  for (const o of seen) for (const hs of o.hooks) for (const r of o.replaces) assert.ok(hs.includes(r), `a read of hooks ${hs} under an override of ${r}`);
+  // every address an override replaces is a hook of a read under it (card evm-hook-reads-share-a-call: reads that run
+  // no hook as it is share a call, its override each of their hooks; SH1, SH2)
+  for (const o of seen.filter((x) => x.hooks.length > 0)) for (const r of o.replaces) assert.ok(o.hooks.some((hs) => hs.includes(r)), `an override of ${r} over reads of hooks ${JSON.stringify(o.hooks)}`);
+});
+
+// card evm-hook-reads-share-a-call: read from the Mac 25 Nov 18:0xZ (scratchpad rh-ov-qqq), QQQ's warm tap on
+// Robinhood sent 44 eth_call a side in 24 overrides, 19 of them one hook's at 2 to 4 reads; shared, 27 (rh-ov-qqq-share)
+test("SH1 grouped reads that run no hook as it is share a call whose override replaces each of their hooks; a read that runs as it is a hook the call replaces, one with a hook left as it is, and one that runs its own hook keep their own calls", () => {
+  const hk = (n: number) => "0x" + (0x51c0 + n).toString(16).padStart(40, "0");
+  const [H1, H2, H3, H4, H5] = [hk(1), hk(2), hk(3), hk(4), hk(5)];
+  const C = "0x" + "c1".repeat(20);
+  const T = "0x" + "71".repeat(20);
+  const read = (h: string, runs?: string[]) => ({ to: QUOTER_V4, data: "0xca253dc9" + h.slice(2).padStart(64, "0"), override: { [h]: { code: quoteMod.EVM_NOOP_HOOK_CODE } }, group: h, ...(runs === undefined ? {} : { runs }) });
+  const calls = quoteMod.evmReadCallsOf(NEW, [read(H1, [C, T]), read(H2, [C, T]), read(H3, [H1, T]), read(H4), read(H5, [H5, T])], { perCall: 64, maxBytes: 200_000 });
+  const replaced = calls.map((c) => Object.keys(c.params[2] as object).filter((a) => a.toLowerCase() !== MC3).sort());
+  // H4's read keeps a hook as it is (no `runs`), H5's runs its own hook; H1's and H2's share; H3's runs H1, so not with it
+  assert.deepEqual(replaced, [[H4], [H5], [H1, H2].sort(), [H3]]);
+  const reads = (c: EvmRpcCall) => Number(BigInt("0x" + String((c.params[0] as { data: string }).data).slice(74, 138)));
+  assert.deepEqual(calls.map(reads), [1, 1, 2, 1], "the shared call holds both reads");
+  for (const c of calls) {
+    const o = Object.fromEntries(Object.entries(c.params[2] as Record<string, { code: string }>).map(([a, x]) => [a.toLowerCase(), x]));
+    assert.equal(o[MC3]?.code, quoteMod.EVM_READ_GAS_CODE, "every call runs the per-read gas code");
+    for (const [a, x] of Object.entries(o)) if (a !== MC3) assert.equal(x.code, quoteMod.EVM_NOOP_HOOK_CODE, `${a} is given the no-op hook`);
+  }
+});
+
+test("SH2 a quote's reads of two pools behind two replaced hooks share a call, and the quote decides as when each read under its own", () => onTestClock(async () => {
+  const token = "0x00000000000000000000000000000000000a77b7";
+  const H2 = "0x00000000000000000000000000000000000031cc";
+  const second: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, H2), give: (a) => a / 2n };
+  const pools = [seeded(token), real(token), second];
+  const seen: Overridden[] = [];
+  const v = await verdict(evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token), pools: [second.key] } as EvmPoolBuyQuoteRequest, [chain(pools, 0, 5_000_000, seen), chain(pools, 1, 5_000_000, seen)], NOW, scanner(5_000_000, [{ key: real(token).key, at: 4_500_000 }])));
+  assert.deepEqual(v, below);
+  assert.ok(seen.some((o) => o.replaces.includes(UNPINNED) && o.replaces.includes(H2)), `no call replaced both hooks: ${JSON.stringify(seen.map((o) => o.replaces))}`);
+}));
+
+test("SH3 a shared set's reads with no gas kept go READ_AGAIN_PER_CALL (6) a call, never the venue's 64", () => {
+  const hk = (n: number) => "0x" + (0x52c0 + n).toString(16).padStart(40, "0");
+  const C = "0x" + "c2".repeat(20);
+  const read = (h: string) => ({ to: QUOTER_V4, data: "0xca253dc9" + h.slice(2).padStart(64, "0"), override: { [h]: { code: quoteMod.EVM_NOOP_HOOK_CODE } }, group: h, runs: [C] });
+  const calls = quoteMod.evmReadCallsOf(NEW, Array.from({ length: 10 }, (_, n) => read(hk(n))), { perCall: 64, maxBytes: 200_000 });
+  // from the Mac 25 Nov 18:1xZ: shared calls of 16 to 22 thin pools' reads answered 2 for reads that revert alone
+  assert.deepEqual(calls.map((c) => Number(BigInt("0x" + String((c.params[0] as { data: string }).data).slice(74, 138)))), [6, 4]);
 });
 
 test("S1d a route whose hook is an address the quote calls is refused before any read", async () => {
@@ -1585,7 +1627,9 @@ test("S3c a market whose hook is not pinned is quoted only once it exists, with 
     await assert.rejects(evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) }, [chain(pools, 0, 5_000_000, seen), chain(pools, 1, 5_000_000, seen)], NOW, scanner(5_000_000, logs)), heldTo(x));
     assert.ok(seen.some((o) => o.replaces.length === 2 && o.replaces.includes(MH) && o.replaces.includes(H2)), `${more} more: ${JSON.stringify(seen)}`);
     assert.ok(!seen.some((o) => o.replaces.includes(GH)), "no override for the market the PoolManager does not hold");
-    for (const o of seen) for (const hs of o.hooks) for (const r of o.replaces) assert.ok(hs.includes(r), `a read of hooks ${hs} under an override of ${r}`);
+    // every address an override replaces is a hook of a read under it (reads that run no hook as it is share a call:
+    // card evm-hook-reads-share-a-call)
+    for (const o of seen.filter((x) => x.hooks.length > 0)) for (const r of o.replaces) assert.ok(o.hooks.some((hs) => hs.includes(r)), `an override of ${r} over reads of hooks ${JSON.stringify(o.hooks)}`);
   }
 });
 

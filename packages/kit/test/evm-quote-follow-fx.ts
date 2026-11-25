@@ -57,6 +57,9 @@ const replay = (lie?: (k: string, a: unknown) => unknown, hang?: (k: string) => 
  *  `lie` rewrites the by-number answer of that block, `headHeld`: the watch hands it back as its fresh head; `hangPin`:
  *  the follow's first ask of that block by number hangs to its provider's timeout. */
 export async function firstThenFollow(lie?: (k: string, a: unknown) => unknown, headHeld = false, hangPin = false) {
+  // the USDG quote was recorded before reads through replaced hooks shared calls (card evm-hook-reads-share-a-call),
+  // and its calls are matched call for call
+  Q.evmHookReadsShare(false);
   evmSpeedReset();
   evmPaceReset();
   evmPoolIndexReset();

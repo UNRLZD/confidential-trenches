@@ -354,11 +354,16 @@ export function evmBuySwapFitCall(chain: EvmPoolChain, route: EvmRoute, amount: 
 }
 
 // `group`: the one hook a read's override replaces; reads of the same group share that override in aggregate3 calls,
-// and no read shares an override with a read of another hook
+// and no read shares an override with a read of another hook, except as `runs` lets it
+// `runs`: set on a grouped read that runs no hook's code as it is (every hook of its pools replaced by the hook that
+// does nothing): the addresses whose code it does run as it is (its pools' currencies, the token, the venue's called
+// contracts). Such reads share aggregate3 calls whatever hooks they replace, each call's override every hook its reads
+// replace, where no read of the call runs an address another's override replaces (planOf; card
+// evm-hook-reads-share-a-call)
 // `state`: a PoolManager.extsload read, one storage word, sent STATE_READS_PER_CALL to a call
 // `tx`: the transaction fields of a read sent alone (one with an override and no group), as the sim of a sale sends them
 // `oog`: an out-of-gas error answers as a revert (a read capped at a gas, card evm-buy-gas-floor), not a refusal
-type Read = { to: string; data: string; override?: Record<string, Override> | undefined; env?: Record<string, string>; group?: string; state?: true; tx?: SimTx; oog?: true; size?: string };
+type Read = { to: string; data: string; override?: Record<string, Override> | undefined; env?: Record<string, string>; group?: string; runs?: readonly string[]; state?: true; tx?: SimTx; oog?: true; size?: string };
 // a call's sender and gas, with the sale's fees (a sim) or none (tx.gasprice 0: a gas check)
 type SimTx = { from: string; gas: string; maxFeePerGas?: string; maxPriorityFeePerGas?: string };
 // `overflow`: the revert is SafeCastOverflow (card rh-cold-quote, the X prune)
@@ -515,6 +520,15 @@ let gasPacking = true;
 /** Turns the packing of measured reads by their gas on or off (tests). Not in the index. */
 export const evmGasPacking = (on = true): void => void (gasPacking = on);
 const sizeKey = (r: Read) => lower(r.to) + r.data;
+// a shared hook read's gas is kept by its hooks as well (card evm-hook-reads-share-a-call): the same calldata read with
+// its hooks as they are (`real`) is another read, whose hook may burn gas
+const shareKey = (r: Read) => sizeKey(r) + "|" + (r.group ?? "");
+// whether grouped reads that run no hook as it is share calls (Read.runs): off for the replays of quotes recorded
+// before it, whose calls are matched call for call (test/evm-tap-record.ts, test/evm-quote-follow-fx.ts,
+// test/evm-quote-calls.test.ts)
+let hookSharing = true;
+/** Turns the sharing of hook reads' calls on or off (tests). Not in the index. */
+export const evmHookReadsShare = (on = true): void => void (hookSharing = on);
 // And by its route (card evm-warm-tap-reads-in-one-round): a buy's quote of a route at the quote's amount or at twice
 // it (`Read.size`, the calldata less its amount word), whatever that amount. The coin page warms a coin at
 // EVM_BUY_WARM_IN and the tap quotes the typed amount, so by calldata alone nothing the warm kept held for the tap: every
@@ -687,9 +701,12 @@ export const evmAgreedReset = (): void => AGREED.clear();
  *  (tests). Not in the index. */
 export const evmQuoteWarmReset = (): void => (PLANS.clear(), FITS.clear());
 
+/** The calls planOf makes of `reads` at `hash` with the venue's limits `lim` (tests: card evm-hook-reads-share-a-call).
+ *  Not in the index. */
+export const evmReadCallsOf = (hash: string, reads: readonly Read[], lim: ReadLimits = READS_DEFAULT): EvmRpcCall[] => planOf(hash, reads, lim, undefined).calls;
 /** How readBothSent sends `reads` at `hash`: its calls, each call's answer as the reads it holds, and where each batch
  *  (one post to a provider) starts in the calls, the aggregate3 calls' reads and the plain reads. Sends nothing. */
-function planOf(hash: string, reads: readonly Read[], lim: ReadLimits, again: number | undefined): { calls: EvmRpcCall[]; decode: ((raw: unknown, who: string) => [number, Answer][])[]; starts: number[]; parts: number[][]; plain: number[] } {
+function planOf(hash: string, reads: readonly Read[], lim: ReadLimits, again: number | undefined): { calls: EvmRpcCall[]; decode: ((raw: unknown, who: string) => [number, Answer][])[]; starts: number[]; parts: number[][]; plain: number[]; shared: number[] } {
   // `again`: reads answered `gas` in a call of more, read again this many to a call (READ_AGAIN_PER_CALL, then 1)
   const perCall = again ?? readsOverride ?? lim.perCall;
   const at = { blockHash: hash, requireCanonical: true };
@@ -705,13 +722,28 @@ function planOf(hash: string, reads: readonly Read[], lim: ReadLimits, again: nu
     for (const g of byTo.values()) for (let k = 0; k < g.length; k += SLOTS_PER_CALL) slotParts.push(g.slice(k, k + SLOTS_PER_CALL));
   }
   const groups = new Map<string, number[]>();
+  // card evm-hook-reads-share-a-call: the grouped reads that run no hook as it is (`runs`), in sets that share calls: a
+  // read joins the first set where none of the hooks it replaces is an address a read of the set runs as it is, and
+  // none of the addresses it runs as it is is a hook the set replaces, so each read answers in the shared call exactly as
+  // under its own override. A Robinhood coin's taps sent one call or two for each of 19 hooks, 2 to 4 reads each: QQQ's
+  // warm tap 44 eth_call a side, 24 overrides (read from the Mac 25 Nov 18:0xZ, scratchpad rh-ov-qqq)
+  const shares: { hooks: Set<string>; runs: Set<string>; is: number[] }[] = [];
   reads.forEach((r, i) => {
-    if (r.override !== undefined && r.group !== undefined) append(groups, r.group, i);
+    if (r.override === undefined || r.group === undefined) return;
+    const hs = Object.keys(r.override);
+    // a read that runs as it is a hook it replaces (droppable keeps such a pool out) reads under its own override alone
+    if (!hookSharing || r.runs === undefined || hs.some((h) => r.runs!.includes(h))) return void append(groups, r.group, i);
+    let s = shares.find((x) => !hs.some((h) => x.runs.has(h)) && !r.runs!.some((a) => x.hooks.has(a)));
+    if (s === undefined) shares.push((s = { hooks: new Set(), runs: new Set(), is: [] }));
+    hs.forEach((h) => s.hooks.add(h));
+    r.runs.forEach((a) => s.runs.add(a));
+    s.is.push(i);
   });
   const lone = reads.flatMap((r, i) => (r.override !== undefined && r.group === undefined ? [i] : []));
-  // every aggregate3 call runs EVM_READ_GAS_CODE with EVM_READ_CALL_GAS, beside the hook's override where it has one
+  // every aggregate3 call runs EVM_READ_GAS_CODE with EVM_READ_CALL_GAS, beside the hooks' override where its reads have
+  // one: a group's own, or every hook a shared call's reads replace
   const callOf = (part: number[]): EvmRpcCall => {
-    const o = reads[part[0]!]!.override;
+    const o = Object.assign({}, ...part.map((i) => reads[i]!.override ?? {})) as Record<string, Override>;
     return { method: "eth_call", params: [{ to: MULTICALL3, data: aggregate(part.map((i) => reads[i]!)), gas: READ_CALL_GAS_HEX }, at, { ...o, [MULTICALL3]: { code: EVM_READ_GAS_CODE } }] };
   };
   // a part whose call is past maxBytes is sent as its halves, down to one read
@@ -741,6 +773,20 @@ function planOf(hash: string, reads: readonly Read[], lim: ReadLimits, again: nu
   const statePer = Math.min(again ?? STATE_READS_PER_CALL, STATE_READS_PER_CALL);
   for (let k = 0; k < state.length; k += statePer) fit(state.slice(k, k + statePer));
   for (const g of groups.values()) for (let k = 0; k < g.length; k += perCall) fit(g.slice(k, k + perCall));
+  // each shared set: its reads with a gas used kept (readGas, by shareKey) in calls filled to the gas budget, as measured
+  // plain reads are; the rest READ_AGAIN_PER_CALL a call at most (from the Mac 25 Nov 18:1xZ, scratchpad hook-diff3-*:
+  // Claude's and NVDA's shared calls of 16 to 22 reads answered 32 reads 2 that revert alone, its calls of 6 or fewer
+  // none). A pass reading reads again (`again`) and a test's reads a call send perCall a call
+  const own = again === undefined && readsOverride === undefined;
+  for (const s of shares) {
+    const known = own && gasPacking ? s.is.filter((i) => readGas.has(shareKey(reads[i]!))) : [];
+    const measuredHere = new Set(known);
+    const knownOk = (ks: readonly number[]) => bytesOf(callOf(ks.map((k) => known[k]!))) + BATCH_BYTES <= lim.maxBytes;
+    for (const part of gasParts(known.map((i) => readGas.get(shareKey(reads[i]!))!), knownOk)) fit(part.map((k) => known[k]!));
+    const rest = s.is.filter((i) => !measuredHere.has(i));
+    const per = own ? Math.min(perCall, READ_AGAIN_PER_CALL) : perCall;
+    for (let k = 0; k < rest.length; k += per) fit(rest.slice(k, k + per));
+  }
   const calls: EvmRpcCall[] = [
     ...parts.map(callOf),
     ...slotParts.map((part) => ({
@@ -767,7 +813,7 @@ function planOf(hash: string, reads: readonly Read[], lim: ReadLimits, again: nu
     size += b;
     k++;
   }
-  return { calls, decode, starts, parts, plain };
+  return { calls, decode, starts, parts, plain, shared: shares.flatMap((s) => s.is) };
 }
 
 /** The posts readBoth sends each provider it asks for `reads` at `hash`: the batches of the reads it does not answer from
@@ -779,7 +825,7 @@ function postsOf(rpcs: readonly EvmRpc[], hash: string, reads: readonly Read[], 
 }
 
 async function readBothSent(rpcs: readonly EvmRpc[], hash: string, reads: readonly Read[], lim: ReadLimits, again: number | undefined, down: Set<EvmRpc>): Promise<Answer[]> {
-  const { calls, decode, starts, parts, plain } = planOf(hash, reads, lim, again);
+  const { calls, decode, starts, parts, plain, shared } = planOf(hash, reads, lim, again);
   sizeSeen(rpcs, starts.length);
   const same = (a: Answer, b: Answer) => (a.kind === "out" ? b.kind === "out" && a.amountOut === b.amountOut : b.kind === "revert" && a.partial === b.partial && a.overflow === b.overflow);
   // a read that may have run out of gas on one provider and reverted on another is not the same answer, nor one whose
@@ -872,11 +918,13 @@ async function readBothSent(rpcs: readonly EvmRpc[], hash: string, reads: readon
   }
   // each plain read's gas used at its final answer, where two providers agreed it and it was not answered 2; a gas used
   // of 0 is no measure (a read that ran used its call's 2,600 at least; an answer with no gas word, as a recorded
-  // Multicall3 answer written in the code's shape, reads 0), so such a read keeps the venue's reads a call
-  for (const i of plain) {
+  // Multicall3 answer written in the code's shape, reads 0), so such a read keeps the venue's reads a call; a shared hook
+  // read's too, by its hooks (shareKey), so the next quote packs it by its gas
+  const sharedHere = new Set(shared);
+  for (const i of [...plain, ...shared]) {
     const a = all[i]!;
     if ((a as { gas?: true }).gas === true || a.used === undefined || a.used <= 0) continue;
-    const key = sizeKey(reads[i]!);
+    const key = (sharedHere.has(i) ? shareKey : sizeKey)(reads[i]!);
     readGas.delete(key);
     readGas.set(key, a.used);
     if (readGas.size > READ_SIZES_KEPT) readGas.delete(readGas.keys().next().value!);
@@ -4606,6 +4654,12 @@ async function routeSetOf(a: {
     const hs = [...new Set(keys.filter(replaced).map((k) => k.hooks))].sort();
     return hs.length === 0 ? {} : { override: Object.fromEntries(hs.map((h) => [h, { code: EVM_NOOP_HOOK_CODE }])), group: hs.join(",") };
   };
+  // card evm-hook-reads-share-a-call: what a buy's read through all of a route's `keys` runs as it is, where it runs no
+  // hook as it is (each hook of its pools replaced, none listed): its pools' currencies, the token and every address the
+  // venue's reads call (Read.runs); nothing where a hook is left as it is, or for a sale's read
+  const runsOf = (keys: readonly EvmPoolKey[]): { runs?: readonly string[] } =>
+    a.sell || !keys.some(replaced) || !keys.every((k) => k.hooks === NATIVE || replaced(k)) ? {}
+    : { runs: [...new Set([...keys.flatMap((k) => [lower(k.currency0), lower(k.currency1)]), lower(token), ...v.called])].sort() };
   // a pool whose hook is an address the reads call, the token or one of the pool's currencies is dropped: its hook is
   // never replaced (a hookless pool, hook 0, has none to replace)
   const droppable = (k: EvmPoolKey) => k.hooks !== NATIVE && (v.called.has(k.hooks) || k.hooks === lower(token) || k.hooks === k.currency0 || k.hooks === k.currency1);
@@ -4646,7 +4700,7 @@ async function routeSetOf(a: {
     return quoteAt(into, r, hooks, from, amount);
   };
   const quoteAt = (into: Read[], r: EvmV4Route, hooks: EvmPoolKey[], from: string, amount: bigint): Quote => {
-    const c: Quote = { route: r, at: put(into, { ...readOf(r, amount, true, from), ...noop(hooks) }), twice: put(into, { ...readOf(r, 2n * amount, true, from), ...noop(hooks) }) };
+    const c: Quote = { route: r, at: put(into, { ...readOf(r, amount, true, from), ...noop(hooks), ...runsOf(hooks) }), twice: put(into, { ...readOf(r, 2n * amount, true, from), ...noop(hooks), ...runsOf(hooks) }) };
     if (hooks.some(replaced)) c.real = { at: put(into, readOf(r, amount, true, from)), twice: put(into, readOf(r, 2n * amount, true, from)) };
     // every proper set of the replaced hooks replaced alone (the whole set is `at`, none is `real`; review of
     // 72e28658, M1)
@@ -4905,7 +4959,7 @@ async function routeSetOf(a: {
   if (ok && floor !== null && floor > 0n && floor < 1n << 127n && [...xPools.keys()].some(unsure)) {
     const q = floor;
     const asks: [Found, number][] = [];
-    const ask = (into: Read[], f: Found) => asks.push([f, put(into, { ...exactOutRead(v.v4!, f.key, lower(token), q), ...noop([f.key]) })]);
+    const ask = (into: Read[], f: Found) => asks.push([f, put(into, { ...exactOutRead(v.v4!, f.key, lower(token), q), ...noop([f.key]), ...runsOf([f.key]) })]);
     // A pool the last quote dropped short of a Q this one's is at least, with its price and liquidity as they were
     // (unmovedSince), cannot give this Q either, and is not asked again: NVDAc on Base re-asked about 77 such pools on
     // both providers at every warm tap, 154 of a tap's exact-output reads, the taps 4.9 and 11.8 s (read only from this
