@@ -21,6 +21,14 @@
 //   transaction, so the pool's block is the token's; a token with code before its pool is read again where its code
 //   first appears (Base's first provider serves old state).
 //
+// Own trending (card robinhood-lists-own-reads, the first slice of helper-lists-own-index): on a chain whose swap index
+// is wired (own: Robinhood's, index.ts), Trending 5m and 1h are never read from GeckoTerminal. Their candidates are the
+// pools with the most swaps in the window, counted from the index (trend.ts), and their rows DexScreener's pairs of those
+// pools (`latest/dex/pairs/<chainId>/<pool>,...`, at most DEX_PAIRS_MAX a call, on DexScreener's one budget, held.ts
+// DEX_LIMITS), each made by the token page's own rule (named.ts toNamed) and ranked by the window's volume. A pair of the
+// chain's own quotes (WETH/USDG, ETH/USDG) is no coin's row; a pool under LIQ_MIN_USD or with no volume in the window is
+// none either (a pool of a few dollars can be pushed to any price); a pool DexScreener does not name is never listed.
+//
 // Display only: nothing here feeds a signature. Every vendor and RPC value is hostile input, checked as in the Solana
 // lists: a row with no valid address, symbol or name is dropped, numbers are checked finite and bounded or become null,
 // text is cut and stripped, a list holds at most LIST_MAX rows, and an RPC log is used only when its emitter, topic0
@@ -29,8 +37,13 @@ import { gzipSync } from "node:zlib";
 import { LOGOS } from "../logo.ts";
 import { dec, LIST_MAX, ROW_FIELDS, SERVED_MAX, SERVED_MS, servedTokens, text, type ListsAnswer, type Row } from "../solana/lists.ts";
 import { LIST_FLOOR, throttledUntil, WINDOW_MS, type GeckoBudget } from "../gecko.ts";
-import { evmThrottleS, upstreamRetryAfterS, type ProviderHolds } from "../../limits/limits.ts";
+import { evmThrottleS, upstreamRetryAfterS, type ProviderHolds, type upstreamBudget } from "../../limits/limits.ts";
 import { BATCH_SIZES, batchRefusal, readWords, type BatchSizes } from "../../rpc/batch-sizes.ts";
+import { DEX_BASE, DEX_CHAIN, DEX_KEY, DEX_LIMITS } from "../held.ts";
+import { LIQ_MIN_USD } from "../near/lists.ts";
+import { toNamed } from "./named.ts";
+import { candidates, countSwaps, countsState, emptyCounts, restoreCounts } from "./trend.ts";
+import type { SwapIndex } from "./index.ts";
 
 export const EVM_CHAINS = ["base", "robinhood"] as const;
 export type EvmChain = (typeof EVM_CHAINS)[number];
@@ -53,6 +66,21 @@ export const GT_READS = {
 } as const;
 /** A list is read again once its last read is this old, when the lists lane yields a call. */
 export const LIST_MS = 60_000;
+/** The lists a wired swap index ranks (own), each with its window in seconds. */
+export const OWN_WINDOWS = { trending_5m: 300, trending_1h: 3_600 } as const;
+type OwnKey = keyof typeof OWN_WINDOWS;
+const OWN_KEYS = Object.keys(OWN_WINDOWS) as OwnKey[];
+const isOwnKey = (k: string): k is OwnKey => Object.hasOwn(OWN_WINDOWS, k);
+/** The rows an own list holds [design: GeckoTerminal's page 1, the 20 pools each list read before]. */
+export const OWN_ROWS = 20;
+/** Pools a DexScreener pairs call names [design: 30 asked, 30 answered, v4 pool ids and pool addresses alike, read
+ *  2026-11-25 07:2xZ from the Mac; its tokens/v1 takes 30 too, held.ts HELD_MAX]. */
+export const DEX_PAIRS_MAX = 30;
+const DEX_ANSWER_MAX = 512 * 1024;
+/** A chain's own trending source, wired once its swaps are made (server.ts): the swap index whose swaps are counted, the
+ *  PoolManager whose logs name a v4 pool by id, the swap topics, the chain's own quote tokens (a pair whose base token is
+ *  one, WETH/USDG or ETH/USDG, is no coin's row) and DexScreener's one budget. */
+export type OwnSource = { index: Pick<SwapIndex, "range" | "logs">; poolManager: string; topics: readonly string[]; quotes: readonly string[]; dex: ReturnType<typeof upstreamBudget> };
 /** The snapshot is rebuilt on the Solana lists' cadence (D-S2's 12 s): makers not settled yet are read again. */
 export const TICK_MS = 12_000;
 /** A snapshot whose oldest list read is older than this is behind: still served, dated by its oldest read, never
@@ -390,6 +418,37 @@ export function toRows(chain: EvmChain, answer: unknown, asOfMs: number): { rows
       buys_1h: count(h1.buys),
       sells_1h: count(h1.sells),
     } satisfies Record<(typeof ROW_FIELDS)[number], unknown>);
+  }
+  return { rows, created, pools };
+}
+
+/** DexScreener pairs as an own list's rows (at most OWN_ROWS, each token once, the busiest by the window's volume
+ *  first), each made by the token page's rule (named.ts toNamed: the chain's pair, its base token named, numbers
+ *  bounded); a pair whose pool is not in its exact form, under LIQ_MIN_USD or with no volume in the window is dropped.
+ *  Null when `pairs` is not a list. */
+export function ownRows(chain: EvmChain, pairs: unknown, asOfMs: number, key: OwnKey): { rows: Row[]; created: Map<string, number>; pools: Map<string, string> } | null {
+  if (!Array.isArray(pairs)) return null;
+  const vol = key === "trending_5m" ? "vol_5m_usd" : "vol_1h_usd";
+  const made: { row: Row; pool: string; v: number }[] = [];
+  for (const p of pairs.slice(0, 4 * DEX_PAIRS_MAX)) {
+    const token = evmAddress(obj(obj(p).baseToken).address);
+    const n = token === null ? null : toNamed(chain, token, [p], asOfMs);
+    if (n === null || n.pool === null) continue;
+    const [liq, v] = [Number(n.row.liq_usd ?? NaN), Number(n.row[vol] ?? NaN)];
+    if (!(liq >= Number(LIQ_MIN_USD)) || !(v > 0)) continue;
+    made.push({ row: n.row, pool: n.pool, v });
+  }
+  made.sort((a, b) => b.v - a.v);
+  const rows: Row[] = [];
+  const created = new Map<string, number>();
+  const pools = new Map<string, string>();
+  for (const m of made) {
+    const token = m.row.token as string;
+    if (created.has(token)) continue;
+    if (rows.length >= OWN_ROWS) break;
+    rows.push(m.row);
+    created.set(token, typeof m.row.created_s === "number" ? m.row.created_s : -1);
+    pools.set(token, m.pool);
   }
   return { rows, created, pools };
 }
@@ -777,11 +836,13 @@ export async function readMakers(chain: EvmChain, doFetch: Fetch, wanted: readon
 // ---------------------------------------------------------------------------------------------------------------
 
 const UPSTREAM: ListsAnswer = { status: 503, body: JSON.stringify({ error: { code: "upstream" } }) };
-type Read = { rows: Row[]; created: Map<string, number>; pools: Map<string, string>; at: number; raw: string };
+/** `src` "dexscreener": an own list's read, `raw` the pairs its rows were made of (ownRows), never GeckoTerminal's. */
+type Read = { rows: Row[]; created: Map<string, number>; pools: Map<string, string>; at: number; raw: string; src?: "dexscreener" };
 /** What a restart's next process takes over (../warm.ts, card helper-ready-gate): each list's GeckoTerminal answer as
  *  read and its read time, the makers read, and the tokens served with when (listed, card robinhood-listed-tape-opens).
- *  The answers are parsed again by toRows, as from GeckoTerminal. */
-export type EvmListsState = { reads: Partial<Record<string, { raw: string; at: number }>>; makers: [string, string | null][]; clock?: string; served?: [string, number][] };
+ *  The answers are parsed again by toRows, as from GeckoTerminal; an own list's pairs by ownRows; `trend` the swaps
+ *  counted for the own lists (trend.ts countsState). */
+export type EvmListsState = { reads: Partial<Record<string, { raw: string; at: number; src?: "dexscreener" }>>; makers: [string, string | null][]; clock?: string; served?: [string, number][]; trend?: ReturnType<typeof countsState> };
 /** The block clock a chain's makers were settled on (BLOCK_CLOCK), as the warm file carries it: a none settled on
  *  another clock may come from a wrong block range, so restore reads it again (card helper-ready-page-warm). */
 export const clockOf = (chain: EvmChain): string => JSON.stringify(BLOCK_CLOCK[chain]);
@@ -803,6 +864,64 @@ export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetc
   // listed, not only while the newest answer holds it (card token-page-data-complete-and-fast: a dropped token had no
   // hint, and its first open ran the whole pool discovery past swaps.ts OPEN_BOUND_MS, 503 at 12.1-12.6 s)
   const poolAt = new Map<string, { pool: string; at: number }>(); // the least recently named first
+  // the own lists' source, once wired (own), and the swaps it counted
+  let source: (OwnSource & { topicSet: ReadonlySet<string>; quoteSet: ReadonlySet<string> }) | null = null;
+  let counts = emptyCounts();
+
+  /** DexScreener's pairs of `ids` (every call answered, or null: the budget refused one, or one failed). */
+  async function dexPairs(s: OwnSource, ids: readonly string[]): Promise<unknown[] | null> {
+    const out: unknown[] = [];
+    for (let i = 0; i < ids.length; i += DEX_PAIRS_MAX) {
+      if (s.dex.take(DEX_KEY, undefined) > 0) return null;
+      try {
+        const r = await doFetch(`${DEX_BASE}/latest/dex/pairs/${DEX_CHAIN[chain]}/${ids.slice(i, i + DEX_PAIRS_MAX).join(",")}`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
+        if (r.status === 429) {
+          const ra = Number(r.headers.get("retry-after"));
+          s.dex.hold(DEX_KEY, now() + (Number.isFinite(ra) && ra > 0 ? ra * 1000 : DEX_LIMITS.windowMs!));
+          await r.body?.cancel();
+          return null;
+        }
+        if (r.status !== 200 || Number(r.headers.get("content-length") ?? "0") > DEX_ANSWER_MAX) {
+          await r.body?.cancel();
+          return null;
+        }
+        const body = await r.text();
+        if (body.length > DEX_ANSWER_MAX) return null;
+        const pairs = obj(JSON.parse(body)).pairs;
+        // DexScreener answers `pairs: null` when it names none of them
+        if (pairs !== null && !Array.isArray(pairs)) return null;
+        out.push(...(pairs ?? []).slice(0, DEX_PAIRS_MAX));
+      } catch {
+        return null;
+      }
+    }
+    return out;
+  }
+
+  /** The own lists' tick: the index's swaps since the last counted, then each own list older than LIST_MS (or read from
+   *  GeckoTerminal before) made again from its candidates' pairs, both in one set of DexScreener calls. */
+  async function ownTick(s: NonNullable<typeof source>): Promise<void> {
+    const nowS = Math.floor(now() / 1000);
+    const r = s.index.range();
+    if (r !== null && r.to > counts.seen) countSwaps(counts, s.index.logs(Math.max(counts.seen + 1, r.from), r.to), r.to, nowS, s.poolManager, s.topicSet);
+    const due = OWN_KEYS.filter((k) => reads[k]?.src !== "dexscreener" || now() - reads[k]!.at >= LIST_MS);
+    const want = new Map(due.map((k) => [k, candidates(counts, nowS, OWN_WINDOWS[k])] as const));
+    const ids = [...new Set([...want.values()].flat())];
+    if (ids.length === 0) return;
+    const pairs = await dexPairs(s, ids);
+    if (pairs === null) return;
+    const at = now();
+    for (const [k, mine] of want) {
+      const ask = new Set(mine);
+      // the window's candidates only, never a pair whose coin is one of the chain's own quotes
+      const chosen = pairs.filter((p) => {
+        const o = obj(p);
+        return typeof o.pairAddress === "string" && ask.has(o.pairAddress.toLowerCase()) && !s.quoteSet.has(evmAddress(obj(o.baseToken).address) ?? "");
+      });
+      const made = ownRows(chain, chosen, at, k);
+      if (made !== null) reads[k] = { ...made, at, raw: JSON.stringify(chosen), src: "dexscreener" };
+    }
+  }
 
   /** `since`: when the list was last read (-Infinity: never), the place the budget gives it among both chains' lists. */
   async function gt(path: string, urgent: boolean, first: boolean, since: number): Promise<Read | null> {
@@ -859,9 +978,11 @@ export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetc
   }
 
   async function tick(): Promise<void> {
+    // the own lists from the chain's swaps, no GeckoTerminal call (card robinhood-lists-own-reads)
+    if (source !== null) await ownTick(source);
     // the stalest list first (a missing one before any), one call at a time while the lists lane yields one
     const age = (k: ListKey) => (reads[k] === undefined ? Infinity : now() - reads[k]!.at);
-    for (const k of LIST_KEYS.filter((x) => age(x) >= LIST_MS).sort((a, b) => age(b) - age(a))) {
+    for (const k of LIST_KEYS.filter((x) => (source === null || !isOwnKey(x)) && age(x) >= LIST_MS).sort((a, b) => age(b) - age(a))) {
       const r = await gt(GT_READS[k], age(k) >= LIST_URGENT_MS, reads[k] === undefined, reads[k]?.at ?? -Infinity);
       if (r === null) break;
       reads[k] = r;
@@ -923,8 +1044,8 @@ export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetc
 
   /** This chain's lists as a next process takes them over. */
   function state(): EvmListsState {
-    const out: EvmListsState = { reads: {}, makers: [...makers], clock: clockOf(chain), served: served.state() };
-    for (const k of LIST_KEYS) if (reads[k] !== undefined) out.reads[k] = { raw: reads[k]!.raw, at: reads[k]!.at };
+    const out: EvmListsState = { reads: {}, makers: [...makers], clock: clockOf(chain), served: served.state(), ...(counts.seen >= 0 ? { trend: countsState(counts) } : {}) };
+    for (const k of LIST_KEYS) if (reads[k] !== undefined) out.reads[k] = { raw: reads[k]!.raw, at: reads[k]!.at, ...(reads[k]!.src === undefined ? {} : { src: reads[k]!.src }) };
     return out;
   }
 
@@ -939,19 +1060,25 @@ export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetc
    *  True when every list is held after it, so the lists answer without a GeckoTerminal call. */
   function restore(st: unknown): boolean {
     const t = now();
-    const o = (st ?? {}) as { reads?: unknown; makers?: unknown; clock?: unknown; served?: unknown };
+    const o = (st ?? {}) as { reads?: unknown; makers?: unknown; clock?: unknown; served?: unknown; trend?: unknown };
     const sameClock = o.clock === clockOf(chain);
     const rs = (o.reads ?? {}) as Record<string, unknown>;
     for (const k of LIST_KEYS) {
-      const r = (Object.hasOwn(rs, k) ? rs[k] : undefined) as { raw?: unknown; at?: unknown } | undefined;
+      const r = (Object.hasOwn(rs, k) ? rs[k] : undefined) as { raw?: unknown; at?: unknown; src?: unknown } | undefined;
       if (reads[k] !== undefined || typeof r?.raw !== "string" || r.raw.length > ANSWER_MAX || typeof r.at !== "number" || !Number.isFinite(r.at) || r.at > t) continue;
       try {
-        const rows = toRows(chain, JSON.parse(r.raw), r.at);
-        if (rows !== null) reads[k] = { ...rows, at: r.at, raw: r.raw };
+        // an own list's pairs are made again by ownRows, GeckoTerminal's answers by toRows; a pair list under any other
+        // key is no read
+        const own = r.src === "dexscreener";
+        if (own && !isOwnKey(k)) continue;
+        const rows = own ? ownRows(chain, JSON.parse(r.raw), r.at, k as OwnKey) : toRows(chain, JSON.parse(r.raw), r.at);
+        if (rows !== null) reads[k] = { ...rows, at: r.at, raw: r.raw, ...(own ? { src: "dexscreener" as const } : {}) };
       } catch {
-        // not an answer: the list is read from GeckoTerminal
+        // not an answer: the list is read again
       }
     }
+    // the swaps counted for the own lists, an hour at most, so the 1h list ranks the hour before the restart too
+    if (counts.seen < 0 && o.trend !== undefined) counts = restoreCounts(o.trend, Math.floor(t / 1000));
     const pads = new Set(FACTORIES[chain].map((f) => f.pad));
     if (Array.isArray(o.makers))
       for (const m of o.makers.slice(0, MAKER_MAX)) {
@@ -1004,5 +1131,11 @@ export function createEvmLists(chain: EvmChain, gecko: GeckoBudget, deps: { fetc
     return p;
   }
 
-  return { get, warm, tick, state, restore, onAnswer, listed, pool, maker };
+  /** Wires the chain's own trending source (server.ts, once the chain's swaps are made): from the next tick on, Trending
+   *  5m and 1h come from its swaps and DexScreener's pairs, never from GeckoTerminal. */
+  function own(s: OwnSource): void {
+    source = { ...s, topicSet: new Set(s.topics.map((x) => x.toLowerCase())), quoteSet: new Set(s.quotes.map((x) => x.toLowerCase())) };
+  }
+
+  return { get, warm, tick, state, restore, onAnswer, listed, pool, maker, own };
 }
