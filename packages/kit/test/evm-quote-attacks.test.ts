@@ -7798,6 +7798,85 @@ test("SL6 card base-rpc-list-fix: a warm Base scan with its first two down and i
   }
 }));
 
+// card base-warm-quote-rides-a-stalled-last-scan: read-only warm Base quotes from the Mac (2026-11-25 19:4xZ, the live
+// check evm-quote-lag-held's base-blastapi-5 case) ended rpc_error "the last scan provider did not carry the scan's
+// blocks within 8000 ms", three in a row over about 28 s, the length of a hold after a throttle: base-rpc.publicnode.com,
+// answering each of the tail's posts in 118 to 465 ms, was passed over for every warm request, the next two passed or
+// failed them, and rpc.sentio.xyz, the last, 81 to 186 blocks behind, answered each request's block "beyond the latest
+// block".
+// The last here: that lag (each getLogs [] and the block in Sentio's words), a getLogs it never answers, or no
+// connection for any call, head reads too. The first, passed over but never asked, is asked: at once where the others
+// failed, at EVM_SCAN_HOLD_MS where the last is still out (so before the last's EVM_SCAN_LAST_MS cut ends its getLogs);
+// and for the head where none after it answered one.
+const SL8_BEHIND = 81;
+/** `inner` answered as a provider SL8_BEHIND blocks behind `headNo`: a getLogs past its head [], a block past it in
+ *  rpc.sentio.xyz's words; the rest as `inner`. */
+const behindOf = (headNo: number) => (inner: EvmRpc): EvmRpc => async (calls) =>
+  (await inner(calls)).map((o, id) => {
+    const c = calls[id]!;
+    const own = headNo - SL8_BEHIND;
+    if (c.method === "eth_getLogs") return Number((c.params[0] as { toBlock: string }).toBlock) > own ? { jsonrpc: "2.0", id, result: [] } : o;
+    const n = Number(c.params[0]);
+    return c.method === "eth_getBlockByNumber" && n > own ? { jsonrpc: "2.0", id, error: { code: -32000, message: `block ${n} is beyond the latest block ${own} of this node, retry` } } : o;
+  });
+for (const [name, lastOf] of [
+  ["behind", behindOf(5_000_010)],
+  ["hang", (inner: EvmRpc, events: string[]): EvmRpc => async (calls, signal) => (calls.some((c) => c.method === "eth_getLogs") ? untilAborted(signal).finally(() => events.push("last cut")) : inner(calls))],
+  ["refuse", (): EvmRpc => refusing("four.sl8.test")],
+] as [string, (inner: EvmRpc, events: string[]) => EvmRpc][]) {
+  const k = ["behind", "hang", "refuse"].indexOf(name);
+  test(`SL8 card base-warm-quote-rides-a-stalled-last-scan: a warm Base scan whose first is held after its throttle, its second and third refusing and its last ${name}: the first is asked and carries it`, { timeout: 60_000 }, () => onTestClock(async () => {
+    evmPaceReset();
+    const token = "0x00000000000000000000000000000000005c463" + k;
+    const warm = scanner(5_000_000, []);
+    await triQuote(token, [warm, scanner(5_000_000, []), scanner(5_000_000, []), scanner(5_000_000, [])]);
+    const url = "https://base-rpc.publicnode.com";
+    const inner = scanner(5_000_010, realAt(token, 5_000_005));
+    const events: string[] = [];
+    const first = evmJsonRpc(url, (async (_u: string, init: RequestInit) => {
+      const calls = (JSON.parse(init.body as string) as { method: string; params: unknown[] }[]).map((c) => ({ method: c.method, params: c.params }));
+      if (calls.some((c) => c.method === "eth_getLogs")) events.push("first");
+      return new Response(JSON.stringify(await inner(calls)), { status: 200 });
+    }) as unknown as typeof fetch);
+    quoteMod.evmScanTailAlias(first, warm);
+    // held as a throttle holds it (pace.ts): a warm request, and the head's read, pass it over to the next unsent
+    evmProviderHold(url);
+    const v = await triQuote(token, [first, refusing("two.sl8.test"), refusing("three.sl8.test"), lastOf(scanner(5_000_010, realAt(token, 5_000_005)), events)], "base", 5_000_010);
+    evmPaceReset();
+    console.log(`SL8 ${name}: ${JSON.stringify(v)}, ${JSON.stringify(events)}`);
+    assert.deepEqual(v, below, name);
+    assert.ok(events.includes("first"), `${name}: the held first was never asked the blocks every other provider failed`);
+    const cut = events.indexOf("last cut");
+    assert.ok(cut < 0 || events.indexOf("first") < cut, `${name}: the first was asked only once the last's request was cut: ${JSON.stringify(events)}`);
+  }));
+}
+
+// The same on a scan that is not warm (scanPools `run`): 12,000 blocks since the kept scan, the first's 10,000-block
+// request sent to it through its hold (past the next's one round, SCAN_ALONE's rule) and its 2,000-block one, which the
+// next reads in a round, passed over unsent; the next two refuse it and the last, behind, answers its blocks past its
+// own head as none. The first is asked those blocks and the quote finds the pool made in them; on main it ends rpc_error.
+test("SL9 card base-warm-quote-rides-a-stalled-last-scan: a scan's request its held first passed over and every provider after it failed is asked of the first", { timeout: 60_000 }, () => onTestClock(async () => {
+  evmPaceReset();
+  const token = "0x00000000000000000000000000000000005c4640";
+  const warm = scanner(5_000_000, []);
+  await triQuote(token, [warm, scanner(5_000_000, []), scanner(5_000_000, []), scanner(5_000_000, [])]);
+  const url = "https://base-rpc.publicnode.com";
+  const inner = scanner(5_012_000, realAt(token, 5_011_990));
+  const firstAsked: [number, number][] = [];
+  const first = evmJsonRpc(url, (async (_u: string, init: RequestInit) => {
+    const calls = (JSON.parse(init.body as string) as { method: string; params: unknown[] }[]).map((c) => ({ method: c.method, params: c.params }));
+    for (const c of calls) if (c.method === "eth_getLogs") firstAsked.push([Number((c.params[0] as { fromBlock: string }).fromBlock), Number((c.params[0] as { toBlock: string }).toBlock)]);
+    return new Response(JSON.stringify(await inner(calls)), { status: 200 });
+  }) as unknown as typeof fetch);
+  quoteMod.evmScanTailAlias(first, warm);
+  evmProviderHold(url);
+  const v = await triQuote(token, [first, refusing("two.sl9.test"), refusing("three.sl9.test"), behindOf(5_012_000)(scanner(5_012_000, realAt(token, 5_011_990)))], "base", 5_012_000);
+  evmPaceReset();
+  console.log(`SL9: ${JSON.stringify(v)}, the first asked ${JSON.stringify(firstAsked)}`);
+  assert.deepEqual(v, below);
+  assert.ok(firstAsked.some(([a, b]) => a <= 5_011_990 && b >= 5_011_990), `block 5,011,990 never asked of the held first: ${JSON.stringify(firstAsked)}`);
+}));
+
 test("TAIL4 card evm-scan-chain-tail (independent review of 92717c7, MEDIUM 1): blocks a spare answered no logs of are never kept as read for another coin: a pool of B made there is found by B's quote on the first", { timeout: 60_000 }, () => onTestClock(async () => {
   const [A, B] = ["0x00000000000000000000000000000000005c4631", "0x00000000000000000000000000000000005c4632"];
   // the chain's tail up to 5,000,000, on the first
