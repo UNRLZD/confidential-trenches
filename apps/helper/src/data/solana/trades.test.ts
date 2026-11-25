@@ -2167,3 +2167,29 @@ test("card helper-sol-tape-checks-hold: a tape whose walk waits on a read (its f
   release();
   t.stop();
 });
+
+test("card sol-stream-refuses-unsigned-notes: a stream note signed with the default signature (64 ones, which no transaction on chain carries) holds no trade; the same logs under the transaction's own signature do", async () => {
+  // live run 45602902162 (helper 14f8ab810), index-sol-trades: the public websocket sent GEJvXD3R a logsNotification
+  // signed 1111...1111, err null, with a trade's logs; no RPC knows that signature
+  const DEFAULT_SIG = "1".repeat(64);
+  let on: SourceEvents | null = null;
+  const t = createSolanaTrades({
+    fetch: rpcFetch({ sigs: () => [], txs: {}, price: 9_342_267_796n, pub: TS, slot: 100 }, { [MINT]: 6 }) as never,
+    now: () => TS * 1000,
+    listed: async (m) => m === MINT,
+    rpcs: ["https://rpc.test"],
+    source: (o) => ((on = o), { watch: async () => undefined, unwatch: () => undefined, close: () => undefined }),
+    tickMs: 0,
+  });
+  assert.equal((await t.trades(MINT, 50)).status, 200);
+  await settle();
+  withClock(on!).note(MINT, { sig: DEFAULT_SIG, slot: 465_000_000, err: false, logs: BUY.result.meta.logMessages });
+  await settle();
+  t.tick();
+  assert.deepEqual(JSON.parse((await t.trades(MINT, 50)).body).trades, [], "no row from a note no transaction carries");
+  withClock(on!).note(MINT, { sig: BUY.signature, slot: 465_000_001, err: false, logs: BUY.result.meta.logMessages });
+  await settle();
+  t.tick();
+  assert.deepEqual(JSON.parse((await t.trades(MINT, 50)).body).trades.map((r: { tx: string }) => r.tx), [BUY.signature]);
+  t.stop();
+});
