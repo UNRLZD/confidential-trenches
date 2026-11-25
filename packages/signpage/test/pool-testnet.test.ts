@@ -1776,10 +1776,15 @@ test("a kept sell settled while the ops write fails once: the record stays, and 
 test("a kept list read that always fails: the same state read still settles a dead pending sell request", async () => {
   const k = await keptWorld();
   await k.w.put("ops", "op2", { kind: "sell", pool: "sol", sha: "00", stage: "pending", txs: [], created_ms: 1 });
-  const flaky = storeWith(k.w, "get", (orig, store, key, ...rest) => (store === "meta" && key === "owed/kept-sell-sol" ? Promise.reject(new Error("meta read failed")) : orig(store, key, ...rest)));
+  const keys: string[] = [];
+  const flaky = storeWith(k.w, "get", (orig, store, key, ...rest) => (keys.push(`${String(store)}:${String(key)}`), store === "meta" && key === "owed/kept-sell-sol" ? Promise.reject(new Error("meta read failed")) : orig(store, key, ...rest)));
   try {
     await k.pool(flaky).stateRead();
     assert.equal(await k.stage("op2"), "refused");
+    // the dead request is settled before the kept list is read: what shows the read went on past the failed list is a
+    // step after it, the rent backs' booked ride read (the nightly sweep's P3-2 mutant, the list read unguarded, passed
+    // every test at 2232c2c2c)
+    assert.ok(keys.indexOf("meta:owed/rentback-sol-ride") > keys.indexOf("meta:owed/kept-sell-sol"), `the read ended at the failed list: ${JSON.stringify(keys.slice(-3))}`);
   } finally {
     k.w.close();
   }

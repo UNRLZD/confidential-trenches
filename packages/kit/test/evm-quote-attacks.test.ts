@@ -3122,6 +3122,23 @@ test("FU1 a provider that cannot be reached, one of three, is sent each request 
       assert.ok(bodies.length > 0, `${name}: the unreachable provider was asked first`);
       assert.equal(new Set(bodies).size, bodies.length, `${name}: a request was sent to the unreachable provider ${bodies.length - new Set(bodies).size} times more`);
     }
+    // the nightly sweep's FU1 mutant (an unreachable provider asked again 0.5 s on while another is left) passed every
+    // test at 2232c2c2c: the two others answered at once, so the quote was done before the re-ask and the gate dropped it
+    // unsent. With a fourth provider and the others' answers 700 ms on, the head read (the unreachable one's first request)
+    // is still open at the re-ask while a provider is left: a re-ask would be sent
+    const late = (rpc: EvmRpc): EvmRpc => async (calls, ...rest) => (await new Promise((r) => setTimeout(r, 700)), rpc(calls, ...rest));
+    for (const [k, [name, fail]] of forms.entries()) {
+      const bodies: string[] = [];
+      const away = evmJsonRpc(`https://away${k}.fu1b.test`, (async (_u: string, init: { body: string }) => {
+        bodies.push(init.body);
+        throw fail();
+      }) as unknown as typeof fetch);
+      const v = await verdict(evmPoolBuyQuoteWith(req, [away, late(chain([best(token)], 0)), late(chain([best(token)], 1)), late(chain([best(token)], 0))], NOW));
+      assert.equal(v.accepted, true, `${name}, the others late: ${String((v as { code?: string }).code)}`);
+      await new Promise((r) => setTimeout(r, 3_500));
+      assert.ok(bodies.length > 0, `${name}, the others late: the unreachable provider was asked first`);
+      assert.equal(new Set(bodies).size, bodies.length, `${name}, the others late: a request was sent to the unreachable provider ${bodies.length - new Set(bodies).size} times more`);
+    }
   } finally {
     evmPaceReset();
   }
@@ -6638,6 +6655,12 @@ test("LQ3 an answer outside 2xx that is no not-yet answer is refused, its body r
   const f = (async () => new Response(body, { status: 403 })) as unknown as typeof fetch;
   await assert.rejects(evmJsonRpc("https://lq3.test", f)([{ method: "eth_blockNumber", params: [] }]), /HTTP 403/);
   assert.equal(cancelled, true);
+  // a 5xx's body is never read: it is let go at once, never left holding the connection (the nightly sweep's LQ3
+  // mutant, the 5xx cancel removed, passed every test at 2232c2c2c)
+  let let5xx = false;
+  const endless = new ReadableStream({ pull: (c) => c.enqueue(new TextEncoder().encode("[")), cancel: () => void (let5xx = true) });
+  await assert.rejects(evmJsonRpc("https://lq3b.test", (async () => new Response(endless, { status: 502 })) as unknown as typeof fetch)([{ method: "eth_blockNumber", params: [] }]), /HTTP 502/);
+  assert.equal(let5xx, true, "the 5xx body cancelled");
 });
 
 // card evm-lag-answer-read-again: release 187's sign live run 44912189713 (21 Nov) read robinhood.drpc.org answer HTTP
@@ -6713,11 +6736,15 @@ test("LG3 a quote whose last provider left answers its state reads HTTP 400 \"Un
 // (base-partial-v4) against 194 and 465 ms in the same code's PR run: a lagging provider's not-yet answers, asked again 0.25,
 // 0.5 and 0.75 s on its own provider (askAt), held the quote about 1.5 s where another provider was left to ask
 test("LG5 a provider whose answers are not yet at the block, under a 200 or a 4xx, gives way at once to a provider left: the lagging batch is never posted again, so the quote waits none of the 1.5 s of re-asks (red at 4e6f453ef)", async () => {
-  for (const status of [200, 400]) {
+  // the nightly sweep's LG5 mutant (the throw while a provider is left removed) passed every test at 2232c2c2c: the two
+  // that hold the block answered in 20 ms, so the quote was done before the lagging batch's first re-ask (250 ms on) and
+  // the gate dropped it unsent. With a fourth provider and the others' state reads 600 ms on, the quote is still open at
+  // the first re-ask while a provider is left: a re-ask would be posted
+  for (const [status, wait] of [[200, 20], [400, 20], [200, 600], [400, 600]] as const) {
     const token = freshToken();
     const pools = [best(token)];
-    const host = `lag${status}.lg5.test`;
-    const models: Record<string, EvmRpc> = { [host]: chain(pools, 0), [`a${status}.lg5.test`]: chain(pools, 0), [`b${status}.lg5.test`]: chain(pools, 0) };
+    const host = `lag${status}w${wait}.lg5.test`;
+    const models: Record<string, EvmRpc> = { [host]: chain(pools, 0), [`a${status}w${wait}.lg5.test`]: chain(pools, 0), [`b${status}w${wait}.lg5.test`]: chain(pools, 0), ...(wait === 20 ? {} : { [`c${status}w${wait}.lg5.test`]: chain(pools, 0) }) };
     const urls = Object.keys(models).map((h) => "https://" + h);
     const posted = new Map<string, number>();
     const f = (async (u: string, init: RequestInit) => {
@@ -6728,7 +6755,7 @@ test("LG5 a provider whose answers are not yet at the block, under a 200 or a 4x
         // every state read of the lagging provider: Base's "block not found" under a 200 (null), drpc's code 27 under a 400
         return new Response(JSON.stringify(calls.map((c) => (status === 200 ? { jsonrpc: "2.0", id: c.id, result: null } : UNKNOWN_STATE(c.id)))), { status });
       }
-      await pause(20);
+      await pause(calls.some((c) => c.method === "eth_call") ? wait : 20);
       const out = await models[h]!(calls.map((c) => ({ method: c.method, params: c.params })));
       return new Response(JSON.stringify(out.map((a, i) => ({ ...(a as object), id: calls[i]!.id }))));
     }) as unknown as typeof fetch;
@@ -7435,8 +7462,15 @@ test("SP6 a first scan provider whose head read takes 2.5 s: the head is the sec
   const token = "0x00000000000000000000000000000000005c450a";
   const inner = scanner(5_000_000, realAt(token, 4_999_000));
   const firstLogs: [number, number][] = [];
-  const slowHead: EvmRpc = async (calls) => {
-    if (calls.some((c) => c.method === "eth_blockNumber")) await pause(2_500);
+  // the first's head read is cut at the hold, its post let go (the nightly sweep's SP6 mutant, no cut, passed every test
+  // at 2232c2c2c: the second's head is raced in beside it, so only the cut post tells the two apart)
+  let headCut: number | null = null;
+  const slowHead: EvmRpc = async (calls, signal) => {
+    if (calls.some((c) => c.method === "eth_blockNumber")) {
+      const t0 = performance.now();
+      signal?.addEventListener("abort", () => (headCut ??= performance.now() - t0));
+      await pause(2_500);
+    }
     for (const f of getLogsOf(calls)) firstLogs.push([Number(f.fromBlock), Number(f.toBlock)]);
     return inner(calls);
   };
@@ -7452,6 +7486,9 @@ test("SP6 a first scan provider whose head read takes 2.5 s: the head is the sec
   const { v } = await pairQuote(token, slowHead, secondRpc);
   assert.deepEqual(v, below);
   assert.ok(secondHeads > 0, "the head was the first's, waited for past the 2 s cut");
+  // the quote is done on the second's head before the hold: past the first's 2.5 s, its post was cut at the hold
+  await pause(3_000);
+  assert.equal(headCut, quoteMod.EVM_SCAN_HOLD_MS, "the first's head read cut at the hold");
   assert.ok(firstLogs.length > 0, "the first was asked no getLogs");
   assert.equal(second.length, 0, `the second read ${second.length} of a cold scan's requests`);
 }));
