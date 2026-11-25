@@ -49,6 +49,7 @@ import { SOL_PIECES } from "../../wallet/src/pool/solana.ts";
 import { isRung } from "../../wallet/src/pool/ladder.ts";
 import { ridePiece } from "../src/pool-withdraw.ts";
 import { poolSellPays } from "../src/pool-sell-dry.ts";
+import { enableTimers, resetTimers } from "./mock-timers.ts";
 
 import { SEED64, L, J, W, PIN, SCOPE, VF, MINT, AMOUNT, SLIPPAGE, ASK, UNITS, FEE, feeOf, N, ENOUGH, enc, be32, beInt, FRONT_RUN, markOf, RETURN, SECOND, W_NOTE, W_NOTE_MARK, preOf, MINT_READ, TOKEN_PROGRAM, ATA, REF, MIN_OUT, nativeAccount, tokenAccount, pageBytes, chain, rentMin, type Acc, type Plant, type Venue } from "./pool-sell-world.ts";
 
@@ -7260,7 +7261,8 @@ const neverOpens = (ms = 30) => deviceSpacing({ open: () => ({}) } as unknown as
 // no verdict (sweep 45612446421 and the 24 Nov nightly); here the bound's own timer is moved on by hand, and a call still
 // pending after it is a failed assertion
 test("card nightly-sweep-runs-whole: the device's spacing on an open that never answers rejects each call once its bound passes", async (t) => {
-  t.mock.timers.enable({ apis: ["setTimeout"] });
+  enableTimers(t.mock.timers, { apis: ["setTimeout"] });
+  t.after(() => resetTimers(t.mock.timers));
   const d = neverOpens(30);
   const stamp = { at: 700_000, gap: 600_000 };
   const calls: [string, () => Promise<unknown>][] = [["spacing", () => d.spacing()], ["space", () => d.space(stamp)], ["claim", () => d.claim(stamp)]];
