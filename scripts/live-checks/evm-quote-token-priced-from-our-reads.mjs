@@ -11,6 +11,8 @@
 //   - no answer names evm-vendor-price.
 // The rows priced from chain (evm-quote-usd) are printed: a coin that traded in the hold shows them, a quiet one none.
 // A coin with too few vendor answers to judge: INCONCLUSIVE (exit 2, provider-answer.mjs nothingToJudge), never a pass.
+// A coin every read of which the helper answers 404 is gone (it carries the coin no more) and is named, not judged; with
+// no coin judged the run is INCONCLUSIVE (card evm-quote-check-skips-a-gone-coin).
 // After: helper
 // Serial: evm-keyed 400 (its Base and Robinhood tape reads draw the keyed providers)
 //   node scripts/live-checks/evm-quote-token-priced-from-our-reads.mjs [--base <url>] [--record <file>]
@@ -78,14 +80,21 @@ export async function read(
   return { base: b, at: new Date(now()).toISOString(), chains };
 }
 
-/** PASS, FAIL or null (a coin with too few vendor answers to judge), with one line per rule (a failed rule: BAD). */
+/** PASS, FAIL or null (a coin with too few vendor answers to judge, or no coin judged), with one line per rule (a failed
+ *  rule: BAD). Card evm-quote-check-skips-a-gone-coin: a coin the helper carries no more, every read answered 404 (Base
+ *  USEF 0x1668cd48 on helper 70328a60c, 25 Nov 10:4xZ, DexScreener naming no pair for it), is named gone and not judged. */
 export function judge(r) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok" : "BAD"} ${text}`);
   let none = false;
+  let judged = 0;
   for (const chain of CHAINS) {
     const reads = arr(obj(obj(r.chains)[chain]).reads);
     const tag = `${chain} ${String(COINS[chain]).slice(0, 10)}`;
+    if (reads.length > 0 && reads.every((x) => x.status === 404)) {
+      lines.push(`--  ${tag}: gone, every one of its ${reads.length} answers 404 (the helper carries it no more), not judged`);
+      continue;
+    }
     const vendor = reads.filter((x) => VENDOR.test(String(x.timing)));
     if (vendor.length < MIN_VENDOR) {
       lines.push(
@@ -109,9 +118,10 @@ export function judge(r) {
       ...vendor.map((x) => Number(THROUGH.exec(String(x.timing))?.[1] ?? 0)),
     );
     lines.push(`--  ${tag}: rows priced from chain at their block: ${through}`);
+    judged++;
   }
   const bad = lines.some((l) => l.startsWith("BAD"));
-  return { ok: bad ? false : none ? null : true, lines };
+  return { ok: bad ? false : none || judged === 0 ? null : true, lines };
 }
 
 if (import.meta.main) {

@@ -1,7 +1,8 @@
 {
  "_about": {
   "good": "mainnet-run.mjs (named in the card's report) at this card's head 9c3741368, 19 Nov 2026 14:22-14:25Z on the Mac: a helper's createSwaps on Base's and Robinhood's own providers (SWAP_RPCS), no CoinGecko key, keyless GeckoTerminal answering each coin's first read and then refused (429) for every call; each coin's trades read every 2 s for 190 s; each read's Server-Timing evm-vendor and evm-quote entries kept as its timing (evm-open and evm-queue left out), `at` the run's second. No new trade of either coin landed in the run (USEF trades hours apart; fBOMB's rows are not served, card robinhood-solidly-vendor-rows-serve), so no row was priced from chain and none at the vendor's rate: PASS",
-  "bad": "the base before the card, b0cb7010b, on the card's recorded mainnet reads (apps/helper/src/data/evm/quote-token-usd.test.ts's replay harness and fixtures/quote-token-usd.json: the key's share spent, each pool's newest trade on chain), each answer's status, Server-Timing, src and row count as the harness read them; Base's run stops at its first answer naming the rate (8 answers, too few alone), Robinhood's 32 name evm-vendor-price from the eighth: FAIL"
+  "bad": "the base before the card, b0cb7010b, on the card's recorded mainnet reads (apps/helper/src/data/evm/quote-token-usd.test.ts's replay harness and fixtures/quote-token-usd.json: the key's share spent, each pool's newest trade on chain), each answer's status, Server-Timing, src and row count as the harness read them; Base's run stops at its first answer naming the rate (8 answers, too few alone), Robinhood's 32 name evm-vendor-price from the eighth: FAIL",
+  "gone": "this check run on the Mac against the deployed helper (X-Helper-Commit 70328a60c), 25 Nov 2026 10:45Z, --record: Base USEF 0x1668cd48 answered 404 not_found to every read (DexScreener token-pairs/v1/base names no pair for it, read the same minute); Robinhood fBOMB 0x84d6bb25 the vendor rows, none at the vendor rate"
  },
  "good": {
   "base": "http://helper.local",
@@ -1687,6 +1688,386 @@
       "at": 1795077248000,
       "status": 200,
       "timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 0 ms ago\", evm-vendor-price;desc=\"usd read 60000 ms ago\"",
+      "src": "coingecko",
+      "n": 0
+     }
+    ]
+   }
+  }
+ },
+ "gone": {
+  "base": "https://ct-api.unrealized.trade",
+  "at": "2026-11-25T10:45:47.921Z",
+  "chains": {
+   "base": {
+    "coin": "0x1668cd48f31d869fca21eb826ca60e94cffc018c",
+    "reads": [
+     {
+      "at": 1795603430615,
+      "status": 404,
+      "timing": "",
+      "src": null,
+      "n": 0
+     },
+     {
+      "at": 1795603433371,
+      "status": 404,
+      "timing": "",
+      "src": null,
+      "n": 0
+     },
+     {
+      "at": 1795603435781,
+      "status": 404,
+      "timing": "",
+      "src": null,
+      "n": 0
+     },
+     {
+      "at": 1795603438001,
+      "status": 404,
+      "timing": "",
+      "src": null,
+      "n": 0
+     },
+     {
+      "at": 1795603440312,
+      "status": 404,
+      "timing": "",
+      "src": null,
+      "n": 0
+     },
+     {
+      "at": 1795603442716,
+      "status": 404,
+      "timing": "",
+      "src": null,
+      "n": 0
+     },
+     {
+      "at": 1795603444951,
+      "status": 404,
+      "timing": "",
+      "src": null,
+      "n": 0
+     },
+     {
+      "at": 1795603447180,
+      "status": 404,
+      "timing": "",
+      "src": null,
+      "n": 0
+     },
+     {
+      "at": 1795603449405,
+      "status": 404,
+      "timing": "",
+      "src": null,
+      "n": 0
+     },
+     {
+      "at": 1795603451605,
+      "status": 404,
+      "timing": "",
+      "src": null,
+      "n": 0
+     },
+     {
+      "at": 1795603453825,
+      "status": 404,
+      "timing": "",
+      "src": null,
+      "n": 0
+     },
+     {
+      "at": 1795603456035,
+      "status": 404,
+      "timing": "",
+      "src": null,
+      "n": 0
+     },
+     {
+      "at": 1795603458255,
+      "status": 404,
+      "timing": "",
+      "src": null,
+      "n": 0
+     },
+     {
+      "at": 1795603460469,
+      "status": 404,
+      "timing": "",
+      "src": null,
+      "n": 0
+     },
+     {
+      "at": 1795603462684,
+      "status": 404,
+      "timing": "",
+      "src": null,
+      "n": 0
+     },
+     {
+      "at": 1795603464895,
+      "status": 404,
+      "timing": "",
+      "src": null,
+      "n": 0
+     },
+     {
+      "at": 1795603467164,
+      "status": 404,
+      "timing": "",
+      "src": null,
+      "n": 0
+     },
+     {
+      "at": 1795603469370,
+      "status": 404,
+      "timing": "",
+      "src": null,
+      "n": 0
+     },
+     {
+      "at": 1795603471585,
+      "status": 404,
+      "timing": "",
+      "src": null,
+      "n": 0
+     },
+     {
+      "at": 1795603473801,
+      "status": 404,
+      "timing": "",
+      "src": null,
+      "n": 0
+     },
+     {
+      "at": 1795603476012,
+      "status": 404,
+      "timing": "",
+      "src": null,
+      "n": 0
+     },
+     {
+      "at": 1795603478248,
+      "status": 404,
+      "timing": "",
+      "src": null,
+      "n": 0
+     },
+     {
+      "at": 1795603480465,
+      "status": 404,
+      "timing": "",
+      "src": null,
+      "n": 0
+     },
+     {
+      "at": 1795603482680,
+      "status": 404,
+      "timing": "",
+      "src": null,
+      "n": 0
+     },
+     {
+      "at": 1795603484896,
+      "status": 404,
+      "timing": "",
+      "src": null,
+      "n": 0
+     },
+     {
+      "at": 1795603487132,
+      "status": 404,
+      "timing": "",
+      "src": null,
+      "n": 0
+     },
+     {
+      "at": 1795603489343,
+      "status": 404,
+      "timing": "",
+      "src": null,
+      "n": 0
+     }
+    ]
+   },
+   "robinhood": {
+    "coin": "0x84d6bb25d3b013c784be60dc598c920588f452bc",
+    "reads": [
+     {
+      "at": 1795603489584,
+      "status": 200,
+      "timing": "evm-open;dur=1382, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 1 ms ago\", total;dur=1716",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795603494402,
+      "status": 200,
+      "timing": "evm-open;dur=4, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 2701 ms ago\", total;dur=4",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795603497101,
+      "status": 200,
+      "timing": "evm-open;dur=6, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 4920 ms ago\", total;dur=6",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795603499319,
+      "status": 200,
+      "timing": "evm-open;dur=5, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 7142 ms ago\", total;dur=5",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795603501546,
+      "status": 200,
+      "timing": "evm-open;dur=4, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 9439 ms ago\", total;dur=5",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795603503869,
+      "status": 200,
+      "timing": "evm-open;dur=3, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 11702 ms ago\", total;dur=5",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795603506127,
+      "status": 200,
+      "timing": "evm-open;dur=2, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 14024 ms ago\", total;dur=2",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795603508436,
+      "status": 200,
+      "timing": "evm-open;dur=4, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 4556 ms ago\", total;dur=5",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795603510710,
+      "status": 200,
+      "timing": "evm-open;dur=2, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 6919 ms ago\", total;dur=3",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795603513074,
+      "status": 200,
+      "timing": "evm-open;dur=5, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 9262 ms ago\", total;dur=5",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795603515422,
+      "status": 200,
+      "timing": "evm-open;dur=5, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 11546 ms ago\", total;dur=6",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795603517696,
+      "status": 200,
+      "timing": "evm-open;dur=6, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 2515 ms ago\", total;dur=7",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795603520262,
+      "status": 200,
+      "timing": "evm-open;dur=5, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 4805 ms ago\", total;dur=5",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795603522521,
+      "status": 200,
+      "timing": "evm-open;dur=5, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 7035 ms ago\", total;dur=5",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795603524761,
+      "status": 200,
+      "timing": "evm-open;dur=2, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 9446 ms ago\", total;dur=2",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795603527163,
+      "status": 200,
+      "timing": "evm-open;dur=6, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 11658 ms ago\", total;dur=7",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795603529386,
+      "status": 200,
+      "timing": "evm-open;dur=3, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 2246 ms ago\", total;dur=4",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795603531661,
+      "status": 200,
+      "timing": "evm-open;dur=5, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 4469 ms ago\", total;dur=5",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795603533879,
+      "status": 200,
+      "timing": "evm-open;dur=2, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 6695 ms ago\", total;dur=2",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795603536108,
+      "status": 200,
+      "timing": "evm-open;dur=5, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 8944 ms ago\", total;dur=5",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795603538360,
+      "status": 200,
+      "timing": "evm-open;dur=2, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 11257 ms ago\", total;dur=4",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795603540688,
+      "status": 200,
+      "timing": "evm-open;dur=4, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 2278 ms ago\", total;dur=4",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795603542975,
+      "status": 200,
+      "timing": "evm-open;dur=4, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 4692 ms ago\", total;dur=5",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795603545390,
+      "status": 200,
+      "timing": "evm-open;dur=3, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 6962 ms ago\", total;dur=3",
+      "src": "coingecko",
+      "n": 0
+     },
+     {
+      "at": 1795603547664,
+      "status": 200,
+      "timing": "evm-open;dur=6, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", evm-vendor-read;desc=\"rows read 9207 ms ago\", total;dur=6",
       "src": "coingecko",
       "n": 0
      }
