@@ -1,9 +1,10 @@
 // Card tests-make-no-late-reads: no package test reaches the network (scripts/test-no-network.cjs, loaded by
 // scripts/test-bound-watch.cjs). Planted files, run with each package's own node --test flags from its package.json, in
 // that package's folder: a test that reads a host off this machine through fetch, node:https, node:net and node:tls,
-// each catching its failure and passing, fails its file, every host named, with no connection made (the plant's host
-// is 192.0.2.1, TEST-NET-1, which no packet reaches); a test that reads a server of its own on loopback (127.0.0.1,
-// localhost, ::1) and on a unix socket passes. Red control: the same reading file under node --test with no guard
+// and a name its own lookup pins there, each catching its failure and passing, fails its file, every host named, with
+// no connection made (the plant's host is 192.0.2.1, TEST-NET-1, which no packet reaches); a test that reads a server
+// of its own on loopback (127.0.0.1, localhost, ::1, a name its own lookup pins to 127.0.0.1) and on a unix socket
+// passes. Red control: the same reading file under node --test with no guard
 // passes, its reads failing unseen.
 //   node --test scripts/ci/test-no-network.test.mjs
 import assert from "node:assert/strict";
@@ -31,6 +32,9 @@ test("reads a host off this machine four ways, each failure caught", async () =>
   await new Promise((ok) => https.get({ host: "${OFF}", port: 8444, timeout: 3000 }).on("error", ok).on("timeout", function () { this.destroy(); }).on("close", ok));
   await ended(net.connect(8445, "${OFF}"));
   await ended(tls.connect({ host: "${OFF}", port: 8446 }));
+  // a name the caller's own lookup pins to an address off this machine
+  const pin = (h, o, cb) => (o?.all ? cb(null, [{ address: "${OFF}", family: 4 }]) : cb(null, "${OFF}", 4));
+  await new Promise((ok) => https.get({ host: "pinned.invalid", port: 8447, lookup: pin, timeout: 3000 }).on("error", ok).on("timeout", function () { this.destroy(); }).on("close", ok));
 });
 `,
   "reads-loopback.test.mjs": `import { test } from "node:test";
@@ -45,6 +49,10 @@ test("reads a server of its own on loopback and on a unix socket", async () => {
   await new Promise((ok) => s.listen(0, "::", ok));
   const { port } = s.address();
   for (const h of ["127.0.0.1", "localhost", "[::1]"]) assert.equal(await (await fetch(\`http://\${h}:\${port}/\`)).text(), "ok", h);
+  // a name the caller's own lookup pins to loopback (the helper's logo fetch pins the address it checked)
+  const pin = (h, o, cb) => (o?.all ? cb(null, [{ address: "127.0.0.1", family: 4 }]) : cb(null, "127.0.0.1", 4));
+  const pinned = await new Promise((ok, no) => http.get({ host: "pinned.invalid", port, lookup: pin }, (r) => { let t = ""; r.on("data", (d) => (t += d)).on("end", () => ok(t)); }).on("error", no));
+  assert.equal(pinned, "ok", "pinned.invalid");
   s.close();
   const dir = mkdtempSync(path.join(tmpdir(), "no-net-"));
   const sock = path.join(dir, "s");
@@ -96,6 +104,7 @@ test("every package's test run fails a file that reads a host off this machine, 
       const out = r.stdout + r.stderr;
       assert.notEqual(r.status, 0, `${d}: a file that read off this machine passed\n${out}`);
       for (const port of [8443, 8444, 8445, 8446]) assert.ok(out.includes(`test-no-network: ${off} asked ${OFF}:${port}, refused`), `${d}: ${OFF}:${port} not named\n${out}`);
+      assert.ok(out.includes(`test-no-network: ${off} asked pinned.invalid (${OFF}):8447, refused`), `${d}: the pinned name not named\n${out}`);
       assert.match(out, /✔ reads a host off this machine four ways/, `${d}: the test itself did not pass, its reads refused at once\n${out}`);
       assert.equal(l.status, 0, `${d}: a loopback reader failed\n${l.stdout}${l.stderr}`);
       assert.doesNotMatch(l.stdout + l.stderr, /test-no-network/, d);

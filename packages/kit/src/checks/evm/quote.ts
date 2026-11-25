@@ -1666,12 +1666,6 @@ export function evmHeadWatch(order: readonly EvmRpc[] | (() => readonly EvmRpc[]
       const t = Math.max(nowMs, clock());
       return since >= 0 && since <= EVM_FOLLOW_MAX_AGE_MS && c.age + since <= EVM_FOLLOW_MAX_AGE_MS && t - Number(c.block.timestamp) * 1000 <= EVM_FOLLOW_MAX_AGE_MS ? c.block : null;
     },
-    async stop() {
-      until = 0;
-      if (timer !== null) clearTimeout(timer);
-      timer = null;
-      await refreshing;
-    },
     async head(nowMs) {
       keep();
       // the device's clock now: a quote asks after its scan, which may have run for seconds since `nowMs`
@@ -1687,6 +1681,12 @@ export function evmHeadWatch(order: readonly EvmRpc[] | (() => readonly EvmRpc[]
           hold(a.block, m, t);
         },
       };
+    },
+    async stop() {
+      until = 0;
+      if (timer !== null) clearTimeout(timer);
+      timer = null;
+      await refreshing;
     },
   };
 }
