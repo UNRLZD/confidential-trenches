@@ -463,7 +463,7 @@ export const MUTANTS = [
   // card evm-buy-and-sell-on-mainnet: the blocks within maxLag of a kept scan read beside the quote, not before it
   [QUOTE, "    const held = (e.tail ? each.every((x) => x.pools.length > 0) : e.pools.length > 0) || kind === \"markets\";", "    const held = true;", R, "card evm-buy-and-sell-on-mainnet: a coin the served index holds no pool of"],
   [QUOTE, "    if (held && e.gaps.length > 0 && unread.every(([a]) => a > head - lag)) {", "    if (held && e.gaps.length > 0) {", R, "W2g "],
-  [QUOTE, "      e.later = lagged.reduce((sp, [x, y]) => withSpan(sp, x, y), kept);\n      e.gaps = [];\n", "", R, "W2c "],
+  [QUOTE, "      e.later = kept;\n      e.gaps = [];\n", "", R, "W2c "],
   // card evm-scan-chain-tail: the tail of the chain, read from a near start with the event alone, kept per provider
   [QUOTE, "  for (const c of new Set([k.currency0, k.currency1])) append(t.byCurrency, c, k);", "  for (const c of new Set([k.currency0])) append(t.byCurrency, c, k);", R, "X4 "],
   [QUOTE, "  return other === NATIVE || other === weth;\n};\n", "  return other === weth;\n};\n", R, "S3 "],
@@ -482,8 +482,10 @@ export const MUTANTS = [
   [QUOTE, "        const top = head - tailLag;", "        const top = head;", R, "TAIL7 "],
   // TAIL2 (the band counted as read in what the read after the answer keeps) is gone with that term, which changed no
   // read: `lagged` and `now` hold every band block it took out (the nightly sweep at 2232c2c2c)
-  // card evm-tap-reads-no-block-the-index-holds: the band's blocks at or below the scan's start are read, never asked again
-  [QUOTE, "  const band: Spans = (tail0?.band ?? []).filter(([, y]) => y > start).map(([x, y]): [number, number] => [Math.max(x, start + 1), y]);", "  const band: Spans = tail0?.band ?? [];", R, "TAIL11k "],
+  // card evm-tap-reads-no-block-the-index-holds: the band's blocks at or below the scan's start are read, never asked again;
+  // with `lagged` gone from the read after the answer (card nightly-sweep-runs-whole) the filter keeps them out of P2-1's
+  // first block, so that read stays after the answer (TAIL11l; TAIL11k no longer sees it)
+  [QUOTE, "  const band: Spans = (tail0?.band ?? []).filter(([, y]) => y > start).map(([x, y]): [number, number] => [Math.max(x, start + 1), y]);", "  const band: Spans = tail0?.band ?? [];", R, "TAIL11l "],
   [QUOTE, "    } else if (e.tail && held && unread.length > 0) {", "    } else if (false) {", R, "W2b "],
   [QUOTE, "          if (g.b > top) t.band = withSpan(", "          if (false) t.band = withSpan(", R, "W2b "],
   [QUOTE, "          if (g.spare) continue;\n", "", R, "TAIL4b "],
