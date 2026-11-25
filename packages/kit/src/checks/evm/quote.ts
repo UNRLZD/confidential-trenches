@@ -2768,6 +2768,11 @@ async function scanPools(
   // missed as a pool made in them is, its price and nothing more, while X with no market read again before every warm
   // quote cost one post of Robinhood's scan provider's 1 a second.
   const lag = Number(maxLag);
+  // the band's blocks at or below `start` are read: every currency of the scan reads to it (the served index's N, a coin
+  // read's, the tail's kept spans), so neither the rule below nor the read after the answer asks them again (card
+  // evm-tap-reads-no-block-the-index-holds: the page keeps the index at the head, its N passed the band within seconds,
+  // and each later quote asked the band again, 2 to 10 getLogs a mainnet tap at or below N, TAIL11k)
+  const band: Spans = (tail0?.band ?? []).filter(([, y]) => y > start).map(([x, y]): [number, number] => [Math.max(x, start + 1), y]);
   for (const e of scans) {
     // on the chain's tail, the blocks a provider answered within the index's margin of its head (`band`, kept for no
     // quote: TAIL7) count as read for this rule alone, and only while within maxLag of the head, the miss the kit accepts
@@ -2778,7 +2783,7 @@ async function scanPools(
     // below counts from the first of them against the agreed block (independent review of 7ed7d86f9, H1: a band block 80
     // blocks before an agreed block 40 past the scan head was never read again, and the coin quoted against a seeded
     // pool, RVW3; RVW4 on a tail with kept spans, as on main)
-    const lagged: Spans = e.tail ? (tail0?.band ?? []).filter(([, y]) => y > head - lag).map(([x, y]): [number, number] => [Math.max(x, head - lag + 1), y]) : [];
+    const lagged: Spans = e.tail ? band.filter(([, y]) => y > head - lag).map(([x, y]): [number, number] => [Math.max(x, head - lag + 1), y]) : [];
     const unread = e.tail ? gapsOf(lagged.reduce((sp, [x, y]) => withSpan(sp, x, y), e.spans), floor, head) : e.gaps;
     const laggedFrom = lagged.length > 0 ? Math.min(...lagged.map(([x]) => x)) : undefined;
     const held = (e.tail ? each.every((x) => x.pools.length > 0) : e.pools.length > 0) || kind === "markets";
@@ -2787,7 +2792,7 @@ async function scanPools(
     // them and never again after one (a burst of five Robinhood quotes asked 28 to 63 getLogs, 10 to 23 of them 429,
     // where main asked 10)
     const top = head - tailLag;
-    const kept = e.tail ? gapsOf((tail0?.band ?? []).filter(([, y]) => y > top).map(([x, y]): [number, number] => [Math.max(x, top + 1), y]).reduce((sp, [x, y]) => withSpan(sp, x, y), e.spans), floor, head) : e.gaps;
+    const kept = e.tail ? gapsOf(band.filter(([, y]) => y > top).map(([x, y]): [number, number] => [Math.max(x, top + 1), y]).reduce((sp, [x, y]) => withSpan(sp, x, y), e.spans), floor, head) : e.gaps;
     if (held && e.gaps.length > 0 && unread.every(([a]) => a > head - lag)) {
       e.later = lagged.reduce((sp, [x, y]) => withSpan(sp, x, y), kept);
       e.gaps = [];

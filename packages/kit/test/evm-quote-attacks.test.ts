@@ -12782,6 +12782,34 @@ test("RVW6 as RVW3 with the agreed block 20 past the scan head: the new blocks s
     reset();
   }
 });
+// Card evm-tap-reads-no-block-the-index-holds: the band's blocks a served index now holds are read. The page keeps the
+// index at the head (EVM_INDEX_KEEP_MS), so its N passes a band a quote's tail read left inside the margin within
+// seconds, and the band was still asked again beside every later quote, each block at or below N (the live check
+// evm-index-kept-at-the-head on mainnet, 25 Nov 05:0xZ: 2 to 10 such getLogs a tap, Robinhood's up to 116 blocks under N)
+test("TAIL11k a band block the served index holds is never asked again: a fill from an index 20 blocks behind leaves the band [4,999,981, 5,000,000], the index then served to 5,000,005, B's quote at 5,000,010 asks no block at or below 5,000,005", async () => {
+  const { evmPoolIndexUse, evmPoolIndexReset } = quoteMod as unknown as { evmPoolIndexUse: (c: string, s: unknown) => boolean; evmPoolIndexReset: () => void };
+  const b = freshToken();
+  const serve = (n: number) => assert.equal(evmPoolIndexUse("base", { index: { chainId: 8453, poolManager: PM, from: 4_000_001 }, coversThrough: n, pools: [{ key: best(b).key }] }), true);
+  try {
+    evmPoolIndexReset();
+    serve(4_999_980);
+    const m = moving();
+    evmScanFillable(m.rpc);
+    const w = freshToken();
+    assert.equal((await bandQuote([best(w)], w, bestRoute(w), m.to(scanner(5_000_000, [])), 5_000_000)).accepted, true);
+    await evmTailFills(m.rpc);
+    serve(5_000_005);
+    const asked: [number, number][] = [];
+    const v = await bandQuote([best(b)], b, bestRoute(b), m.to(scanner(5_000_010, [], asked)), 5_000_010);
+    assert.equal(v.accepted, true, String((v as { code?: string }).code));
+    await pause(50);
+    await evmTailFills(m.rpc);
+    assert.deepEqual(asked.filter(([a]) => a <= 5_000_005), [], `asked ${JSON.stringify(asked)}`);
+    assert.ok(asked.some(([, z]) => z === 5_000_010), `the new blocks are read: ${JSON.stringify(asked)}`);
+  } finally {
+    evmPoolIndexReset();
+  }
+});
 test("TAIL11j a taker of a shared tail read waits EVM_SCAN_HOLD_MS for it at most (independent review of 7ed7d86f9, M1): with the read in flight held past it, the second quote reads the blocks itself and answers", async () => {
   const [c, d] = [freshToken(), freshToken()];
   const logs = [best(c), best(d)].map((p, i) => ({ key: p.key, at: 4_100_000 + i }));
