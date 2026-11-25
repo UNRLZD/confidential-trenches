@@ -257,8 +257,20 @@ export const MUTANTS = [
   [QUOTE, "    if (fast && on.next !== undefined) throw new ScanRefused(", "    if (false) throw new ScanRefused(", R, "SP5 "],
   // card evm-rpc-spare-list: a request the second fails goes to the third, the head too; a 5xx passes on at once; a
   // not-yet block is asked again whole; a one-call batch's bare answer is read
-  [QUOTE, "      await settle(rest.map((r) => run({ ...r, into: j.into })));", "      await settle(rest.map((r) => one({ ...r, into: j.into })));", R, "SL1 "],
-  [QUOTE, "(o.next === undefined ? Promise.reject(e) : inTurn(o.next))", "Promise.reject(e)", R, "SL1 "],
+  [QUOTE, "      const onNext = settle(rest.map((r) => run({ ...r, into: j.into })));", "      const onNext = settle(rest.map((r) => one({ ...r, into: j.into })));", R, "SL1 "],
+  [QUOTE, "(o.next === undefined ? Promise.reject(e) : backOf(o, e, inTurn(o.next)))", "Promise.reject(e)", R, "SL1 "],
+  // card base-warm-quote-rides-a-stalled-last-scan: a request a held or paced first passed over unsent is asked of it,
+  // through its hold, where the providers after it fail it (the warm race at once or at EVM_SCAN_HOLD_MS, the cold run,
+  // the head's read)
+  [QUOTE, "!spare || provider === undefined || force", "!spare || provider === undefined", R, "SL8 "],
+  [QUOTE, "    const rs = await on.gate.ask(rpc, calls, last ? SCAN_TRIES : 1, fast, hedge, force).then(", "    const rs = await on.gate.ask(rpc, calls, last ? SCAN_TRIES : 1, fast, hedge).then(", R, "SL8 "],
+  [QUOTE, "          if (e instanceof ScanPassed) back ??= setTimeout(again, EVM_SCAN_HOLD_MS);", "          if (false) back ??= setTimeout(again, EVM_SCAN_HOLD_MS);", R, "SL8 "],
+  [QUOTE, "            if (firstOut.e instanceof ScanPassed && !backed) return again();", "            if (false) return again();", R, "SL8 "],
+  [QUOTE, "        one({ ...j, into: ours, force: true, hedge:", "        one({ ...j, into: ours, force: false, hedge:", R, "SL8 "],
+  [QUOTE, "        backOf(o, first, spare()).then(win, (e: unknown) => {", "        spare().then(win, (e: unknown) => {", R, "SL8 "],
+  [QUOTE, "scanHeadOf(o.rpc, o.gate, true).catch(() => Promise.reject(x))", "scanHeadOf(o.rpc, o.gate).catch(() => Promise.reject(x))", R, "SL8 "],
+  [QUOTE, "      if (!(e instanceof ScanPassed)) return onNext;", "      return onNext;", R, "SL9 "],
+  [QUOTE, "        return settle(back.map((r) => one({ ...r, into: j.into, force: true }))).catch(() => Promise.reject(no));", "        return settle(back.map((r) => one({ ...r, into: j.into, force: false }))).catch(() => Promise.reject(no));", R, "SL9 "],
   // re-anchored (card evm-unreachable-moves-on): the 5xx test is serverFault's since card evm-5xx-holds-the-provider-
   // for-the-round; SL1 passes on it (the request still reaches the next after its tries), SP5xx does not
   [QUOTE, "          if (spareNext && out5xx && !deepCall) {", "          if (false && out5xx && !deepCall) {", R, "SP5xx "],
@@ -1308,7 +1320,7 @@ export const MUTANTS = [
   // asked beside it; the first head answered is kept, and the first's failure still asks the next
   [QUOTE, "evmHedgeAfter(URL_OF.get(o.rpc), \"head\") ?? EVM_HEDGE_MS);", "EVM_SCAN_HOLD_MS * 10);", R, "KPI1 "],
   [QUOTE, "      const timer = setTimeout(() => void spare().then(win, () => {}), evmHedgeAfter(", "      const timer = setTimeout(() => void spare().then(win, (e: unknown) => ((over = true), no(e))), evmHedgeAfter(", R, "KPI2 "],
-  [QUOTE, "      scanHeadOf(o.rpc, o.gate).then(win, () => {\n        clearTimeout(timer);", "      scanHeadOf(o.rpc, o.gate).then(win, (e: unknown) => {\n        if (theirs === undefined) return no(e);\n        clearTimeout(timer);", R, "KPI2 "],
+  [QUOTE, "      scanHeadOf(o.rpc, o.gate).then(win, (first: unknown) => {\n        clearTimeout(timer);", "      scanHeadOf(o.rpc, o.gate).then(win, (first: unknown) => {\n        if (theirs === undefined) return no(first);\n        clearTimeout(timer);", R, "KPI2 "],
   [QUOTE, "      const spare = () => (theirs ??= inTurn(next));", "      const spare = () => (theirs ??= headFrom(next));", R, "KPI3 "],
   // bloXroute's Robinhood endpoint paced to 10 calls in any second, its 429 from runners at 11 and 12 (card
   // robinhood-blxrbdn-under-the-runner-limit; 16 before, its 429 at 17 in live run 45043534742)
