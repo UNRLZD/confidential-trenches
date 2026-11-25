@@ -1426,6 +1426,45 @@ test("pick (c): an owed W under the floor is listed at its rest, the user's own 
   assert.deepEqual(returningWallets([...w.owed.values()], price, await w.ns.list()).map((r) => r.state), ["RETURNING"]);
 });
 
+// Pick (c), the other side (the nightly sweep's T3j, c20 and c20b mutants passed every test at 2232c2c2c): a W whose rest
+// adds nothing once moved (restAdds 0: its lamports are the sweep's fee, the deposit's rents and the keep) is not listed,
+// a claim owed or not: no amount on its record, no RETURNING row, never the last pass's amount nor W's whole lamports
+test("pick (c): a W under the floor whose rest adds nothing is not listed, owed or not, and an amount listed before goes", async () => {
+  const price = { price: "8100000000", expo: -8, published_s: 1, read_ms: 1 };
+  // an owed claim: listed at its rest first, then W down to its costs
+  const w = await world({ venue: "pumpswap", ataLamports: TOKEN_RENT, volumes: [{ program: SOLANA_PUMP_AMM_PROGRAM, cashback: 12_742_862n }], claimFails: true });
+  const a = await runPoolSell(w.host, { ...ASK, token: VF.pumpswap.mint });
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  await settle(w);
+  const costs = solanaSweepKeep(rent, 1) + BigInt(FEE) + rentMin(17) + GROWTH;
+  const acc = w.c.accounts.get(W.address)!;
+  w.c.accounts.set(W.address, { ...acc, lamports: Number(costs + 1_000_000n) });
+  await resumeRentBacks(loadedOf(w), fakeLocks());
+  assert.equal(w.owed.get(W.address)?.lamports, "1000000", "listed at its rest");
+  assert.equal(restAdds(0n, FLOOR), 0n);
+  w.c.accounts.set(W.address, { ...w.c.accounts.get(W.address)!, lamports: Number(costs) });
+  w.told.length = 0;
+  await resumeRentBacks(loadedOf(w), fakeLocks());
+  assert.equal(w.told.at(-1)?.state, "owed", JSON.stringify(w.told.slice(-2)));
+  assert.ok(w.owed.has(W.address), "the claim's record kept");
+  assert.equal(w.owed.get(W.address)?.lamports, undefined, "owed: no amount listed");
+  assert.deepEqual(returningWallets([...w.owed.values()], price, await w.ns.list()).map((r) => r.state), [], "owed: no RETURNING row");
+  // no claim: a full sale's W at the floor, then W down to the sweep's fee and the deposit's rents
+  const { amount } = await amountFor(FLOOR_SALE);
+  const v = await world({ held: amount, lamports: 1_493_440, ataLamports: TOKEN_RENT }, [wallet(amount)]);
+  const b = await runPoolSell(v.host, { ...ASK, amount });
+  assert.equal("stage" in b && b.stage, "filled", JSON.stringify(b));
+  assert.equal(v.told.at(-1)?.state, "floor", JSON.stringify(v.told.slice(-2)));
+  assert.equal(v.owed.get(W.address)?.lamports, "3498760", "listed at its rest");
+  v.c.accounts.set(W.address, { ...v.c.accounts.get(W.address)!, lamports: 5_000 + 1_468_120 });
+  v.told.length = 0;
+  await resumeRentBacks(loadedOf(v, amount), fakeLocks());
+  assert.equal(v.told.at(-1)?.state, "floor", JSON.stringify(v.told.slice(-2)));
+  assert.ok(v.owed.has(W.address), "W's record kept");
+  assert.equal(v.owed.get(W.address)?.lamports, undefined, "floor: no amount listed");
+  assert.deepEqual(returningWallets([...v.owed.values()], price, await v.ns.list()).map((r) => r.state), [], "floor: no RETURNING row");
+});
+
 // The review of c1fd2d20, 2b: a load that reads W the same skips the pass only after an end W's own state decides (under
 // the floor, holding, an account kept). An "owed" end waits on the program taking the claim, which no read of W shows:
 // each load tries the claim again, and the load after the program takes it claims and sweeps.
@@ -2996,6 +3035,33 @@ test("a found W owning strangers' zero-balance token accounts, of any mint, unde
   await resumeRentBacks(v.host, fakeLocks());
   assert.ok(!v.c.accounts.has(held), "closed once empty");
   assert.equal(v.c.deposits.filter((d) => d.sweep).length, 1, JSON.stringify(v.told.slice(-4)));
+});
+
+// Review P2-1 of T1+T2 at a rung's edge (the nightly sweep's P21b mutant, the kept account's cost left out of W's rest,
+// passed every test at 2232c2c2c: a rung is coarser than that cost, so the sweep's value moved only where the cost
+// crosses a rung): W's rest with the kept account's cost left on W is just under a rung, so the sweep is the rung below
+test("a found W keeping a stranger's unit, its rest just under a rung once the account's close cost stays on W: the sweep is the rung below, W keeps that cost", async () => {
+  const other = VF.pumpswap.mint;
+  const at = base58.encode(new Uint8Array(32).fill(44));
+  const s = await world({ buy: null }, []);
+  s.c.accounts.delete(VF.pump.ata);
+  s.c.accounts.set(at, { owner: SOLANA_TOKEN_PROGRAM, lamports: Number(TOKEN_RENT), data: tokenAccount(1n, 1, other) });
+  await foundW(s);
+  const keep = solanaSweepKeep(rent, 0, 1);
+  const cost = keep - solanaSweepKeep(rent, 0);
+  assert.ok(cost > 0n, "a kept account costs W its close");
+  const stay = solanaSweepStay(rent, keep);
+  // a rest whose value moves once the close cost is added: the edge of a rung
+  let rest = 20_000_000n;
+  while (solanaSweepOf(rest + cost, stay).value === solanaSweepOf(rest, stay).value) rest += cost;
+  const value = solanaSweepOf(rest, stay).value;
+  assert.ok(value >= FLOOR, "over the floor");
+  s.c.accounts.set(W.address, { ...s.c.accounts.get(W.address)!, lamports: Number(rest + BigInt(FEE) + rentMin(17) + GROWTH + keep) });
+  await resumeRentBacks(s.host, fakeLocks());
+  const swept = s.c.deposits.filter((d) => d.sweep);
+  assert.equal(swept.length, 1, JSON.stringify(s.told.slice(-3)));
+  assert.equal(swept[0]!.value, value, "the rung of W's rest with the close cost kept");
+  restAfterSweep(s, keep, "W keeps the kept account's cost");
 });
 
 // Strangers' transactions on a found W (card a-found-wallet-sweeps-past-a-strangers-coin): W's history is anyone's to
@@ -7323,6 +7389,39 @@ test("round-trip-costs-less: a sale's stamp that lands late is in before the tra
   from = w.c.calls.length;
   await resumeRentBacks(host, locks);
   assert.equal(senders(from).size, 0, "inside the sale's gap: held");
+});
+
+// The same with a sale that ends sent (no verdict read: reads 0), so no rent back runs after it: the run's own wait on the
+// stamps is all that holds the trade lock (the nightly sweep's c32 mutant, that wait removed, passed every test at
+// 2232c2c2c: each test's sale filled, and its rent back waits on the stamp itself)
+test("round-trip-costs-less: a sale that ends sent, no rent back after it: its stamp that lands late is in before the trade lock goes", async () => {
+  let space: RentBackSpacing | undefined;
+  const dev = { spacing: async () => space, claim: async (v: RentBackSpacing, own?: number) => (spaceOpen(space, v.at, own) ? false : ((space = v), true)) };
+  const s = await world({ held: 2n * AMOUNT }, [wallet(2n * AMOUNT)]);
+  const locks = countedLocks();
+  const atRelease: (RentBackSpacing | undefined)[] = [];
+  const request = locks.request;
+  locks.request = (async (name: string, opts: never, f: (l: unknown) => Promise<unknown>) => (name !== POOL_TRADE_LOCK ? request(name, opts, f as never) : request(name, opts, (async (l: unknown) => {
+    try {
+      return await f(l);
+    } finally {
+      atRelease.push(space);
+    }
+  }) as never))) as never;
+  let land: (() => void) | undefined;
+  const late = (v: RentBackSpacing) => new Promise<void>((ok) => void (land = () => ((space = v), ok())));
+  const ended = { n: 0 };
+  const r = poolSellKind(() => ({ ...s.host, reads: 0, now: () => 5_000_000n, storeMs: 600_000, owed: { ...s.host.owed!, ...dev, space: late }, ops: async () => s.store, end: () => void ended.n++ }), locks)(ASK, ctxOf("late-sent")) as KindAnswer;
+  await r.after;
+  assert.equal(r.answer().result?.stage, "sent");
+  await until(async () => land !== undefined);
+  // past the sale's end: only its stamp holds the run
+  await new Promise((go) => setTimeout(go, 50));
+  assert.equal(atRelease.length, 0, "the trade lock went before the stamp landed");
+  land!();
+  await until(async () => ended.n > 0);
+  assert.equal(atRelease.length, 1);
+  assert.equal(atRelease[0]?.at, 5_000_000, "the sale's stamp in before the trade lock went");
 });
 
 // probe P-L: a stamp that lands late never puts an older time back over a newer one (a claim at 2,000, then a sale's stamp

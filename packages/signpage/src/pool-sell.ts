@@ -1621,7 +1621,7 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: ListedBuy
     // W holds above its keep, goes into the pool right after, under W's lock and the sell lock held throughout
     const keep = after + keepPriority;
     const swept: NonNullable<typeof later.back> = (locks) => withHolds(locks, w.address, false, wait, async () => keepSweep(h, { rpcs, program, pool, scope, rent, store, sync, w, keep, wait: (ms) => waitUnless(h.wait, ms, h.signal) }));
-    const back: NonNullable<typeof later.back> = (locks) => withHolds(locks, w.address, false, wait, async (hold) => void (await rentBackOwed(h, { rpcs, program, pool, scope, rent, store, sync, w, mints: owedRec.mints, wait, sale: true, ride: true, ...(owedRec.sell ? { sell: owedRec.sell } : {}) }, owedRec, hold, await seenOf(h, w.address, owedRec.mints))));
+    const back: NonNullable<typeof later.back> = (locks) => withHolds(locks, w.address, false, wait, async (hold) => void (await rentBackOwed(h, { rpcs, program, pool, scope, rent, store, sync, w, mints: owedRec.mints, wait, sale: true, ...(owedRec.sell ? { sell: owedRec.sell } : {}) }, owedRec, hold, await seenOf(h, w.address, owedRec.mints))));
     // what a filled sale runs after it, one rule for both of its ends (no note, and the note settled; card
     // second-places-held-by-tests): a partial sell sweeps W above its keep, a full sell runs W's rent back
     const onFill = keeps ? swept : back;
@@ -1974,7 +1974,7 @@ async function keepSweep(h: PoolSellHost, x: KeepSweep): Promise<void> {
 /** `unproven`: no buy of W's proven this time (no record, or the public seat read W's history otherwise than the
  *  rebuild): the pass holds as with no buy, read again on a later state read ("again") until its POOL_RENT_BACK_
  *  UNPROVEN_PASSES-th pass, then as W's own state ("steady"; card round-trip-costs-less, review of 20ba2481b P2-6). */
-type RentBack = { rpcs: Rpcs; program: string; pool: string; scope: bigint; rent: SolanaRent; store: NoteStore; sync: SolanaTreeSync; w: ListedBuyWallet; mints: readonly { mint: string; program: string }[]; wait: (ms: number) => Promise<void>; sell?: Readonly<Record<string, SoldBy>>; buy?: { mint: string; program: string } | null; bare?: true; unproven?: "again" | "steady"; read?: (lamports: bigint) => void; own?: number; sale?: true; ride?: true; unlisted?: () => void; stamped?: (at: number) => void; swept?: (signature: string, value: bigint) => Promise<void> };
+type RentBack = { rpcs: Rpcs; program: string; pool: string; scope: bigint; rent: SolanaRent; store: NoteStore; sync: SolanaTreeSync; w: ListedBuyWallet; mints: readonly { mint: string; program: string }[]; wait: (ms: number) => Promise<void>; sell?: Readonly<Record<string, SoldBy>>; buy?: { mint: string; program: string } | null; bare?: true; unproven?: "again" | "steady"; read?: (lamports: bigint) => void; own?: number; sale?: true; unlisted?: () => void; stamped?: (at: number) => void; swept?: (signature: string, value: bigint) => Promise<void> };
 
 /**
  * W's rent back (card sol-buy-rent-back), after a full sell filled or at a later load while it is owed: what W's
@@ -2804,7 +2804,7 @@ export async function resumeRentBacks(h: PoolSellHost, locks: Locks | null = glo
       const go = await withHolds(locks, address, true, wait, async (hold) => {
         const o = await current();
         const w = o && setup.wallets.find((x) => x.chain === "sol" && x.address === o.address && x.l.toString() === o.l && x.j === o.j);
-        if (o && w && (await rentBackOwed(h, { rpcs, program, pool, scope, rent, store, sync, w, mints: o.mints, wait, ...(o.sell ? { sell: o.sell } : {}), ...(opts.ride === true ? { ride: true as const } : {}) }, o, hold, read?.get(address)?.seen))) more = true;
+        if (o && w && (await rentBackOwed(h, { rpcs, program, pool, scope, rent, store, sync, w, mints: o.mints, wait, ...(o.sell ? { sell: o.sell } : {}) }, o, hold, read?.get(address)?.seen))) more = true;
       });
       if (!go) return true;
       // this pass sent from its W: the run's one; the rest send nothing in this run

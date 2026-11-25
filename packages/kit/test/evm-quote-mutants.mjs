@@ -357,7 +357,9 @@ export const MUTANTS = [
   [QUOTE, "if (s.last <= t || now - s.failed < EVM_HOLD_MS) s.held", "if (true) s.held", PR, "R3 "],
   // round (E): a post out past its provider's hedge time has a stand-in asked, in agreeing (H4), in the block's confirm
   // (H1) and in the follow's pin confirm (H2); the hedge time is read from the provider's answers (H1)
-  [QUOTE, "        hedgedK[n] = true;\n        start(true, n);", "        hedgedK[n] = true;", HP, "H4 "],
+  // the stand-in's start: a hung warm head (HP's H4) is raced on two providers since round E, so it never waits on a
+  // stand-in and passed this mutant (the nightly sweep at 2232c2c2c); W3's lost post is answered by its stand-in alone
+  [QUOTE, "        hedgedK[n] = true;\n        start(true, n);", "        hedgedK[n] = true;", HC, "W3 "],
   [QUOTE, "  if (t === undefined || t.length === 0) return null;", "  return null;", HP, "H1 "],
   [QUOTE, "        times.push(ms);\n", "", HP, "H1 "],
   [QUOTE, "if (n + 1 < order.length && (await hedged(", "if (false && (await hedged(", HP, "H1 "],

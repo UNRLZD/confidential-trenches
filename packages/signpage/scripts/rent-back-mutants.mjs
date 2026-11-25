@@ -63,7 +63,7 @@ export const M = [
   ["D8b a held mint with no sell read taken as sold", SELL, T, 'sells.get(t.mint) ?? "no"', 'sells.get(t.mint) ?? "yes"'],
   ["D9 the burn list dropped", SELL, T, "const burn = holding.map((t) => t.ata);", "const burn: string[] = [];"],
   ["D10 the sell not recorded", SELL, T, "      owedRec.sell = { ...prior?.sell, [token]: { tx: base64.encode(signed), last: bhv.lastHeight } };\n", ""],
-  ["D11 a load passes no sell on", SELL, T, "mints: o.mints, wait, ...(o.sell ? { sell: o.sell } : {}), ...(opts.ride", "mints: o.mints, wait, ...(opts.ride"],
+  ["D11 a load passes no sell on", SELL, T, "mints: o.mints, wait, ...(o.sell ? { sell: o.sell } : {}) }, o, hold", "mints: o.mints, wait }, o, hold"],
   // the review of bf467ae7's named ones: X2 (F3), Y2, Y3, Y4, Y7 (F4), its read order and commitment (F5), and the
   // armed path's burn list (F6); and a sell read's fault counted for a mint W no longer holds
   ["review X2 a burn's next close of another account", KIT, K, " && next.data[0] === 9 && next.accounts[0]?.key === h?.address;\n          if (!h || h.kind !== \"token\" || h.burn", " && next.data[0] === 9;\n          if (!h || h.kind !== \"token\" || h.burn"],
@@ -196,7 +196,8 @@ export const M = [
   ["c20b an unlisted owed end keeps its last amount", SELL, T, "kept.unlisted === true ? undefined : ", ""],
   // card pool-amounts-are-standard-sizes: the sweep's note the largest rung of W's rest that leaves W 0 or rent-exempt,
   // the rest on W (never paid away); a W under the floor listed at its rest. The ride (card every-lamport-can-move T3)
-  // never runs now, so its mutants T3a, T3d, T3h and T3i are gone with its code
+  // never runs now, so its mutants T3a, T3d, T3h and T3i are gone with its code, and T3e with the rent back's dead
+  // `ride` flag (set on a load's and a sale's pass, read by none: the nightly sweep's survivor at 2232c2c2c)
   ["lamport L1 the sweep's rung leaving W short of rent", SELL, T, "      const { value } = solanaSweepOf(rest, stay);\n", "      const { value } = solanaSweepOf(rest);\n", STAY],
   ["lamport T3j a W with nothing on it still listed", SELL, T, "      if (value < floor && adds === 0n) x.unlisted?.();\n", ""],
   ["lamport T3k a W under the floor listed at its lamports", SELL, T, "(x.buy || since !== undefined)) x.read?.(adds);", "(x.buy || since !== undefined)) x.read?.(lamports);"],
@@ -208,7 +209,6 @@ export const M = [
   ["lamport P21b a kept account's fee not left on W", SELL, T, "solanaDepositRents(rent, sizes, held) - solanaSweepKeep(rent, owed, kept);", "solanaDepositRents(rent, sizes, held) - solanaSweepKeep(rent, owed);"],
   ["lamport T3b a ride chunk off the list", WITHDRAW, T, [["for (const chunk of releaseSizesUpTo(r, n.value).reverse()) {\n      if (!isReleaseSize(r, chunk) || !changeMoves", "for (const chunk of Array.from({ length: Number(n.value / r.grid) }, (_, k) => BigInt(k + 1) * r.grid)) {\n      if (!changeMoves"]]],
   ["lamport T3c a ride chunk whose change cannot move", WITHDRAW, T, "if (!isReleaseSize(r, chunk) || !changeMoves(r, n.value - chunk) || !fits(chunk)) continue;", "if (!isReleaseSize(r, chunk) || !fits(chunk)) continue;"],
-  ["lamport T3e a load's pass rides", SELL, T, "...(opts.ride === true ? { ride: true as const } : {})", "ride: true as const"],
   ["lamport T3f a W at the floor not passed again for a tap's ride", SELL, T, "const floored = opts.ride === true && o.floor === true;", "const floored = false;"],
   ["lamport T3g the floor end not marked", SELL, T, ', ...(e === "floor" ? { floor: true as const } : {})', ""],
   ["lamport L2 the sweep's note at the exact rest", SELL, T, "      const { value } = solanaSweepOf(rest, stay);\n", "      const value = rest;\n", FULL_SALE],
