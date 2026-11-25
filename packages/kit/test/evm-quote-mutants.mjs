@@ -320,14 +320,18 @@ export const MUTANTS = [
   [QUOTE, "[rankClass(u, now), cost(u), k] as const;", "[0, cost(u), k] as const;", R, "V4 "],
   [QUOTE, "late.length > 0 && s!.last < Math.min(...late) ? 1 : 0);", "0);", "test/evm-pair-rank.test.ts", "R2 "],
   [QUOTE, "  if (till > now) return 20 + last;", "  if (till > now) return 1 + last;", R, "V4 "],
-  [QUOTE, "      if (out.some(limited) || out.some(stateless)) s.held = performance.now() + (out.some(stateless) ? EVM_HOLD_MS : throttleHoldMs(url, null));\n      // an answer for a block the provider does not hold yet is no measure of its speed (re-review INFO 4)\n      else if (!out.some(notYet)) {", "      {", R, "V4 "],
+  [QUOTE, "      if (out.some(limited) || out.some(stateless)) {\n        const late = !out.some(limited) && firstSent !== null && t - firstSent > EVM_STATE_FRESH_MS;\n        if (!late) s.held = performance.now() + (out.some(stateless) ? EVM_HOLD_MS : throttleHoldMs(url, null));\n      }\n      // an answer for a block the provider does not hold yet is no measure of its speed (re-review INFO 4)\n      else if (!out.some(notYet)) {", "      {", R, "V4 "],
   // card evm-quote-lag-held: a lower head more than maxLag below the scan provider's holds its provider and the block
   // is agreed again without it; a 200 carrying a state error holds its provider in the ranking
   [QUOTE, "    if (!(await behind(got.block))) return got;\n    if (got.low === undefined) {", "    return got;\n    if (got.low === undefined) {", R, "LH1 "],
   [QUOTE, "    const low = got.low!;\n    HOLD.get(low)?.();", "    const low = got.low!;", R, "LH1 "],
   [QUOTE, "    if (!Object.isFrozen(rpcs)) [...rest, low].forEach((r, n) => ((rpcs as EvmRpc[])[n] = r));", "", R, "LH1 "],
   [QUOTE, "return { block: lo, confirm, low: list[own]! };", "return { block: lo, confirm, low: list[at]! };", R, "LH1 "],
-  [QUOTE, "if (out.some(limited) || out.some(stateless)) s.held", "if (out.some(limited)) s.held", R, "LH2 "],
+  [QUOTE, "if (out.some(limited) || out.some(stateless)) {", "if (out.some(limited)) {", R, "LH2 "],
+  // card evm-state-cut-holds-only-fresh-reads: a state-cut answer to a late read holds nothing; a fresh read's still
+  // holds (a rate limit's hold is evmJsonRpc's own as well, so dropping timed's `!out.some(limited)` changes nothing)
+  [QUOTE, "        if (!late) s.held = performance.now() + (out.some(stateless)", "        s.held = performance.now() + (out.some(stateless)", R, "LH4 "],
+  [QUOTE, "t - firstSent > EVM_STATE_FRESH_MS;", "t - firstSent >= 0;", R, "LH4 "],
   // the review of the lag hold: each no-longer answer, never a revert, a non-2xx answer, the whole list's majority, the
   // two-provider list, one wait
   [QUOTE, "/historical state \\S+ is not available|archive", "/archive", R, "LH2b "],
