@@ -25,7 +25,7 @@
 import "../net-window.mjs";
 import { realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { SOLANA_SOL_MINT, readSolanaClmmMarket, solanaClmmPoolScan, solanaJsonRpc } from "../../packages/kit/src/index.ts";
+import { SOLANA_RPC_WINDOW_RETRY, SOLANA_SOL_MINT, readSolanaClmmMarket, solanaClmmPoolScan, solanaJsonRpc } from "../../packages/kit/src/index.ts";
 import { rpcAnswer } from "./provider-answer.mjs";
 
 export const KEY = "solana-buy-never-below-a-hidden-market";
@@ -78,7 +78,9 @@ export async function read({ plantLie = false, helper = HELPER } = {}) {
   const scan = { status: a.status ?? null, ...(a.result !== undefined ? { result: a.result } : a.error !== undefined ? { error: a.error } : { noAnswer: String(a.noAnswer ?? "no answer").slice(0, 200) }) };
   const providers = {};
   const rpcs = PROVIDERS.map((u, i) => {
-    const rpc = solanaJsonRpc(u, { timeoutMs: 8_000 });
+    // card live-checks-ride-out-a-public-rpc-stall: a stall is asked again within the kit's window (helper live run
+    // 45526898423: "provider A gave no answer (the call failed)")
+    const rpc = solanaJsonRpc(u, { timeoutMs: 8_000, retry: SOLANA_RPC_WINDOW_RETRY });
     providers[u] = {};
     return Object.assign(async (method, params, signal) => {
       let ans = await rpc(method, params, signal);

@@ -21,7 +21,7 @@ import "../net-window.mjs";
 import { createHash, generateKeyPairSync, randomBytes } from "node:crypto";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { readSolanaRent, solanaJsonRpc, solanaPoolPriorityBudget } from "../../packages/kit/src/index.ts";
+import { SOLANA_RPC_WINDOW_RETRY, readSolanaRent, solanaJsonRpc, solanaPoolPriorityBudget } from "../../packages/kit/src/index.ts";
 import { plant } from "./pool-senders-next-page-helper.mjs";
 
 const KEY = "owners-solana-buy-lands";
@@ -58,7 +58,9 @@ export function tipRule(js) {
 /** The microlamports a CU that make the plant's priority fee 1,000 lamports under `budget` (none when the budget is). */
 export const tightPrice = (budget) => (budget > 1_000n ? ((budget - 1_000n) * 1_000_000n) / CU : null);
 
-export async function read(fetchFn = fetch, rentOf = () => readSolanaRent([solanaJsonRpc(RPCS[0]), solanaJsonRpc(RPCS[1])])) {
+// card live-checks-ride-out-a-public-rpc-stall: the rent's two public reads ask a stall again within the kit's window
+const publicRpc = (u) => solanaJsonRpc(u, { retry: SOLANA_RPC_WINDOW_RETRY });
+export async function read(fetchFn = fetch, rentOf = () => readSolanaRent([publicRpc(RPCS[0]), publicRpc(RPCS[1])])) {
   const get = async (url, init = {}) => {
     const r = await fetchFn(url, { ...init, redirect: "error", signal: AbortSignal.timeout(15_000) });
     return { status: r.status, headers: Object.fromEntries(r.headers), body: await r.text() };
