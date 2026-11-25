@@ -14,8 +14,12 @@
 //   - the cut at the pool's time: stateRootTimes and labelRootTimes of its roots are its last leaf's block time. A pool
 //     with no leaf yet prints "no leaf yet", which is not a failure (both mainnet pools hold leaves now, so the
 //     recorded run's line must pass).
+// Every call is read through the shared module (provider-answer.mjs rpcAnswer, card
+// notes-per-pool-evm-throttle-is-no-answer): a provider's no-answer (a 429, a rate limit, no JSON-RPC answer, a failed
+// fetch) is handed to the sync as a refusal, and a sync that ends refused on one names it and is INCONCLUSIVE, never a
+// FAIL; a wrong tree or any other refusal stays FAIL.
 //   node scripts/live-checks/notes-per-pool-evm.mjs [--chain base|robinhood] [--record <file>]
-//     PASS exit 0, FAIL exit 1, error exit 2
+//     PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3
 // --record writes every answer read, as the good run of notes-per-pool-evm.answers.json, and its bad run: the same
 // answers with currentTreeSize one higher on both RPCs, which the sync must refuse.
 // Bounded (card notes-per-pool-evm-base-hang): the chains are read at once, each printed as it ends with its calls and
@@ -25,6 +29,7 @@
 import "../net-window.mjs";
 import { spawn } from "node:child_process";
 import { STILL_CLOCK } from "./wallet-restore-transfer-rpcs.mjs";
+import { EXIT, RETRY, rpcAnswer } from "./provider-answer.mjs";
 import { createRequire } from "node:module";
 import { writeFileSync } from "node:fs";
 import path from "node:path";
@@ -71,26 +76,22 @@ export const CHAIN_DEADLINE_MS = 240_000;
 
 const pause = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/** One JSON-RPC call over the network: { result } or { error }; a 429, a 5xx or a failed fetch is tried 4 times. */
-export async function post(url, method, params) {
+/** A provider's JSON-RPC error in its own words, as the sync's pager reads them (a range cap's span, CAP_SPANS); one with
+ *  no code or words as its JSON. */
+const rpcError = (e) => (e !== null && typeof e === "object" && e.code !== undefined && typeof e.message === "string" ? `RPC error ${e.code}: ${e.message}` : `RPC error ${JSON.stringify(e)}`);
+
+/** One JSON-RPC call over the network, read through the shared module (provider-answer.mjs rpcAnswer, which reads a
+ *  no-answer again once), in two rounds: { result }; { error } (the provider's JSON-RPC error, judged by the sync, a
+ *  block or state it does not hold included); or, past the second round, { error, noAnswer: true }, the provider's
+ *  no-answer by the shared rule (a 429, a rate limit, a body that is no JSON-RPC answer, a failed fetch), named with its
+ *  host and HTTP status (card notes-per-pool-evm-throttle-is-no-answer: robinhood.api.pocket.network's throttle of a
+ *  page read as "RPC error undefined: undefined" and failed the run, 25 Nov 04:0xZ). */
+export async function post(url, method, params, { fetchFn = fetch } = {}) {
   for (let t = 1; ; t++) {
-    try {
-      const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }), signal: AbortSignal.timeout(20_000) });
-      if ((r.status === 429 || r.status >= 500) && t < 4) {
-        await pause(1000 * t);
-        continue;
-      }
-      const j = await r.json();
-      if (j?.error) return { error: `RPC error ${j.error.code}: ${j.error.message}` };
-      if (!r.ok) return { error: `HTTP ${r.status}` };
-      return { result: j.result };
-    } catch (e) {
-      if (t < 4) {
-        await pause(1000 * t);
-        continue;
-      }
-      return { error: `fetch failed: ${e?.message ?? e}` };
-    }
+    const a = await rpcAnswer(url, method, params, { fetchFn, timeoutMs: 20_000, judgeStateMiss: true });
+    if (a.noAnswer === undefined) return "error" in a ? { error: rpcError(a.error) } : { result: a.result };
+    if (t >= 2) return { error: a.noAnswer, noAnswer: true };
+    await pause(RETRY.ms * 2);
   }
 }
 
@@ -127,7 +128,7 @@ export function replayer(log) {
     const q = queues.get(k) ?? (byNumber.has(k) ? [byNumber.get(k)] : undefined);
     const e = q?.length > 1 ? q.shift() : q?.[0];
     if (e === undefined) return { error: `no recorded answer to ${method} ${JSON.stringify(params)} on ${url}` };
-    return "error" in e ? { error: e.error } : { result: e.result };
+    return "error" in e ? { error: e.error, ...(e.noAnswer === true ? { noAnswer: true } : {}) } : { result: e.result };
   };
 }
 
@@ -217,11 +218,19 @@ function view(r, s) {
   return x[0];
 }
 
-/** The check on one chain: { ok, lines }. `deadlineMs`: the sync's (CHAIN_DEADLINE_MS). */
-export async function check(name, transport, { wait = true, deadlineMs = CHAIN_DEADLINE_MS } = {}) {
+/** The check on one chain: { ok, verdict, lines }, verdict PASS, FAIL, or INCONCLUSIVE (a refusal that names a
+ *  provider's no-answer the run was given: that provider's moment, which proves nothing either way). `deadlineMs`: the
+ *  sync's (CHAIN_DEADLINE_MS). */
+export async function check(name, given, { wait = true, deadlineMs = CHAIN_DEADLINE_MS } = {}) {
   const c = CHAINS[name];
   if (c === undefined) throw new Error(`unknown chain ${name}`);
   const lines = [];
+  const quiet = new Set(); // every no-answer's words the run was given
+  const transport = async (url, method, params) => {
+    const a = await given(url, method, params);
+    if (a.noAnswer === true) quiet.add(a.error);
+    return a;
+  };
   try {
     const d = await deployBlock(c, transport);
     lines.push(`${name}: deploy tx ${c.deployTx} in block ${d.number} (${d.hash}) on both RPCs, creating ${c.pool}`);
@@ -237,10 +246,12 @@ export async function check(name, transport, { wait = true, deadlineMs = CHAIN_D
     lines.push(r.cut === null
       ? `${name}: no leaf yet (no leaf before the pool's time ${r.nowMs} ms): stateRootTimes and labelRootTimes are read from the first deposit on`
       : `${name}: the cut before ${r.cut.beforeMs} ms (${r.cut.stateSize} state, ${r.cut.labelSize} label leaves): stateRootTimes(${r.cut.stateRoot}) and labelRootTimes(${r.cut.labelRoot}) are its last leaves' block times on both`);
-    return { ok: true, lines };
+    return { ok: true, verdict: "PASS", lines };
   } catch (e) {
-    lines.push(`${name}: ${e?.message ?? e}`);
-    return { ok: false, lines };
+    const said = String(e?.message ?? e);
+    const no = [...quiet].find((w) => said.includes(w));
+    lines.push(`${name}: ${said}${no === undefined ? "" : " (a provider's no-answer, not judged)"}`);
+    return { ok: false, verdict: no === undefined ? "FAIL" : "INCONCLUSIVE", lines };
   }
 }
 
@@ -259,14 +270,14 @@ async function main(argv) {
   const only = at("--chain");
   const names = only ? [only] : Object.keys(CHAINS);
   const record = at("--record");
-  let ok = true;
+  const verdicts = [];
   const good = {}, bad = {};
   // the chains at once, each printed as it ends
   await Promise.all(names.map(async (name) => {
     const rec = recorder();
     const r = await check(name, rec.transport);
-    for (const l of r.lines) console.log(`${r.ok ? "PASS" : "FAIL"} ${l}`);
-    ok &&= r.ok;
+    for (const l of r.lines) console.log(`${r.verdict} ${l}`);
+    verdicts.push(r.verdict);
     good[name] = rec.log;
     bad[name] = spoil(rec.log);
   }));
@@ -274,8 +285,10 @@ async function main(argv) {
     writeFileSync(record, `${JSON.stringify({ key: KEY, recorded: new Date().toISOString(), good, bad }, null, 1)}\n`);
     console.log(`recorded ${record}`);
   }
-  console.log(ok ? `PASS ${KEY}` : `FAIL ${KEY}`);
-  return ok ? 0 : 1;
+  // a FAIL on any chain fails the run; a chain refused on a provider's no-answer, with none failed, leaves it unjudged
+  const verdict = verdicts.includes("FAIL") ? "FAIL" : verdicts.includes("INCONCLUSIVE") ? "INCONCLUSIVE" : "PASS";
+  console.log(`${verdict} ${KEY}`);
+  return EXIT[verdict];
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url))
