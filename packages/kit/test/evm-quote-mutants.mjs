@@ -332,6 +332,16 @@ export const MUTANTS = [
   // holds (a rate limit's hold is evmJsonRpc's own as well, so dropping timed's `!out.some(limited)` changes nothing)
   [QUOTE, "        if (!late) s.held = performance.now() + (out.some(stateless)", "        s.held = performance.now() + (out.some(stateless)", R, "LH4 "],
   [QUOTE, "t - firstSent > EVM_STATE_FRESH_MS;", "t - firstSent >= 0;", R, "LH4 "],
+  // card evm-hook-reads-share-a-call: a shareable read shares calls only with its gas kept, in the first set its hooks
+  // and the addresses it runs allow, packed by that gas; its gas is kept from its own call; a sale's reads never share
+  [QUOTE, "    if (!own || gasOf(r) === undefined) return void append(groups, r.group, i);", "    if (!own) return void append(groups, r.group, i);", R, "SH1 "],
+  [QUOTE, "  const own = again === undefined && readsOverride === undefined && gasPacking;", "  const own = false;", R, "SH1 "],
+  [QUOTE, "    let s = shares.find((x) => !hs.some((h) => x.runs.has(h)) && !r.runs!.some", "    let s = shares.find((x) => !r.runs!.some", R, "SH1 "],
+  [QUOTE, " && !r.runs!.some((a) => x.hooks.has(a)));", "));", R, "SH1 "],
+  [QUOTE, "    if (r.runs === undefined || hs.some((h) => r.runs!.includes(h))) return void append(groups, r.group, i);", "    if (r.runs === undefined) return void append(groups, r.group, i);", R, "SH1 "],
+  [QUOTE, "  for (const i of [...plain, ...shareable]) {", "  for (const i of plain) {", R, "SH2 "],
+  [QUOTE, "    for (const part of gasParts(s.is.map((i) => gasOf(reads[i]!)!), sharedOk)) fit(part.map((k) => s.is[k]!));", "    fit(s.is);", R, "SH3 "],
+  [QUOTE, "a.sell || !keys.some(replaced) || !keys.every", "true || !keys.every", R, "SH2 "],
   // the review of the lag hold: each no-longer answer, never a revert, a non-2xx answer, the whole list's majority, the
   // two-provider list, one wait
   [QUOTE, "/historical state \\S+ is not available|archive", "/archive", R, "LH2b "],
