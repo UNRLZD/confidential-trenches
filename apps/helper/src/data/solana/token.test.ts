@@ -749,6 +749,44 @@ test("candles: a GeckoTerminal 429 after one good read serves the last good bars
   assert.ok((none.retryAfterS ?? 0) > 0);
 });
 
+// card helper-candles-first-read-never-empty: merge queue run 45710984415 (app-token-chart live, 22:17:58Z) read a listed
+// Solana coin's 15m chart 200 with 500 bars (X-Helper-Source geckoterminal), then the token page's first read of it, seconds
+// on, 200 with no bars (chain, filling): an answer of no bars, the vendor's empty list or its 404 for the pool's bars, was
+// the history's answer while that mint's bars were kept. A coin's past bars never go away, so such an answer is the
+// vendor's fault, as its 429 is: the kept bars are served (cut at `to`), dated by their read. A chart never read still
+// answers the vendor's own empty list, truly (trades.test.ts: a history that knows no bars).
+test("card helper-candles-first-read-never-empty: a vendor answer of no bars (an empty list, or a 404 for the pool's bars) after one good read serves the kept bars of that mint and tf, cut at `to`; a chart never read answers the empty list", async () => {
+  let now = NOW;
+  let answer: "good" | "empty" | "404" = "good";
+  const g = fakeGecko();
+  const empty = { ...FX.gt_ohlcv, data: { ...FX.gt_ohlcv.data, attributes: { ...FX.gt_ohlcv.data.attributes, ohlcv_list: [] } } };
+  const fetchFn = async (url: string) =>
+    !url.includes("/ohlcv/") || answer === "good"
+      ? g.fetch(url)
+      : answer === "404"
+        ? new Response('{"errors":[{"status":"404"}]}', { status: 404, headers: { "content-type": "application/json" } })
+        : new Response(JSON.stringify(empty), { status: 200, headers: { "content-type": "application/json" } });
+  const t = createSolanaToken(fakeProxy(), fakeRpc(), { now: () => now, fetch: fetchFn as never });
+  const good = await t.candles(CURVE, "1m", null, 500);
+  assert.equal(good.status, 200);
+  const bars = JSON.parse(good.body).candles as [number, ...string[]][];
+  assert.ok(bars.length > 2);
+  for (const a of ["empty", "404"] as const) {
+    now += 10 * 60_000; // past the cache and its stale window
+    answer = a;
+    const kept = await t.candles(CURVE, "1m", null, 500);
+    assert.equal(kept.status, 200, `${a}: ${kept.body}`);
+    assert.deepEqual(JSON.parse(kept.body).candles, bars, `${a}: the kept bars, not the vendor's none`);
+    assert.equal(kept.asOfMs, NOW, `${a}: the good read's time, not now`);
+    const to = bars.at(-2)![0];
+    assert.deepEqual(JSON.parse((await t.candles(CURVE, "1m", to, 500)).body).candles, bars.filter((b) => b[0] < to), `${a}: cut at to`);
+  }
+  answer = "empty";
+  const never = await t.candles(CURVE, "15m", null, 500);
+  assert.equal(never.status, 200);
+  assert.deepEqual(JSON.parse(never.body).candles, [], "a chart never read: the vendor's own empty list");
+});
+
 test("card helper-ready-gate: under a walk at full draw all along, a burst of 15 callers opening token pages and holders answers 200 every time, never 429", async () => {
   // one public provider for every read the helper makes: 100 requests per 10 s from our address, then 429 Retry-After 5
   // (4 Nov 06:24-06:30Z and the 07:50Z live run 41794726819); the clock stands still, so nothing leaves its window

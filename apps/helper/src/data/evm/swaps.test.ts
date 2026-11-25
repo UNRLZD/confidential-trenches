@@ -479,6 +479,43 @@ test("GeckoTerminal's bars before ours: the newest range asked once; a 429 later
   s.stop();
 });
 
+// card helper-candles-first-read-never-empty: one rule with ../solana/token.ts candles. An answer of no bars (the vendor's
+// empty list, or its 404 for the pool's bars), read now or held as the newest range's fresh read, while that pool's bars of
+// the tf are kept, serves the kept bars; a chart never read answers the empty list
+test("card helper-candles-first-read-never-empty: GeckoTerminal's answer of no bars (an empty list, a 404) after one good read serves the kept bars of that pool and tf, fresh or read; a chart never read answers the empty list", async () => {
+  const { readFileSync } = await import("node:fs");
+  const FX = JSON.parse(readFileSync(new URL("../solana/fixtures/token-page.json", import.meta.url), "utf8"));
+  const { geckoBudget } = await import("../gecko.ts");
+  const chain = fakeChain();
+  const clock = { t: Date.parse("2026-11-02T13:53:00Z") };
+  let answer: "good" | "empty" | "404" = "good";
+  const empty = { ...FX.gt_ohlcv, data: { ...FX.gt_ohlcv.data, attributes: { ...FX.gt_ohlcv.data.attributes, ohlcv_list: [] } } };
+  const fetchFn = (async (url: string, init: RequestInit) => {
+    if (!url.includes("geckoterminal")) return chain.fetch(url, init);
+    if (answer === "404") return new Response('{"errors":[{"status":"404"}]}', { status: 404 });
+    return new Response(JSON.stringify(answer === "empty" ? empty : FX.gt_ohlcv), { status: 200 });
+  }) as typeof chain.fetch;
+  const s = open(chain, clock, { fetch: fetchFn, gecko: geckoBudget(() => clock.t) });
+  const first = await bodyOf(s.candles(ICNT, "1m", null, 500));
+  assert.equal(first.src, "chain,geckoterminal");
+  assert.ok(first.candles.length > 2);
+  for (const a of ["empty", "404"] as const) {
+    clock.t += 2 * 3_600_000; // past GeckoTerminal's freshness
+    await s.tick();
+    answer = a;
+    const read = await s.candles(ICNT, "1m", null, 500);
+    assert.equal(read.status, 200, `${a}: ${read.body}`);
+    assert.deepEqual(JSON.parse(read.body).candles, first.candles, `${a}: the kept bars, not the vendor's none`);
+    // the empty read, held fresh, is not the next read's answer either
+    assert.deepEqual(JSON.parse((await s.candles(ICNT, "1m", null, 500)).body).candles, first.candles, `${a}: read again while fresh`);
+  }
+  answer = "empty";
+  const never = await s.candles(ICNT, "5m", null, 500);
+  assert.equal(never.status, 200, never.body);
+  assert.deepEqual(JSON.parse(never.body).candles, [], "a chart never read: the vendor's own empty list");
+  s.stop();
+});
+
 test("card helper-crowd-429: GeckoTerminal's bars before a book of ours are an optional seed, a stale read: with one call left in the window it is not taken, the chart answers our own bars, and the call stays for a chart with nothing to serve", async () => {
   const { geckoBudget, GT_LIMIT_PER_MIN } = await import("../gecko.ts");
   const chain = fakeChain();

@@ -1585,7 +1585,12 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
         return { status: 200, body: JSON.stringify(body), src, asOfMs: ahead!.at };
       }
       let a = got;
-      if (a.status === 429 || a.status === 503) {
+      // card helper-candles-first-read-never-empty: an answer of no bars (the vendor's empty list, or its 404 for the
+      // pool's bars) while this mint's bars are kept is the vendor's fault too: a coin's past bars never go away (merge
+      // queue run 45710984415: a listed coin's 15m chart read 500 bars, then the token page's first read of it, seconds
+      // on, none). A chart never read answers the vendor's own empty list, truly
+      const noBars = a.status === 200 && (JSON.parse(a.body) as Candle[]).length === 0;
+      if (a.status === 429 || a.status === 503 || noBars) {
         // GeckoTerminal throttled or down: its last good bars, cut at `to`, read time theirs, at any age (card
         // helper-candles-never-refuse-a-listed-coin, stale-if-error: past GT_SERVE_MS this answered the 429, and the page
         // drew an empty chart for a coin whose bars were held); the newest range refused by the budget is queued

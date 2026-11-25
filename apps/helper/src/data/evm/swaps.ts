@@ -5018,7 +5018,6 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const k = `${e.pool.id}:${tf}:${before ?? ""}`;
     const fresh = history.get(k);
     const newest = alone && before === null;
-    if (fresh !== undefined && now() - fresh.at < (newest ? GT_NEWEST_FRESH_MS : GT_FRESH_MS)) return fresh.bars;
     // card helper-candles-never-refuse-a-listed-coin (stale-if-error): bars held serve a read refused or failed at any
     // age, dated by their read; past GT_SERVE_MS this answered the 429 and the page drew an empty chart for a coin whose
     // bars were held (release 157's app live run 43763914220), so the newest range's re-read is queued instead (below)
@@ -5028,6 +5027,16 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const cut = (held?.bars ?? []).filter((c) => before === null || c[0] < before);
       return cut.length > 0 ? tagged(cut, held?.src) : fail;
     };
+    // card helper-candles-first-read-never-empty: an answer of no bars (GeckoTerminal's empty list, or its 404 for the
+    // pool's bars), read now or held as a fresh read, while this pool's bars of the tf are kept is the vendor's fault: a
+    // coin's past bars never go away, so the kept bars serve (one rule with ../solana/token.ts candles; merge queue run
+    // 45710984415 read a listed coin's chart 500 bars, then none seconds on). A chart never read answers the empty list
+    const some = (bars: Candle[]): Candle[] | DataAnswer => {
+      if (bars.length > 0) return bars;
+      const f = fallback(UPSTREAM);
+      return f === UPSTREAM ? bars : f;
+    };
+    if (fresh !== undefined && now() - fresh.at < (newest ? GT_NEWEST_FRESH_MS : GT_FRESH_MS)) return some(fresh.bars);
     const heldAt = kept.get(`${e.pool.id}:${tf}`)?.at ?? fresh?.at;
     const old = newest && heldAt !== undefined && now() - heldAt > GT_SERVE_MS;
     const wait = (why = "geckoterminal budget") => limited(Math.min(Math.max(Math.ceil((gecko.retryAt("pages") - now()) / 1000), 1), RETRY_AFTER_MAX_S), why);
@@ -5064,7 +5073,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       return fallback(UPSTREAM);
     }
     if (got === "throttled" && (nothing || old)) wantBars(e.pool.id, e.pool.token, tf, before, k, false, now());
-    return Array.isArray(got) ? got : fallback(got === "throttled" ? wait("geckoterminal 429") : UPSTREAM);
+    return Array.isArray(got) ? some(got) : fallback(got === "throttled" ? wait("geckoterminal 429") : UPSTREAM);
   }
 
   /** A pool's OHLCV path, GeckoTerminal's v2 and CoinGecko's on-chain alike (../coingecko.ts). */
