@@ -225,7 +225,7 @@ test("card robinhood-lists-own-reads: the helper wires its own trending on each 
   const got: Record<string, unknown> = {};
   const lists = (chain: string) => ({ own: (s: unknown) => (got[chain] = s) }) as unknown as ReturnType<typeof createEvmLists>;
   const index = indexOf([]);
-  const dex = upstreamBudget(() => DEX_LIMITS);
+  const dex = upstreamBudget(() => DEX_LIMITS, () => NOW);
   const wired = ownTrending({ base: lists("base"), robinhood: lists("robinhood") }, { base: { index: null }, robinhood: { index: index as never } }, dex);
   assert.deepEqual(wired, ["robinhood"]);
   assert.equal(got.base, undefined);
