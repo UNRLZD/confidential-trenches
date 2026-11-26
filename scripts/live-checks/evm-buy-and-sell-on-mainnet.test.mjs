@@ -97,6 +97,24 @@ test("plants on the recorded quotes each fail on their own line", () => {
   const timed = q((runs) => (runs[3].hosts = { "robinhood.rpc.blxrbdn.com": { requests: 10, s429: 1, s429Reads: { eth_getBlockByNumber: 1 }, s429At: ["16 calls in 1 s, 4 posts (10 calls) in flight"] } }));
   assert.match(timed, /warm 3 robinhood\.rpc\.blxrbdn\.com 1\/10 eth_getBlockByNumber x1 \(16 calls in 1 s, 4 posts \(10 calls\) in flight\)$/m);
   assert.doesNotMatch(named, /pocket/);
+  // each warm tap past the bound is named by the request it waited on longest, its idle time and its posts by host (card
+  // evm-tap-check-names-its-wait: run 45804985904's NVDA warm 7521 ms printed only its time, and its job kept no record)
+  const slow = q((runs) =>
+    Object.assign(runs[2], {
+      ms: 7_521,
+      hosts: { "robinhood-rpc.publicnode.com": { requests: 31, calls: 74, s429: 0 }, "robinhood.drpc.org": { requests: 3, calls: 5, s429: 0 } },
+      waited: { methods: "eth_call", host: "robinhood-rpc.publicnode.com", ms: 5_734, end: "200", spare: true, idle: 553, left: 0 },
+    }),
+  );
+  assert.match(slow, /warm taps end within 2000 ms: [^\n]*; warm 2 7521 ms: longest robinhood-rpc\.publicnode\.com eth_call 5734 ms \(200, a spare asked\), idle 553 ms, posts robinhood-rpc\.publicnode\.com 31, robinhood\.drpc\.org 3$/m);
+  // a slow tap with no wait recorded (an older record) says so
+  assert.match(q((runs) => Object.assign(runs[1], { ms: WARM_MAX_MS + 1, waited: undefined, hosts: {} })), /; warm 1 2001 ms: no wait recorded, posts none$/m);
+});
+
+test("a red run keeps its record: the header's Record line and its usage line's --record (scripts/ci/live-rerun.mjs takesRecord)", async () => {
+  const { takesRecord } = await import("../ci/live-rerun.mjs");
+  const text = readFileSync(new URL("./evm-buy-and-sell-on-mainnet.mjs", import.meta.url), "utf8");
+  assert.equal(takesRecord(text, "evm-buy-and-sell-on-mainnet", []), true);
   assert.deepEqual([...NAMED], ["not_allowed", "too_many_pools", "no_reference"]);
   const none = structuredClone(A.good);
   none.quotes = { chains: {} };
