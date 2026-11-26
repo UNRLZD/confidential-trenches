@@ -20,6 +20,7 @@ import { checkVendorPlans, createProxy } from "../src/proxy/proxy.ts";
 import { createRpc, keyedPaces } from "../src/rpc/rpc.ts";
 import { coingeckoNamed, coingeckoPace, coingeckoPlan, createKeyed } from "../src/data/coingecko.ts";
 import { providerHolds } from "../src/limits/limits.ts";
+import { nearKeyDayOf } from "../src/limits/key-reads.ts";
 import { bindSenderFromEnv } from "../src/bind/env.ts";
 import { pairNames, tokenWatchesFromEnv } from "../src/token-status/status.ts";
 import { feeQuoterFromEnv } from "../src/withdraw/fee.ts";
@@ -84,6 +85,8 @@ export const ENV_READERS = {
   createRpc,
   // card rpc-keyed-lists: the helper's one providerHolds takes every keyed URL's company pace
   keyedPaces,
+  // card near-off-the-fastnear-key: the FastNEAR key's daily ceiling, helper and seat reads together
+  nearKeyDayOf,
   // card helper-candles-keyed-gt: CoinGecko's key and its rate, read with a planted key present so the rate is read too
   coingeckoPace: (env) => coingeckoPace(new Proxy(env, { get: (t, k) => (t[k], k === "COINGECKO_API_KEY" ? "CG-plantedTESTkey0123456789abcdef" : k === "COINGECKO_CALLS_PER_MIN" ? "300" : t[k]) })),
   createKeyed: (env) => createKeyed(env, providerHolds(Date.now, {})),

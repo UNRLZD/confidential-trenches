@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import * as rpcModule from "./rpc.ts";
 import { createRpc } from "./rpc.ts";
+import { keyReads } from "../limits/key-reads.ts";
 
 // read off the module, so this file still loads at a base without it and its tests fail on the behaviour (red runs)
 const NEED = (rpcModule as unknown as { RPC_PAGE_NEED?: Record<string, number> }).RPC_PAGE_NEED ?? {};
@@ -215,4 +216,54 @@ test("card near-seat-pace-fits-one-quote: a 429 FastNEAR answers the seat reache
   assert.ok(lines.some((l) => /^rpc hold near fastnear\.com caller 60 s/.test(l)), lines.join("\n"));
   assert.ok(lines.every((l) => !l.includes("plantedNEARfastnear0key")), "the key never in a log line");
   busy = false;
+});
+
+// card near-off-the-fastnear-key: every request to the FastNEAR key counts (limits/key-reads.ts): relayed reads in the
+// seat bucket, the identity read in the helper's; past the day's ceiling the key is not asked
+function countedRig(ceiling: number) {
+  const asked: string[] = [];
+  const fetch = async (url: string, init: RequestInit): Promise<Response> => {
+    asked.push(url);
+    if ((JSON.parse(String(init.body)) as { method?: string }).method === "status") return new Response(JSON.stringify({ jsonrpc: "2.0", id: "1", result: { chain_id: "mainnet" } }), { status: 200, headers: { "content-type": JSON_T } });
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: 7, result: { from: new URL(url).host } }), { status: 200, headers: { "content-type": JSON_T } });
+  };
+  const c = { t: 1_800_000_000_000 };
+  const reads = keyReads(() => c.t, ceiling);
+  const r = createRpc({ NEAR_RPC_URL_FASTNEAR: FASTNEAR, NEAR_RPC_URL_B: DRPC_KEYED }, { fetch: fetch as never, keyReads: reads, now: () => c.t, sleep: async (ms: number) => void (c.t += ms), log: () => undefined }) as ReturnType<typeof createRpc> & { probe?: () => Promise<void> };
+  const call = (keyedOnly: boolean) => r.handle("near", JSON_T, JSON.stringify(QUERY), "198.51.100.7", false, keyedOnly);
+  return { r, asked, reads, call };
+}
+
+test("card near-off-the-fastnear-key: a ?keyed=only read and a plain read sent to the key count in the seat bucket, the key's identity read in the helper's; dRPC's key counts nothing", async () => {
+  const { r, asked, reads, call } = countedRig(100);
+  assert.equal(typeof r.probe, "function");
+  await r.probe!();
+  assert.match(reads.header(), / helper=1 seat=0 of 100 open, /, "the identity read is the helper's");
+  assert.equal((await call(true)).status, 200);
+  assert.equal((await call(false)).status, 200);
+  assert.deepEqual(asked.filter((u) => u === FASTNEAR).length, 3);
+  assert.ok(asked.includes(DRPC_KEYED), "the probe read dRPC's key too");
+  assert.match(reads.header(), / helper=1 seat=2 of 100 open, /);
+});
+
+test("card near-off-the-fastnear-key: past the day's ceiling the key is not asked: ?keyed=only answers 503 upstream (the page reads its keyless spare), the plain route walks on to the next keyed URL", async () => {
+  const { asked, reads, call } = countedRig(2);
+  reads.add("helper", 2);
+  const seat = await call(true);
+  assert.equal(seat.status, 503, seat.body);
+  assert.deepEqual(JSON.parse(seat.body), { error: { code: "upstream" } });
+  const plain = await call(false);
+  assert.equal(plain.status, 200, plain.body);
+  assert.deepEqual(JSON.parse(plain.body).result, { from: "lb.drpc.live" });
+  assert.ok(!asked.includes(FASTNEAR), `the key asked: ${asked.join(" ")}`);
+  assert.match(reads.header(), / helper=2 seat=0 of 2 hit, /);
+});
+
+test("card near-off-the-fastnear-key: past the day's ceiling the key's identity read is not sent either; dRPC's is", async () => {
+  const { r, asked, reads } = countedRig(2);
+  reads.add("seat", 2);
+  await r.probe!();
+  assert.ok(!asked.includes(FASTNEAR), `the key asked: ${asked.join(" ")}`);
+  assert.ok(asked.includes(DRPC_KEYED));
+  assert.match(reads.header(), / helper=0 seat=2 of 2 hit, /);
 });

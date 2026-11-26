@@ -19,6 +19,7 @@ import { heldPerClient, RETRY_AFTER_MAX_S, throttleOf, upstreamBudget } from "./
 import { nearRpc } from "./bind/send.ts";
 import type { BindSender } from "./bind/env.ts";
 import type { SolanaPoolSender } from "./pool/solana.ts";
+import { NEAR_KEY_READS, NEAR_KEY_READS_HEADER } from "./limits/key-reads.ts";
 import { BIND_BODY_MAX, CG_PACE_HEADER, CONNECT_ATTEMPT_MS, HANDOVER_HEADER, handler, LISTEN_BACKLOG, listenAt, LOOP_HELD_MS, loopHeldLine, NEAR_PAIR_HEADER, start, STARTED_HEADER, UPSTREAM_RETRY_AFTER_S, WITHDRAW_BODY_MAX } from "./server.ts";
 import { pairNames } from "./token-status/status.ts";
 import { agreedBlock, FeeReadRefused, type FeeQuoter } from "./withdraw/fee.ts";
@@ -82,6 +83,24 @@ test("GET /v1/health names mainnet NEAR's agreement pair in X-Helper-Near-Pair, 
   assert.equal(r.status, 200);
   assert.equal(r.headers[NEAR_PAIR_HEADER.toLowerCase()], "fastnear.com, drpc.live");
   assert.ok(!JSON.stringify(r.headers).includes("f".repeat(16)) && !JSON.stringify(r.headers).includes("d".repeat(16)) && !r.body.includes("f".repeat(16)), "no key in the answer");
+});
+
+// card near-off-the-fastnear-key: GET /v1/health names, in X-Helper-Near-Key-Reads, the FastNEAR key's reads today and
+// yesterday, helper and seat, the daily ceiling and whether today's reached it (limits/key-reads.ts); one command reads
+// it: curl -sI https://ct-api.unrealized.trade/v1/health | grep -i near-key-reads. A header: the body's 1 KB is spent.
+test("GET /v1/health names the FastNEAR key's reads per UTC day in X-Helper-Near-Key-Reads, with the ceiling", async () => {
+  const d0 = new Date().toISOString().slice(0, 10);
+  const before = await call("GET", "/v1/health", { origin: APP });
+  const d1 = new Date().toISOString().slice(0, 10);
+  const line = before.headers[NEAR_KEY_READS_HEADER.toLowerCase()];
+  assert.equal(typeof line, "string");
+  const day = /^(\d{4}-\d{2}-\d{2}) helper=(\d+) seat=(\d+) of (\d+) (open|hit), (\d{4}-\d{2}-\d{2}) helper=\d+ seat=\d+ of \d+ (open|hit)$/.exec(String(line));
+  assert.ok(day, String(line));
+  assert.ok(day[1] === d0 || day[1] === d1, `today, UTC: ${day[1]}`);
+  assert.equal(day[4], "300000", "NEAR_KEY_DAY unset: the default ceiling");
+  NEAR_KEY_READS.add("seat", 2);
+  const after = await call("GET", "/v1/health", { origin: APP });
+  assert.match(String(after.headers[NEAR_KEY_READS_HEADER.toLowerCase()]), new RegExp(`^${day[1]} helper=${day[2]} seat=${Number(day[3]) + 2} of 300000 open, `));
 });
 
 // card helper-coingecko-pace-from-its-key: GET /v1/health names CoinGecko's pace and where it comes from in
