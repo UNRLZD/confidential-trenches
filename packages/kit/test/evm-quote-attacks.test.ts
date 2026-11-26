@@ -1440,6 +1440,48 @@ test("N3b on Robinhood a WETH route not strictly better than the best native rou
   }
 });
 
+// card robinhood-native-first-names-a-route-a-buy-takes: NVDA and SPCX on Robinhood (mainnet, 26 Nov 08:5xZ): each coin's open
+// route starts from WETH, and its only native route at least as good goes through a hook the venue does not list
+// (0x6d03f039, fee 0x800000), which no buy takes (buy-tap.ts `takes`); native_first named that route, so every tap ended
+// not_allowed and the coin could not be bought. native_first prefers a native start a buy can take: a native route
+// through such a hook holds the WETH route only as every market the device cannot trade through does (R: within the
+// slippage it is bought at its own minOut, past it refused below_reference naming it)
+const onRobinhoodScanned = (pools: ModelPool[], token: string, route: EvmRoute, logs: { key: EvmPoolKey; at: number }[]) =>
+  evmPoolBuyQuoteWith({ chain: "robinhood", token, amountIn: AMOUNT, slippageBps: 100, route }, [chain(pools, 0), chain(pools, 1)], NOW, scanner(5_000_000, logs), undefined, () => 0);
+test("N3c on Robinhood native_first counts only native routes a buy can take: one through a hook the venue does not list, at least as good, holds the WETH route only as R does; a hookless one beside it still refuses native_first", async () => {
+  const token = "0x00000000000000000000000000000000000f45f5";
+  const hookedAt = (give: (a: bigint) => bigint, state?: ModelPool["state"]): ModelPool => ({ key: keyOf(token, NATIVE, 0x800000, 10, UNPINNED), give, ...(state ? { state } : {}) });
+  for (const [hooked, wethGives, bought] of [
+    [hookedAt((a) => a), (a: bigint) => a, AMOUNT], // as good as the WETH route
+    [hookedAt((a) => a), (a: bigint) => a - a / 200n, AMOUNT - AMOUNT / 200n], // the WETH route half a percent below: within the slippage (1%)
+    [hookedAt((a) => 2n * a, pricedAt(2n)), (a: bigint) => a, null], // twice the WETH route: past the slippage, below_reference, never native_first
+  ] as const) {
+    const doppler: ModelPool = { key: keyOf(token, RH_WETH, 0x800000, 200, DOPPLER), give: wethGives };
+    const logs = [{ key: hooked.key, at: 4_500_000 }];
+    const r = await onRobinhoodScanned([hooked, doppler], token, dopplerRoute(token), logs).then(
+      (q) => ({ ok: true as const, q }),
+      (e: unknown) => ({ ok: false as const, e }),
+    );
+    if (bought !== null) {
+      assert.ok(r.ok, String((r as { e?: unknown }).e));
+      assert.ok(r.q.route.venue === "uniswap-v4" && r.q.route.currencyIn === RH_WETH, JSON.stringify(r.q.route));
+      assert.equal(r.q.amountOut, bought);
+      assert.equal(r.q.minOut, (bought * 9900n) / 10000n, "at its own minOut");
+    } else {
+      assert.ok(!r.ok && r.e instanceof EvmQuoteError && r.e.code === "below_reference", String((r as { e?: unknown }).e));
+    }
+  }
+  // a hookless native route as good beside the hooked one: native_first naming it, as N3b
+  const doppler: ModelPool = { key: keyOf(token, RH_WETH, 0x800000, 200, DOPPLER), give: (a) => a };
+  const hooked = hookedAt((a) => 2n * a, pricedAt(2n));
+  const native: ModelPool = { key: keyOf(token, NATIVE, 10000, 200, NATIVE), give: (a) => a };
+  await assert.rejects(onRobinhoodScanned([hooked, native, doppler], token, dopplerRoute(token), [{ key: hooked.key, at: 4_500_000 }]), (e: unknown) => {
+    assert.ok(e instanceof EvmQuoteError && e.code === "native_first", String(e));
+    assert.ok(e.reference?.route.venue === "uniswap-v4" && e.reference.route.currencyIn === NATIVE && e.reference.route.hops[0]!.hooks === NATIVE, JSON.stringify(e.reference?.route));
+    return true;
+  });
+});
+
 const QUOTER_V4 = "0x0d5e0f971ed27fbff6c2837bf31316121532048d"; // Base's pinned V4Quoter
 /** chain(), plus what eth_call does when a call's state override replaces the V4Quoter's code with the no-op hook:
  *  every quote in that aggregate3 call runs the no-op, which returns 64 bytes, the called selector then a zero word. */

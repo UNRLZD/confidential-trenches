@@ -51,8 +51,9 @@
 //   evm-buy-hook-converge, the sale's take-and-ban);
 // - on a chain whose WETH is behind an upgradeable proxy (nativeFirst, Robinhood's aeWETH), the native v4 pools of the
 //   route's first hop: a route that starts from WETH is refused when one exists (native_first), naming the best
-//   native route, unless it quotes strictly more than every native route (native when at least as good); R stays
-//   the best of every pool, so a seeded native pool is held to the token's WETH pools too.
+//   native route, unless it quotes strictly more than every native route a buy can take (native when at least as good;
+//   a native route through a hook the venue does not list holds it only as R does); R stays the best of every pool, so
+//   a seeded native pool is held to the token's WETH pools too.
 //
 // minOut = floor(V x (10000 - slippageBps) / 10000), V what the route counts for, with V >= R or R through such a
 // hook. Only a quote made here builds a buy, within 30 s of
@@ -4191,7 +4192,13 @@ async function buyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: readonly EvmRpc
   // the native routes count only where a WETH start must beat them (native_first below); a route that does not fit is
   // refused whatever they are
   const ownFits = fits(route) === true;
+  // only a native route a buy can take holds a WETH start to native_first (card robinhood-native-first-names-a-route-a-buy-takes): one
+  // through a hook the venue does not list, or one the device can read but not trade through (held), is no native start
+  // a buy has, and holds the WETH route only as R does (below_reference, within the slippage bought at its own minOut).
+  // NVDA and SPCX on Robinhood, whose only native route at least as good goes through such a hook (0x6d03f039), were
+  // refused native_first naming it on every tap (mainnet from the Mac, 26 Nov 08:5xZ)
   const natives = ownFits && v.nativeFirst && wethStart ? priced.filter((c) => startsNative(c.route)) : [];
+  const takeable = natives.filter((c) => c.held !== true && !hookedRoute(chain, c.route));
   const exits = ownFits && unlisted.length > 0 ? priced.filter((r) => evmSellExits(chain, token, r.route)) : [];
   const all = () => true;
   const near = (x: bigint, r: bigint) => x * 10000n >= r * BigInt(10000 - slippageBps);
@@ -4215,7 +4222,7 @@ async function buyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: readonly EvmRpc
   const fitted = await bestFits([
     { l: [{ route, amountOut: value }], band: all },
     { l: priced, band: ownFits ? (c) => c.amountOut >= value : all },
-    { l: natives, band: (c) => c.amountOut >= value },
+    { l: takeable, band: (c) => c.amountOut >= value },
     { l: exits, band: (c) => c.amountOut * 10000n >= value * BigInt(10000 - slippageBps) },
   ]);
   const own = fitted[0] ?? null;
@@ -4227,7 +4234,7 @@ async function buyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: readonly EvmRpc
   }
   if (reference === null && filled.length > 0) return refuse("over_gas_floor", `no standard pool's route runs its swap in ${FIT_TEXT}`, null);
 
-  const nativeExists = v.nativeFirst && (natives.some((c) => fits(c.route) === true) || firstHop.some((c) => fills(c)));
+  const nativeExists = v.nativeFirst && (takeable.some((c) => fits(c.route) === true) || firstHop.some((c) => fills(c)));
   // R is the best of every pool, whatever it starts from: a native pool someone seeded is held to the token's WETH
   // pools too (a launchpad's, on Robinhood). Where a native pool exists a route starts native unless it quotes strictly
   // more than the best native route (native when at least as good); the native_first refusal names that native route.

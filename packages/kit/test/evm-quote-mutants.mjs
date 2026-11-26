@@ -676,6 +676,8 @@ export const MUTANTS = [
   [QUOTE, "  if (nativeExists && wethStart && (nativeBest === null || value <= nativeBest.amountOut)) {", "  if (false) {", Q, "Q6 "],
   [QUOTE, 'nativeFirst: Object.hasOwn(v, "nativeFirst") && v.nativeFirst === true', "nativeFirst: false", Q, "Q6 "],
   [QUOTE, "const natives = ownFits && v.nativeFirst && wethStart ? priced.filter((c) => startsNative(c.route)) : [];", "const natives = ownFits && v.nativeFirst && wethStart ? priced : [];", R, "N3a "],
+  // only a native route a buy can take holds a WETH start (card robinhood-native-first-names-a-route-a-buy-takes)
+  [QUOTE, "const takeable = natives.filter((c) => c.held !== true && !hookedRoute(chain, c.route));", "const takeable = natives;", R, "N3c "],
   // native when at least as good: a WETH route equal to the best native route still refuses
   [QUOTE, "(nativeBest === null || value <= nativeBest.amountOut)", "(nativeBest === null || value < nativeBest.amountOut)", R, "N3b "],
   [QUOTE, "(nativeBest === null || value <= nativeBest.amountOut)", "(nativeBest === null || value <= nativeBest.amountOut && false)", R, "N3b "],
@@ -1093,10 +1095,10 @@ export const MUTANTS = [
   [QUOTE, "asked.forEach((r, i) => fit.set(r.data, a[i]!.kind === \"out\"));", "asked.forEach((r) => fit.set(r.data, true));", R, "GF3 "],
   [QUOTE, "fit.set(reads[ownFit]!.data, out(ownFit) !== null);", "fit.set(reads[ownFit]!.data, true);", R, "GF1 "],
   [QUOTE, "const b = best(l.filter((c) => fits(c.route) !== false));", "const b = best(l);", R, "GF1 "],
-  [QUOTE, "natives.some((c) => fits(c.route) === true)", "natives.length > 0", R, "GF8 "],
+  [QUOTE, "takeable.some((c) => fits(c.route) === true)", "takeable.length > 0", R, "GF8 "],
   [QUOTE, "  const listed = fitted[3] ?? null;", "  const listed = bestOf(exits);", R, "GF9 "],
   [QUOTE, "  const reference = fitted[1] ?? null;", "  const reference = bestOf(filled);", R, "GF3 "],
-  [QUOTE, "  const nativeBest = fitted[2] ?? null;", "  const nativeBest = bestOf(natives);", R, "GF8 "],
+  [QUOTE, "  const nativeBest = fitted[2] ?? null;", "  const nativeBest = bestOf(takeable);", R, "GF8 "],
   [QUOTE, "export const EVM_BUY_SWAP_FIT = 476_190n;", "export const EVM_BUY_SWAP_FIT = 500_000n;", R, "GF6 "],
   [QUOTE, "export const EVM_BUY_SWAP_GAS = 500_000n;", "export const EVM_BUY_SWAP_GAS = 476_190n;", R, "GF5 "],
   [QUOTE, "gas: \"0x\" + (intrinsic + exec).toString(16)", "gas: \"0x\" + exec.toString(16)", R, "GF6 "],
