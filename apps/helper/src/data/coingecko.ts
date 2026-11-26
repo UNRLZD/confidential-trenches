@@ -59,12 +59,20 @@ export const CG_BACKGROUND_TIMEOUT_MS = 8_000;
 export const CG_KEY_HOLD_S = 75;
 /** How long after a 5xx, a timeout or a failed connection: one read's wait, not every chart's. */
 export const CG_DOWN_HOLD_S = 30;
-/** The 5xx, timeouts and failed connections in a row that hold CoinGecko for CG_DOWN_HOLD_S; an answer between them
- *  starts the count again, and one alone holds it CG_BLIP_HOLD_S (card sol-vendor-tape-refresh-lands: a single 2 s
- *  timeout held the key 30 s, and a Solana vendor tape renewed from it each TAPE_FRESH_MS went 40 s unrenewed against
- *  its 15 s bound, a local helper on mainnet reads 18 Nov 14:05:42-14:06:22Z, "coingecko calls: down 1, held 28").
- *  [design: 2, the industry's consecutive-failure breaker] */
+/** The fewest 5xx, timeouts and failed connections ("downs") in CG_DOWN_WINDOW_MS that hold CoinGecko for
+ *  CG_DOWN_HOLD_S, and then only while they are CG_DOWN_SHARE of the calls answered in it; any other down holds it
+ *  CG_BLIP_HOLD_S (card sol-vendor-tape-refresh-lands: a single 2 s timeout held the key 30 s, and a Solana vendor tape
+ *  renewed from it each TAPE_FRESH_MS went 40 s unrenewed against its 15 s bound, a local helper on mainnet reads 18 Nov
+ *  14:05:42-14:06:22Z, "coingecko calls: down 1, held 28"). [design: 2] */
 export const CG_DOWN_TRIP = 2;
+/** The window the downs are counted over, among the calls answered in it. [design: CG_DOWN_HOLD_S] */
+export const CG_DOWN_WINDOW_MS = 30_000;
+/** The share of the calls answered in CG_DOWN_WINDOW_MS that are downs for the hold, the industry's failure-rate breaker
+ *  over a rolling window with a least count (card cg-breaker-trips-on-a-failure-share: helper 244, 26 Nov 01:16-01:18Z,
+ *  a burst of listed charts, 4 downs among 177 calls served over two minutes, then 182 reads "held" in one minute, a
+ *  CG_DOWN_HOLD_S hold's worth at the burst's rate, went keyless into GeckoTerminal's full window, so charts refused; a
+ *  quiet key's two downs with no answer between them are 2 of 2 and hold as before). [design: a half, the failure-rate threshold Hystrix and resilience4j start from] */
+export const CG_DOWN_SHARE = 0.5;
 /** How long one 5xx, timeout or failed connection holds CoinGecko: the rest of the read that met it (a cold chart's
  *  bars after its top pool go keyless at once, as before), short of a tape's 15 s bound less its 10 s refresh and the
  *  2 s timeout. [design: 2 s] */
@@ -133,12 +141,20 @@ export function createKeyed(env: Record<string, string | undefined>, holds: Prov
   const missing = new Map<string, number>();
   const counts = new Map<string, number>();
   const bump = (k: string) => counts.set(k, (counts.get(k) ?? 0) + 1);
-  /** 5xx, timeouts and failed connections in a row (CG_DOWN_TRIP). */
-  let downs = 0;
+  /** The calls answered in the last CG_DOWN_WINDOW_MS, oldest first, each a down or not (at most the key's rate a
+   *  window). */
+  const answered: { at: number; down: boolean }[] = [];
+  const note = (down: boolean) => {
+    const t = now();
+    answered.push({ at: t, down });
+    while (t - answered[0]!.at > CG_DOWN_WINDOW_MS) answered.shift();
+  };
   const down = () => {
-    if (++downs < CG_DOWN_TRIP) return holds.hold(CG_URL, CG_BLIP_HOLD_S);
+    note(true);
+    const downs = answered.filter((a) => a.down).length;
+    if (downs < CG_DOWN_TRIP || downs < answered.length * CG_DOWN_SHARE) return holds.hold(CG_URL, CG_BLIP_HOLD_S);
     holds.hold(CG_URL, CG_DOWN_HOLD_S);
-    downs = 0;
+    answered.length = 0;
   };
   return {
     async read(path, ok, background = false) {
@@ -165,7 +181,7 @@ export function createKeyed(env: Record<string, string | undefined>, holds: Prov
             holds.hold(CG_URL, Number.isFinite(ra) && ra > 0 ? ra : CG_THROTTLE_HOLD_S);
           } else if (r.status === 401 || r.status === 403) holds.hold(CG_URL, CG_KEY_HOLD_S);
           if (r.status >= 500) down();
-          else downs = 0;
+          else note(false);
           if (r.status === 404) {
             missing.delete(where);
             if (missing.size >= CG_MISS_MAX) missing.delete(missing.keys().next().value!);
@@ -173,7 +189,7 @@ export function createKeyed(env: Record<string, string | undefined>, holds: Prov
           }
           return bump(String(r.status)), undefined;
         }
-        downs = 0;
+        note(false);
         if (Number(r.headers.get("content-length") ?? "0") > ANSWER_MAX) return await r.body?.cancel().catch(() => undefined), bump("large"), undefined;
         const text = await r.text();
         if (text.length > ANSWER_MAX) return bump("large"), undefined;
