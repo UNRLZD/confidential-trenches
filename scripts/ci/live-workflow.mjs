@@ -272,6 +272,9 @@ export const RERUN_CASES = Object.freeze([
   { name: "exit 0 passes on its one run", codes: [0], pass: true, runs: 1, code: 0, verdict: "pass" },
   { name: "exit 3 then exit 0 passes on the rerun", codes: [3, 0], pass: true, runs: 2, code: 0, verdict: "pass" },
   { name: "exit 3 throughout is inconclusive at the bound, green, and names the providers", codes: [3], pass: true, runs: "bound", code: 0, verdict: "inconclusive", named: true },
+  // card live-check-fails-a-dead-provider: sign live run 45736762709 kept a check green on a token seat that refused
+  // every connection since 24 Nov
+  { name: "exit 3 throughout, one host taking no connection in every run (refused), is a FAIL at the bound, red", codes: [3], output: "--- solana dead.example.org: no answer (ECONNREFUSED)\nlive-check k: INCONCLUSIVE (1 of 2 answered)", pass: false, runs: "bound", code: 1, verdict: "fail" },
   { name: "exit 3 then exit 1 is red and not run again", codes: [3, 1], pass: false, runs: 2, code: 1, verdict: "fail" },
   { name: "exit 1 (FAIL) is never run again", codes: [1], pass: false, runs: 1, code: 1, verdict: "fail" },
   { name: "exit 2 (ERROR) is never run again", codes: [2], pass: false, runs: 1, code: 2, verdict: "error" },
