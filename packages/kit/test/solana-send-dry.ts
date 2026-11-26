@@ -32,10 +32,12 @@ if (!process.argv.includes("--dry")) {
 }
 // The two providers are neither of the send paths: provider A is PublicNode's keyless Solana RPC (from the Mac between
 // 2026-11-02T03:06:03Z and 03:06:04Z by date -u, isBlockhashValid and getSignatureStatuses with
-// searchTransactionHistory true answered, slots 464337815-16, each echoing its string id), provider B the second public RPC the kit's
-// quote fixtures were read on (test/fixtures/solana-capture.mjs:7). The public RPC stays a send path only.
+// searchTransactionHistory true answered, slots 464337815-16, each echoing its string id), provider B Pocket's keyless
+// gateway, the signing page's public seat's second (card solana-tools-drop-the-dead-provider: Solana Vibe Station, B
+// before, refuses every connection since 24 Nov; Pocket answered isBlockhashValid and simulateTransaction from the Mac,
+// 26 Nov 07:0xZ-07:38Z). The public RPC stays a send path only.
 const PROVIDER_A = "https://solana-rpc.publicnode.com";
-const PROVIDER_B = "https://public.rpc.solanavibestation.com";
+const PROVIDER_B = "https://solana.api.pocket.network";
 const STAND_INS = ["H8sMJSCQxfKiFTCfDR3DUMLPwcRbM61LGFJ8N4dK3WjS", "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM", "5tzFkiKscXHK5ZXCGbXZxdw7gTjjD1mBwuoFbhUvuAi9"];
 
 const a = solanaJsonRpc(PROVIDER_A, { timeoutMs: 10_000 });

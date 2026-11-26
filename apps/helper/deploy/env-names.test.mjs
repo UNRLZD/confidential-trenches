@@ -34,7 +34,7 @@ const HELPER = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 /** Quoted constants in src/ that are not environment names: NEAR RPC error causes, a Ref pool kind and a 1Click
  *  recipientType (bind/create.ts deliveryOf), and route B's keyless providers' names in Server-Timing (rpc/rpc.ts
  *  MARKS_KEYLESS: keyless URLs in the code, set by no environment; card solana-marks-route-answers). */
-export const NOT_ENV = new Set(["UNKNOWN_ACCESS_KEY", "UNKNOWN_ACCOUNT", "UNKNOWN_BLOCK", "UNKNOWN_TRANSACTION", "SIMPLE_POOL", "DESTINATION_CHAIN", "ORIGIN_CHAIN", ...["SOLANA_MARKS_FOUNDATION", "SOLANA_MARKS_SVS"]]);
+export const NOT_ENV = new Set(["UNKNOWN_ACCESS_KEY", "UNKNOWN_ACCOUNT", "UNKNOWN_BLOCK", "UNKNOWN_TRANSACTION", "SIMPLE_POOL", "DESTINATION_CHAIN", "ORIGIN_CHAIN", ...["SOLANA_MARKS_FOUNDATION"]]);
 
 function codeFiles(dir) {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) => {

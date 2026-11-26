@@ -614,11 +614,12 @@ export const MARKS_A_ENV = "SOLANA_RPC_URL";
  * QuickNode and Helius; solana-rpc.publicnode.com 403 ("Indexed requests require a personal token"), solana.drpc.org
  * 400 ("chain is not available on free plan"), Ankr 403, OnFinality 429, Tatum "available for paid plans only". A list
  * only names addresses (marksRoutes' note below), so a keyless lister decides nothing a keyed one would not.
+ * Card solana-tools-drop-the-dead-provider: Solana Vibe Station left the list, as it refuses every connection (24 Nov
+ * from the box and the Mac, 26 Nov 05:5xZ from the Mac). Read from the Mac 26 Nov 07:0xZ, the same scan: api.mainnet-beta
+ * 200 with 14 and 26 accounts; solana.api.pocket.network 200 with the same 14 twice in eight asks and -32010 ("excluded
+ * from account secondary indexes") the other six, no spare. The Foundation's is route B's one keyless provider.
  */
-export const MARKS_KEYLESS: readonly { name: string; url: string }[] = Object.freeze([
-  { name: "SOLANA_MARKS_FOUNDATION", url: "https://api.mainnet-beta.solana.com" },
-  { name: "SOLANA_MARKS_SVS", url: "https://public.rpc.solanavibestation.com" },
-]);
+export const MARKS_KEYLESS: readonly { name: string; url: string }[] = Object.freeze([{ name: "SOLANA_MARKS_FOUNDATION", url: "https://api.mainnet-beta.solana.com" }]);
 /** The one operator POST /v1/rpc/near?keyed=only sends to (operatorOf; card near-quote-under-the-pace): the signing
  *  page's other NEAR seat is dRPC, read device-direct, so this one is FastNEAR's key. */
 export const NEAR_SEAT = "fastnear.com";
