@@ -245,7 +245,8 @@ test("BS1 card evm-quote-fewer-rounds: with dRPC held, the recorded warm PONS ta
     const scans = [v.scan!.url, ...(v.scan!.spares ?? []).map((s) => s.url)].map((u) => q.evmJsonRpc(u, r.fetchFn, 16 << 20));
     let providers = q.evmProviders(q.evmRanked(v.providers!), r.fetchFn);
     const outcomes: string[] = [];
-    let warmMs = -1;
+    // the warm tap's bound, a timer of the test clock set as the tap starts: it fires only if the tap runs past it
+    let warmPast: boolean | undefined;
     for (const [k, x] of (F.quotes as { phase: Phase; now: number; request: Record<string, unknown>; outcome: string }[]).entries()) {
       r.at(x.phase, k);
       if (x.phase === "warm") {
@@ -254,15 +255,17 @@ test("BS1 card evm-quote-fewer-rounds: with dRPC held, the recorded warm PONS ta
         providers = q.evmProviders(q.evmRanked(v.providers!), r.fetchFn);
         assert.deepEqual(q.evmRanked(v.providers!).slice(0, 2), ["https://robinhood-rpc.publicnode.com", "https://robinhood.rpc.blxrbdn.com"], "with dRPC held, bloXroute is the second seat");
       }
-      const t0 = performance.now();
+      let past = false;
+      const bound = x.phase === "warm" ? setTimeout(() => (past = true), WARM_HELD_MS) : undefined;
       const { buys, ...rest } = x.request;
       const req = { ...rest, token: buys, amountIn: BigInt(String(x.request.amountIn)) } as EvmPoolBuyQuoteRequest;
       outcomes.push(await q.evmPoolBuyQuoteWith(req, providers, x.now, scans).then((a) => `ok ${a.amountOut} ${a.block.hash}`, (e) => String((e as { code?: unknown }).code ?? e)));
-      if (x.phase === "warm") warmMs = performance.now() - t0;
+      clearTimeout(bound);
+      if (x.phase === "warm") warmPast = past;
     }
     evmPaceReset();
+    assert.equal(warmPast, false, `the warm tap with dRPC held ran past ${WARM_HELD_MS} ms of the test clock`);
     assert.deepEqual(r.missed, []);
     assert.deepEqual(outcomes, F.quotes.map((x: { outcome: string }) => x.outcome), "every quote of the replay ends as the recording's did");
-    assert.ok(warmMs >= 0 && warmMs <= WARM_HELD_MS, `the warm tap with dRPC held took ${Math.round(warmMs)} ms of the test clock, past ${WARM_HELD_MS}`);
   });
 });
