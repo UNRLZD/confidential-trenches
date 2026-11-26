@@ -17,6 +17,7 @@
 // a provider down, INCONCLUSIVE, never a pass. About 100 posts to the seat (294 calls of eth_blockNumber at Alchemy's 10
 // CU each) and one to publicnode, nothing signed, no money.
 // After: sign helper
+// Serial: evm-keyed 420 (its burst draws the helper's Robinhood Alchemy key, the keyed route's first URL, so it runs after the group's other Robinhood reads)
 // Bundle: out the helper's Robinhood seat (its CORS answer to the page's origin, a mainnet read beside publicnode's, the heaviest tap burst in one 10 s window); the bundle's naming of the seat is held by packages/kit/test/evm-rh-seat.test.ts
 //   node scripts/live-checks/robinhood-warm-tap-inside-2s.mjs [--record <file>]
 //   node scripts/live-checks/robinhood-warm-tap-inside-2s.mjs --answer <file>     judge a recorded run, no network
