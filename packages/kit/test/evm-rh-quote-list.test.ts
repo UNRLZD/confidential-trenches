@@ -12,16 +12,16 @@ import { evmPoolProvidersOf, evmPoolVenues } from "../src/trade/evm/buy-unpinned
 
 const GLOBALSTAKE = "https://rpc-robinhood.globalstake.io";
 
-test("Robinhood's quote list holds no provider that answered the kit's batch HTTP 500, and keeps four keyless operators beside our helper's seat, each pinned", () => {
+test("Robinhood's quote list holds no provider that answered the kit's batch HTTP 500, and keeps four operators, each pinned", () => {
   const v = evmPoolVenues().robinhood;
   const list = v.providers ?? assert.fail("robinhood: no quote list");
   assert.ok(!list.includes(GLOBALSTAKE), `${GLOBALSTAKE} answered the kit's batch HTTP 500 and is still asked for quotes`);
-  // card robinhood-warm-tap-inside-2s: the seat first (evm-rh-seat.test.ts)
-  assert.deepEqual(list, ["https://ct-api.unrealized.trade/v1/rpc/robinhood?keyed=alchemy", "https://robinhood-rpc.publicnode.com", "https://robinhood.drpc.org", "https://rpc.mainnet.chain.robinhood.com", "https://robinhood.rpc.blxrbdn.com"]);
-  // five operators on five hosts: a quote takes two that agree, with three spares
-  assert.equal(new Set(list.map((u) => new URL(u).host)).size, 5);
-  // each one's posts at once pinned, and none for a provider the list no longer asks
-  assert.deepEqual(Object.keys(v.inflight ?? {}).sort(), [...list].sort());
+  assert.deepEqual(list, ["https://robinhood-rpc.publicnode.com", "https://robinhood.drpc.org", "https://rpc.mainnet.chain.robinhood.com", "https://robinhood.rpc.blxrbdn.com"]);
+  // four operators on four hosts: a quote takes two that agree, with two spares
+  assert.equal(new Set(list.map((u) => new URL(u).host)).size, 4);
+  // each one's posts at once pinned, and the seat's a quote asks with them (card robinhood-warm-tap-inside-2s,
+  // evm-rh-seat.test.ts), and none for a provider the list no longer asks
+  assert.deepEqual(Object.keys(v.inflight ?? {}).sort(), [...list, ...(v.seat === undefined ? [] : [v.seat])].sort());
   // the batch the four answered: 64 reads a call
   assert.equal(v.reads?.perCall, 64);
 });

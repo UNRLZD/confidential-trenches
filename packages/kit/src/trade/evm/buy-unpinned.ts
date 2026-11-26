@@ -66,6 +66,12 @@ export type EvmPoolVenue = {
    *  as measured: a quote asks two and the rest when one fails, is slow or differs (quote.ts agreeing, evmRanked); and
    *  how many blocks two heads may differ. */
   readonly providers?: readonly string[];
+  /** Our helper's keyed route for this chain's quote reads (card robinhood-warm-tap-inside-2s), as NEAR's `seat`
+   *  (near/networks.ts): one more provider a quote ranks with `providers` (quote.ts venue), on a host none of them is on,
+   *  one operator among them, so a read it answers still needs another provider's agreeing answer. Apart from `providers`,
+   *  which name third-party operators by origin: the pool index (poolProviders' fallback) and every check of that list
+   *  read them alone. */
+  readonly seat?: string;
   /** Of `providers`, those a quote asks only after every other (quote.ts evmRanked), however fast they answer: each is
    *  paced far under a quote's rounds of reads and carries the chain's scan and pool sync (card
    *  robinhood-quotes-inside-provider-limits). */
@@ -484,14 +490,15 @@ export const evmMainnetVenues = () =>
       // ask it for 12 reads a request, 16 times the posts, for the slowest operator here (its 64-read batches p50/p95
       // 916/3,298 ms against publicnode's 466/941, 23:2xZ), so it is not asked; the pool list keeps it for log pages.
       // Live check rh-provider-fails-64-read-batch reads every one of this list at the batch after each app deploy.
-      // Card robinhood-warm-tap-inside-2s: our helper's seat first, POST /v1/rpc/robinhood?keyed=alchemy, one company's
-      // key under a share sized to three taps (apps/helper/src/rpc/rpc.ts SEAT_SHARE), as NEAR's seat is (near/networks.ts).
-      // The keyless four were the gap: publicnode 0.6 to 5.7 s a post, Robinhood's own and bloXroute paced at 6 calls a
+      providers: Object.freeze(["https://robinhood-rpc.publicnode.com", "https://robinhood.drpc.org", "https://rpc.mainnet.chain.robinhood.com", "https://robinhood.rpc.blxrbdn.com"]),
+      // Card robinhood-warm-tap-inside-2s: our helper's seat, POST /v1/rpc/robinhood?keyed=alchemy, one company's key under
+      // a share sized to three taps (apps/helper/src/rpc/rpc.ts SEAT_SHARE), ranked with the four (quote.ts venue). The
+      // keyless four were the gap: publicnode 0.6 to 5.7 s a post, Robinhood's own and bloXroute paced at 6 calls a
       // second, dRPC held after a 429, so a warm tap took 2.7 to 24 s on mainnet from the Mac (26 Nov 15:0xZ); with the
-      // seat first (a local helper on the same key, 15:5xZ) 0.36 to 1.6 s, 364 seat posts all answered. Every read still
-      // needs two operators that agree: a lying helper meets another's answer and the quote is refused, never signed; a
-      // helper down or past its day leaves the four as before.
-      providers: Object.freeze([`${EVM_HELPER_ORIGIN}/v1/rpc/robinhood?keyed=alchemy`, "https://robinhood-rpc.publicnode.com", "https://robinhood.drpc.org", "https://rpc.mainnet.chain.robinhood.com", "https://robinhood.rpc.blxrbdn.com"]),
+      // seat (a local helper on the same key, 15:5xZ) 0.36 to 1.6 s, 364 seat posts all answered. Every read still needs
+      // two operators that agree: a lying helper meets another's answer and the quote is refused, never signed; a helper
+      // down or past its day is held as any provider and leaves the four as before.
+      seat: `${EVM_HELPER_ORIGIN}/v1/rpc/robinhood?keyed=alchemy`,
       // the warm tap's cut logs (card evm-cut-logs-only-where-served), read from the Mac 2026-11-24 20:46Z over the
       // newest 100 blocks as Base's: dRPC and Robinhood's own answered (67, 72 and 90 logs on both); publicnode -32602
       // "Archive requests require a personal token" and bloXroute -32601 "Method not available on this endpoint" every

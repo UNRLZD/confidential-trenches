@@ -239,6 +239,14 @@ const append = <K, V>(m: Map<K, V[]>, k: K, v: V) => {
   else l.push(v);
 };
 
+/** A venue's providers with its seat first, made once per list (a quote's head watch keeps the list it was made with). */
+const SEATED = new WeakMap<readonly string[], readonly string[]>();
+const withSeat = (seat: string, providers: readonly string[]): readonly string[] => {
+  let l = SEATED.get(providers);
+  if (l === undefined) SEATED.set(providers, (l = Object.freeze([seat, ...providers])));
+  return l;
+};
+
 /** The pinned quoters and rules of `chain`: own keys of the frozen venue list only. */
 function venue(chain: EvmPoolChain, all: EvmPoolVenueList = evmPoolVenues()) {
   const v = typeof chain === "string" && Object.hasOwn(all, chain) ? all[chain] : undefined;
@@ -256,7 +264,9 @@ function venue(chain: EvmPoolChain, all: EvmPoolVenueList = evmPoolVenues()) {
     v3: own("v3"),
     v4: own("v4"),
     nativeFirst: Object.hasOwn(v, "nativeFirst") && v.nativeFirst === true,
-    providers: Object.hasOwn(v, "providers") ? v.providers : undefined,
+    // the venue's seat, our helper's route (card robinhood-warm-tap-inside-2s), ranked with its providers: one operator
+    // more, so each read still needs two that agree
+    providers: Object.hasOwn(v, "providers") ? (Object.hasOwn(v, "seat") && typeof v.seat === "string" ? withSeat(v.seat, v.providers!) : v.providers) : undefined,
     // the venue's reads per call and request bytes; a venue with none sends 6 a call in requests of 24,000 bytes at most
     reads: readLimits(Object.hasOwn(v, "reads") ? v.reads : undefined),
     traceProviders: Object.hasOwn(v, "traceProviders") ? v.traceProviders : undefined,
