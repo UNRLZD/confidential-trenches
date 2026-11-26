@@ -383,28 +383,29 @@ test("card evm-pool-leaves-any-source: POST /v1/rpc/{chain}?keyed=only reads the
   assert.deepEqual(asked, [KEYED]);
 });
 
-test("card robinhood-warm-tap-inside-2s: POST /v1/rpc/robinhood?keyed=quicknode reads the chain's QuickNode URL alone, where ?keyed=only starts at its first keyed URL; QUICKNODE or a second keyed value 400 before any call", async () => {
-  const ALCHEMY = "https://alchemy.test/v2/projectsegment0123456789";
+test("card robinhood-warm-tap-inside-2s: POST /v1/rpc/robinhood?keyed=alchemy reads the chain's Alchemy URL alone, where ?keyed=only starts at its first keyed URL; ALCHEMY, quicknode or a second keyed value 400 before any call", async () => {
+  // the URL's company decides, never the name holding it: here the first keyed name holds another company's URL
   const QN = "https://qn.test/quicknodesegment0123456789/";
+  const ALCHEMY = "https://robinhood-mainnet.g.alchemy.com/v2/projectsegment0123456789";
   const asked: string[] = [];
   const fetch = async (url: string, init: RequestInit) => (asked.push(url), new Response(JSON.stringify({ jsonrpc: "2.0", id: JSON.parse(String(init.body)).id, result: "0x1" }), { status: 200, headers: { "content-type": "application/json" } }));
-  const s = own(start(COMMIT, 0, undefined, createRpc({ ROBINHOOD_RPC_URL: ALCHEMY, ROBINHOOD_RPC_URL_QUICKNODE: QN }, { now: STILL, fetch: fetch as never, pinned: { robinhood: ["https://p1.test"] } })));
+  const s = own(start(COMMIT, 0, undefined, createRpc({ ROBINHOOD_RPC_URL: QN, ROBINHOOD_RPC_URL_QUICKNODE: ALCHEMY }, { now: STILL, fetch: fetch as never, pinned: { robinhood: ["https://p1.test"] } })));
   await listening(s, "the keyed helper");
   const port = (s.address() as AddressInfo).port;
   const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_blockNumber", params: [] });
-  for (const q of ["?keyed=QUICKNODE", "?keyed=quicknode&keyed=only", "?keyed=quicknode&keyed=quicknode"]) {
+  for (const q of ["?keyed=ALCHEMY", "?keyed=quicknode", "?keyed=alchemy&keyed=only", "?keyed=alchemy&keyed=alchemy"]) {
     const r = await call("POST", `/v1/rpc/robinhood${q}`, JSON_H, body, port);
     assert.equal(r.status, 400, q);
     assert.deepEqual(JSON.parse(r.body), { error: { code: "method_not_allowed" } }, q);
   }
   assert.deepEqual(asked, [], "a refused flag reaches no provider");
-  const qn = await call("POST", "/v1/rpc/robinhood?keyed=quicknode", JSON_H, body, port);
-  assert.equal(qn.status, 200, qn.body);
-  assert.deepEqual(asked, [QN]);
+  const seat = await call("POST", "/v1/rpc/robinhood?keyed=alchemy", JSON_H, body, port);
+  assert.equal(seat.status, 200, seat.body);
+  assert.deepEqual(asked, [ALCHEMY]);
   asked.length = 0;
   const only = await call("POST", "/v1/rpc/robinhood?keyed=only", JSON_H, body, port);
   assert.equal(only.status, 200, only.body);
-  assert.deepEqual(asked, [ALCHEMY]);
+  assert.deepEqual(asked, [QN]);
 });
 
 // card helper-server-test-400-never-hangs-up: a start on an OS-chosen port (every test's) listened on the wildcard

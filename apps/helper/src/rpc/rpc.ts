@@ -1138,10 +1138,21 @@ export function sharedKeyOf(chain: RpcChain, req: unknown, keyedOnly: KeyedMode)
   return `${chain}${modeTag(keyedOnly)} ${JSON.stringify([req.method, p])}`;
 }
 /** The route's keyed mode (server.ts, POST /v1/rpc/{chain}?keyed=): false none; true ?keyed=only, the chain's keyed URLs
- *  in order (card evm-pool-leaves-any-source); "quicknode" ?keyed=quicknode, the chain's QuickNode URL alone (card
- *  robinhood-warm-tap-inside-2s): one company, so the device can count the route as QuickNode beside its own providers,
- *  where ?keyed=only may answer from a dRPC key, the company of robinhood.drpc.org. */
-export type KeyedMode = boolean | "quicknode";
+ *  in order (card evm-pool-leaves-any-source); "alchemy" ?keyed=alchemy, the chain's keyed URLs of Alchemy alone (card
+ *  robinhood-warm-tap-inside-2s), a trade's seat beside the device's own providers. One company: ?keyed=only walks on to
+ *  QuickNode and the dRPC keys, and a dRPC key's answer is the company of robinhood.drpc.org, so the device's two answers
+ *  could be one operator's. Alchemy, not QuickNode: Robinhood's QuickNode endpoint is a free trial paced at 7 calls a
+ *  second (limits.ts KEYED_PACE), no faster than bloXroute's 6 on the device, where the Alchemy key is Pay As You Go
+ *  (scripts/deploy/robinhood-alchemy-key.sh): this route answered an eth_call in 190-200 ms from macOS beside
+ *  publicnode's 100-260, Robinhood's own 250-355 and bloXroute's 230-245 (26 Nov 12:5xZ). */
+export type KeyedMode = boolean | "alchemy";
+/** The company each seat mode answers from (KeyedMode), as operatorOf names it. */
+const SEAT_COMPANY = { alchemy: "alchemy.com" } as const;
+/** A seat read's own allowance for the caller (card robinhood-warm-tap-inside-2s), as a pool index read has
+ *  INDEX_CLIENT: the route's page share again (RPC_PAGE_NEED), never the caller's, which the page's background passes
+ *  draw on the same address (INDEX_CLIENT's note: on 21 Nov they spent it and the device's sync met 429). The device
+ *  paces the seat inside it (packages/kit/src/checks/evm/pace.ts EVM_PACE). */
+export const SEAT_CLIENT = "trade-seat";
 /** A shared answer's key part for `m`: an answer read in one mode is never handed to a caller of another. */
 const modeTag = (m: KeyedMode): string => (m === false ? "" : m === true ? " keyed" : ` keyed ${m}`);
 
@@ -1733,7 +1744,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
    * the caller's address (../limits/limits.ts clientOf). The helper's own cached reads (Discover's lists, the token
    * page) pass none: they draw from the provider's total, never a caller's share; `reserved` marks the ones RPC_RESERVE
    * holds room for (Discover's), which alone may draw it. `keyedOnly`: the caller's ?keyed=only (card
-   * evm-pool-leaves-any-source), the chain's keyed URLs alone, or ?keyed=quicknode, its QuickNode URL alone (KeyedMode).
+   * evm-pool-leaves-any-source), the chain's keyed URLs alone, or ?keyed=alchemy, its Alchemy URLs alone (KeyedMode).
    */
   async function handle(chain: string, contentType: string | undefined, body: string, client?: string, reserved = false, keyedOnly: KeyedMode = false): Promise<Answer> {
     const t: Trace = { waitMs: 0 };
@@ -1897,16 +1908,18 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     // only when this seat and its other, dRPC read device-direct, agree byte for byte, so this seat must be another
     // operator: never dRPC's URL or any other company's, and none of FastNEAR's set is 503
     if (keyedOnly) {
-      // card robinhood-warm-tap-inside-2s: ?keyed=quicknode, the chain's QuickNode URL alone (KeyedMode)
-      const own = upstreams[c].keyed.filter((k) => !k.keyless && (c !== "near" || operatorOf(k.url) === NEAR_SEAT) && (keyedOnly !== "quicknode" || KEYED_PROVIDER[k.env] === "quicknode")).map((k) => k.url);
+      // card robinhood-warm-tap-inside-2s: a seat mode (?keyed=alchemy), its company's URLs alone (KeyedMode)
+      const company = keyedOnly === true ? undefined : SEAT_COMPANY[keyedOnly];
+      const own = upstreams[c].keyed.filter((k) => !k.keyless && (c !== "near" || operatorOf(k.url) === NEAR_SEAT) && (company === undefined || operatorOf(k.url) === company)).map((k) => k.url);
       if (own.length === 0) return UPSTREAM();
-      // card helper-robinhood-route-serves-a-device-sync: a pool index read draws its own allowance (INDEX_CLIENT)
-      const mine = client !== undefined && indexReadOf(c, out, poolManagerOf(c)) ? `${INDEX_CLIENT} ${client}` : client;
+      // card helper-robinhood-route-serves-a-device-sync: a pool index read draws its own allowance (INDEX_CLIENT); card
+      // robinhood-warm-tap-inside-2s: a seat read its own (SEAT_CLIENT)
+      const mine = client === undefined ? client : company !== undefined ? `${SEAT_CLIENT} ${client}` : indexReadOf(c, out, poolManagerOf(c)) ? `${INDEX_CLIENT} ${client}` : client;
       // card helper-pool-logs-outside-the-caller-budget: a finalized page of logs kept before is answered here, drawing
       // nothing; a first ask draws as any read, and is kept once its toBlock reads finalized (LOG_CACHE_ENTRIES). Never
-      // in ?keyed=quicknode: the cache and the pool store hold answers of every keyed company, so its ranges go to its
-      // one URL as any read (card robinhood-warm-tap-inside-2s)
-      const logs = Array.isArray(out) || keyedOnly === "quicknode" ? null : finalLogsOf(c, out as Record<string, unknown>, poolOf(c));
+      // in a seat mode: the cache and the pool store hold answers of every keyed company, so its ranges go to its
+      // company's URLs as any read (card robinhood-warm-tap-inside-2s)
+      const logs = Array.isArray(out) || company !== undefined ? null : finalLogsOf(c, out as Record<string, unknown>, poolOf(c));
       if (logs !== null) {
         const id = (out as { id: unknown }).id;
         const kept = logCacheGet(logs.key);

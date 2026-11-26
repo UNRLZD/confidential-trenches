@@ -892,11 +892,11 @@ export function handler(
         const chain = (q === -1 ? raw : raw.slice(0, q)).slice(RPC_PREFIX.length);
         if (!raw.startsWith(RPC_PREFIX) || chain === "" || chain.includes("/")) return send(404, { error: { code: "not_found" } }, cors(req));
         // card evm-pool-leaves-any-source: ?keyed=only, exactly once, reads the chain's keyed URLs alone (rpc.ts); card
-        // robinhood-warm-tap-inside-2s: ?keyed=quicknode its QuickNode URL alone (rpc.ts KeyedMode); any other value of
-        // keyed is refused before the body is read
+        // robinhood-warm-tap-inside-2s: ?keyed=alchemy its Alchemy URLs alone (rpc.ts KeyedMode); any other value of keyed
+        // is refused before the body is read
         const flag = new URL(raw, "http://helper.invalid").searchParams.getAll("keyed");
-        if (flag.length > 1 || (flag.length === 1 && flag[0] !== "only" && flag[0] !== "quicknode")) return send(400, { error: { code: "method_not_allowed" } }, cors(req));
-        const mode: KeyedMode = flag.length === 0 ? false : flag[0] === "only" ? true : "quicknode";
+        if (flag.length > 1 || (flag.length === 1 && flag[0] !== "only" && flag[0] !== "alchemy")) return send(400, { error: { code: "method_not_allowed" } }, cors(req));
+        const mode: KeyedMode = flag.length === 0 ? false : flag[0] === "only" ? true : "alchemy";
         void readBody(req, RPC_BODY_MAX)
           .then((body) =>
             body === undefined

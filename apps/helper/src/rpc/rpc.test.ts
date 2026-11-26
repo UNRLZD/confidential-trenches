@@ -1320,59 +1320,76 @@ test("card evm-pool-leaves-any-source: ?keyed=only refuses what the route refuse
   assert.deepEqual(asked, []);
 });
 
-// -- card robinhood-warm-tap-inside-2s: ?keyed=quicknode reads QuickNode's key alone, one company --------------------------
-// A warm Robinhood tap's second side waits on Robinhood's own RPC and bloXroute once dRPC is held (release 209, VRAX warm
-// 3.2-3.4 s). The device may add this route as its quote's spare only if the route is one company: the quote keeps its
-// two answers apart by host and by its list, and ?keyed=only may answer from Alchemy, QuickNode or a dRPC key, the last
-// the same company as robinhood.drpc.org. So ?keyed=quicknode asks the chain's QuickNode URL and nothing else.
+// -- card robinhood-warm-tap-inside-2s: ?keyed=alchemy reads the chain's Alchemy key alone, one company -----------------
+// A warm Robinhood tap's second side waits on Robinhood's own RPC and bloXroute, each paced at 6 calls a second on the
+// device, once dRPC is held (release 209, VRAX warm 3.2-3.4 s; ANT 5.8 s). The device may add this route as a seat only
+// if the route is one company: the quote keeps its two answers apart by host, and ?keyed=only walks on from Alchemy to
+// QuickNode and the dRPC keys, the last the same company as robinhood.drpc.org. So ?keyed=alchemy asks the chain's Alchemy
+// URL and nothing else, under its own allowance for the caller (rpc.ts SEAT_CLIENT).
+const KO_ALCHEMY = "https://robinhood-mainnet.g.alchemy.com/v2/projectsegment0123456789";
 const KO_QN = "https://qn.test/quicknodesegment0123456789/";
 const KO_RH_DRPC = "https://lb.drpc.test/robinhood/drpckey0123456789abcdef";
-const RH_KEYS = { ROBINHOOD_RPC_URL: KO_KEYED, ROBINHOOD_RPC_URL_QUICKNODE: KO_QN, ROBINHOOD_RPC_URL_DRPC_1: KO_RH_DRPC };
-const quicknodeOnly = (r: ReturnType<typeof createRpc>, chain: string, body: unknown) =>
-  (r.handle as (...a: unknown[]) => ReturnType<typeof r.handle>)(chain, JSON_T, JSON.stringify(body), undefined, false, "quicknode");
+const RH_KEYS = { ROBINHOOD_RPC_URL: KO_ALCHEMY, ROBINHOOD_RPC_URL_QUICKNODE: KO_QN, ROBINHOOD_RPC_URL_DRPC_1: KO_RH_DRPC };
+const alchemyOnly = (r: ReturnType<typeof createRpc>, chain: string, body: unknown, client?: string) =>
+  (r.handle as (...a: unknown[]) => ReturnType<typeof r.handle>)(chain, JSON_T, JSON.stringify(body), client, false, "alchemy");
 
-test("card robinhood-warm-tap-inside-2s: ?keyed=quicknode with Alchemy, QuickNode and a dRPC key set reads QuickNode alone; ?keyed=only still walks from the first keyed URL", async () => {
+test("card robinhood-warm-tap-inside-2s: ?keyed=alchemy with Alchemy, QuickNode and a dRPC key set reads Alchemy alone", async () => {
   const { r, asked } = keyedOnlyRig(RH_KEYS, {}, "robinhood");
-  const a = await quicknodeOnly(r, "robinhood", BLOCK);
+  const a = await alchemyOnly(r, "robinhood", BLOCK);
   assert.equal(a.status, 200, a.body);
   assert.equal(JSON.parse(a.body).id, 5);
-  assert.deepEqual(asked, [KO_QN]);
-  asked.length = 0;
-  assert.equal((await keyedOnly(r, "robinhood", BLOCK)).status, 200);
-  assert.deepEqual(asked, [KO_KEYED], "the other mode as before");
+  assert.deepEqual(asked, [KO_ALCHEMY]);
 });
 
 for (const [what, down] of KO_DOWN) {
-  test(`card robinhood-warm-tap-inside-2s: ?keyed=quicknode with QuickNode failing (${what}): 503 upstream, and neither Alchemy nor the dRPC key is asked though each would answer`, async () => {
-    const { r, asked } = keyedOnlyRig(RH_KEYS, { [KO_QN]: down }, "robinhood");
-    const a = await quicknodeOnly(r, "robinhood", BLOCK);
+  test(`card robinhood-warm-tap-inside-2s: ?keyed=alchemy with Alchemy failing (${what}): 503 upstream, and neither QuickNode nor the dRPC key is asked though each would answer; ?keyed=only walks on as before`, async () => {
+    const { r, asked } = keyedOnlyRig(RH_KEYS, { [KO_ALCHEMY]: down }, "robinhood");
+    const a = await alchemyOnly(r, "robinhood", BLOCK);
     assert.equal(a.status, 503, a.body);
     assert.deepEqual(JSON.parse(a.body), { error: { code: "upstream" } });
-    assert.deepEqual([...new Set(asked)], [KO_QN]);
+    assert.deepEqual([...new Set(asked)], [KO_ALCHEMY]);
+    asked.length = 0;
+    const b = await keyedOnly(r, "robinhood", BLOCK);
+    assert.equal(b.status, 200, b.body);
+    assert.equal(asked.at(-1), KO_QN, "?keyed=only walks on past Alchemy to QuickNode, as before");
   });
 }
 
-test("card robinhood-warm-tap-inside-2s: ?keyed=quicknode with no QuickNode URL set: 503 upstream and nothing is fetched", async () => {
-  const { r, asked } = keyedOnlyRig({ ROBINHOOD_RPC_URL: KO_KEYED, ROBINHOOD_RPC_URL_DRPC_1: KO_RH_DRPC }, {}, "robinhood");
-  const a = await quicknodeOnly(r, "robinhood", BLOCK);
+test("card robinhood-warm-tap-inside-2s: ?keyed=alchemy with no Alchemy URL set (QuickNode and a dRPC key only): 503 upstream and nothing is fetched", async () => {
+  const { r, asked } = keyedOnlyRig({ ROBINHOOD_RPC_URL: KO_QN, ROBINHOOD_RPC_URL_DRPC_1: KO_RH_DRPC }, {}, "robinhood");
+  const a = await alchemyOnly(r, "robinhood", BLOCK);
   assert.equal(a.status, 503, a.body);
   assert.deepEqual(asked, []);
 });
 
-test("card robinhood-warm-tap-inside-2s: ?keyed=quicknode never answers a log range from the keyed log cache or the pool store, which hold any keyed company's answers: the range goes to QuickNode, once", async () => {
+test("card robinhood-warm-tap-inside-2s: ?keyed=alchemy never answers a log range from the keyed log cache or the pool store, which hold any keyed company's answers: the range goes to Alchemy, once", async () => {
   const { r, asked } = keyedOnlyRig(RH_KEYS, {}, "robinhood");
-  const a = await quicknodeOnly(r, "robinhood", TRANSFERS());
+  const a = await alchemyOnly(r, "robinhood", TRANSFERS());
   assert.equal(a.status, 200, a.body);
-  assert.deepEqual(asked, [KO_QN], "no finalized-head read and no other company");
+  assert.deepEqual(asked, [KO_ALCHEMY], "no finalized-head read and no other company");
+});
+
+test("card robinhood-warm-tap-inside-2s: a seat read draws its own allowance (SEAT_CLIENT): a caller whose share the page's reads spent still has the route's page share of seat reads, and no more", async () => {
+  const { r } = keyedOnlyRig(RH_KEYS, {}, "robinhood");
+  const keyedFor = (client: string) => (r.handle as (...a: unknown[]) => ReturnType<typeof r.handle>)("robinhood", JSON_T, JSON.stringify(BLOCK), client, false, true);
+  const CLIENT = "198.51.100.7";
+  let plain = 0;
+  while ((await keyedFor(CLIENT)).status === 200) if (++plain > 200) break;
+  assert.equal(plain, 30, "the caller's own share on the keyed route (RPC_PAGE_NEED robinhood)");
+  let seat = 0;
+  while ((await alchemyOnly(r, "robinhood", BLOCK, CLIENT)).status === 200) if (++seat > 200) break;
+  assert.equal(seat, 30, "the seat's own allowance, the page share again, then its 429");
+  assert.equal((await alchemyOnly(r, "robinhood", BLOCK, CLIENT)).status, 429);
+  assert.equal((await alchemyOnly(r, "robinhood", BLOCK, "198.51.100.8")).status, 200, "another caller's seat is its own");
 });
 
 test("card robinhood-warm-tap-inside-2s: a shared read's key and a market scan's key name the mode, so an answer read in one mode is never handed to another", () => {
   // a coin's CLMM scan as the signing page asks it (clmm-scan.test.ts), with SOL as the coin
   const CLMM_SCAN = { jsonrpc: "2.0", id: 9, method: "getProgramAccounts", params: solanaClmmPoolScan(SOLANA_USDC_MINT, SOLANA_SOL_MINT) };
-  const marketScanKeyOf = (rpcModule as unknown as { marketScanKeyOf: (c: string, r: unknown, m: boolean | "quicknode") => string | null }).marketScanKeyOf;
-  const scanOf = (mode: boolean | "quicknode") => marketScanKeyOf("solana", CLMM_SCAN, mode);
-  assert.notEqual(scanOf("quicknode"), null);
-  assert.equal(new Set([scanOf(false), scanOf(true), scanOf("quicknode")]).size, 3);
+  const marketScanKeyOf = (rpcModule as unknown as { marketScanKeyOf: (c: string, r: unknown, m: boolean | "alchemy") => string | null }).marketScanKeyOf;
+  const scanOf = (mode: boolean | "alchemy") => marketScanKeyOf("solana", CLMM_SCAN, mode);
+  assert.notEqual(scanOf("alchemy"), null);
+  assert.equal(new Set([scanOf(false), scanOf(true), scanOf("alchemy")]).size, 3);
 });
 
 test("card helper-gives-a-trade-its-reads: a route on our keyed providers gives one caller what one signing page draws in its busiest 10 s (RPC_PAGE_NEED: 42 on Solana, 30 on the mark list and the EVM chains, 90 on NEAR), and an RPC_BUDGET_<CHAIN> naming less is refused at the start, naming the variable only", async () => {
