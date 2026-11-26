@@ -130,11 +130,14 @@ export function evmThrottleHoldMs(url: string, afterMs: number | null): number {
   return evmHelperRoute(url) ? Math.max(EVM_HELPER_HOLD_MIN_MS, after) : Math.max(EVM_PROVIDER_HOLD_MS, after);
 }
 
-/** A provider's key: its URL's origin and path, no trailing slash, no query (the helper's PROVIDER_PACE keys). */
+/** A provider's key: its URL's origin and path, no trailing slash, no query (the helper's PROVIDER_PACE keys), but our
+ *  helper's keyed mode: ?keyed=only (the index reader) and ?keyed=alchemy (the trade seat) are two allowances at the
+ *  helper, so a 429 of one never holds the other (card robinhood-warm-tap-inside-2s). */
 export const evmProviderKey = (url: string): string => {
   try {
     const u = new URL(url);
-    return u.origin + u.pathname.replace(/\/+$/, "");
+    const keyed = u.searchParams.get("keyed");
+    return u.origin + u.pathname.replace(/\/+$/, "") + (keyed !== null && evmHelperRoute(url) ? `?keyed=${keyed}` : "");
   } catch {
     return url;
   }

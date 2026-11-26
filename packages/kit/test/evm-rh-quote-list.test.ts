@@ -19,8 +19,9 @@ test("Robinhood's quote list holds no provider that answered the kit's batch HTT
   assert.deepEqual(list, ["https://robinhood-rpc.publicnode.com", "https://robinhood.drpc.org", "https://rpc.mainnet.chain.robinhood.com", "https://robinhood.rpc.blxrbdn.com"]);
   // four operators on four hosts: a quote takes two that agree, with two spares
   assert.equal(new Set(list.map((u) => new URL(u).host)).size, 4);
-  // each one's posts at once pinned, and none for a provider the list no longer asks
-  assert.deepEqual(Object.keys(v.inflight ?? {}).sort(), [...list].sort());
+  // each one's posts at once pinned, and the seat's a quote asks with them (card robinhood-warm-tap-inside-2s,
+  // evm-rh-seat.test.ts), and none for a provider the list no longer asks
+  assert.deepEqual(Object.keys(v.inflight ?? {}).sort(), [...list, ...(v.seat === undefined ? [] : [v.seat])].sort());
   // the batch the four answered: 64 reads a call
   assert.equal(v.reads?.perCall, 64);
 });

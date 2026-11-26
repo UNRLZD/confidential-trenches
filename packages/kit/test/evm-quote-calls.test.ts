@@ -118,7 +118,8 @@ test("the recorded USDG quote's reads finish inside the bound through each provi
 test("each mainnet quote provider has its own in-flight pin, and no pin names another URL", () => {
   for (const chain of ["base", "robinhood"] as const) {
     const v = evmPoolVenues()[chain];
-    assert.deepEqual(Object.keys(v.inflight ?? {}).sort(), [...v.providers!].sort(), chain);
+    // and the seat's, which a quote asks with them (card robinhood-warm-tap-inside-2s)
+    assert.deepEqual(Object.keys(v.inflight ?? {}).sort(), [...v.providers!, ...(v.seat === undefined ? [] : [v.seat])].sort(), chain);
     // 8 at most, but for the two Base providers measured past it (card evm-warm-tap-ends-inside-two-seconds): 16, half
     // of the 32 at once that publicnode refused, which blastapi never did
     const measured = chain === "base" ? ["https://base-rpc.publicnode.com", "https://base-mainnet.public.blastapi.io"] : [];

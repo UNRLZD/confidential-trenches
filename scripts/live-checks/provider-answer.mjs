@@ -142,14 +142,16 @@ export async function rpcAnswer(url, method, params, { fetchFn = fetch, timeoutM
  *  its id, read as `classify` reads one answer, or a no-answer naming the call the batch left out; or, for the batch as a
  *  whole, `{ status, noAnswer }` (an HTTP answer `classify` names a no-answer, or a lone result for a batch of more than
  *  one call), `{ noAnswer }` (a fetch that failed) or `{ status, error }` (one JSON-RPC error for the whole batch,
- *  judged); each with `bytes`, the request body's length. */
-export async function rpcBatchAnswer(url, calls, { fetchFn = fetch, timeoutMs = RPC_TIMEOUT_MS } = {}) {
+ *  judged); each with `bytes`, the request body's length. `headers` and `redirect` as rpcAnswer's (a page's Origin).
+ *  `retry: false` asks once and returns that answer: a check that judges a share (robinhood-warm-tap-inside-2s) reads a
+ *  429 as the page met it, never a second ask's answer in its place. */
+export async function rpcBatchAnswer(url, calls, { fetchFn = fetch, timeoutMs = RPC_TIMEOUT_MS, headers, redirect, retry = true } = {}) {
   const host = new URL(url).host;
   const body = JSON.stringify(calls.map(([method, params], i) => ({ jsonrpc: "2.0", id: i + 1, method, params })));
   const once = async () => {
     let r;
     try {
-      r = await fetchFn(url, { method: "POST", headers: { "content-type": "application/json" }, body, signal: AbortSignal.timeout(timeoutMs) });
+      r = await fetchFn(url, { method: "POST", headers: { "content-type": "application/json", ...headers }, body, ...(redirect === undefined ? {} : { redirect }), signal: AbortSignal.timeout(timeoutMs) });
     } catch (e) {
       return { noAnswer: thrown(host, e) };
     }
@@ -170,7 +172,7 @@ export async function rpcBatchAnswer(url, calls, { fetchFn = fetch, timeoutMs = 
   };
   const missed = (a) => a.noAnswer !== undefined || (a.answers ?? []).some((x) => x.noAnswer !== undefined);
   const a = await once();
-  if (!missed(a)) return { ...a, bytes: body.length };
+  if (!missed(a) || !retry) return { ...a, bytes: body.length };
   await new Promise((r) => setTimeout(r, RETRY.ms));
   return { ...(await once()), bytes: body.length };
 }

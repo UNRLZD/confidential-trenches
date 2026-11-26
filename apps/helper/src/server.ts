@@ -50,7 +50,7 @@ import { callsFiles } from "./proxy/shared-calls.ts";
 import { dayFiles } from "./limits/day-spend.ts";
 import { loopBusy, loopShed } from "./limits/loop-busy.ts";
 import { RPC_BODY_MAX } from "./rpc/methods.ts";
-import { createRpc, KEYED_RETRY_MS, keyedPaces, keyedSpares, MARKS_A_SLOTS } from "./rpc/rpc.ts";
+import { createRpc, KEYED_RETRY_MS, keyedPaces, keyedSpares, MARKS_A_SLOTS, type KeyedMode } from "./rpc/rpc.ts";
 import { BIND_MAX_BYTES } from "./bind/checks.ts";
 import { RECORD_BODY_MAX } from "./bind/record.ts";
 import { bindSenderFromEnv, type BindSender } from "./bind/env.ts";
@@ -891,21 +891,23 @@ export function handler(
         const q = raw.indexOf("?");
         const chain = (q === -1 ? raw : raw.slice(0, q)).slice(RPC_PREFIX.length);
         if (!raw.startsWith(RPC_PREFIX) || chain === "" || chain.includes("/")) return send(404, { error: { code: "not_found" } }, cors(req));
-        // card evm-pool-leaves-any-source: ?keyed=only, exactly once, reads the chain's keyed URLs alone (rpc.ts); any
-        // other value of keyed is refused before the body is read
+        // card evm-pool-leaves-any-source: ?keyed=only, exactly once, reads the chain's keyed URLs alone (rpc.ts); card
+        // robinhood-warm-tap-inside-2s: ?keyed=alchemy its Alchemy URLs alone (rpc.ts KeyedMode); any other value of keyed
+        // is refused before the body is read
         const flag = new URL(raw, "http://helper.invalid").searchParams.getAll("keyed");
-        if (flag.length > 1 || (flag.length === 1 && flag[0] !== "only")) return send(400, { error: { code: "method_not_allowed" } }, cors(req));
+        if (flag.length > 1 || (flag.length === 1 && flag[0] !== "only" && flag[0] !== "alchemy")) return send(400, { error: { code: "method_not_allowed" } }, cors(req));
+        const mode: KeyedMode = flag.length === 0 ? false : flag[0] === "only" ? true : "alchemy";
         void readBody(req, RPC_BODY_MAX)
           .then((body) =>
             body === undefined
               ? { status: 413, body: JSON.stringify({ error: { code: "too_large" } }) }
-              : rpc.handle(chain, req.headers["content-type"], body, clientOf(req), false, flag.length === 1),
+              : rpc.handle(chain, req.headers["content-type"], body, clientOf(req), false, mode),
           )
           // card solana-quote-under-1s: every answer's waits, its send and the provider's environment name (rpc.ts Trace),
           // in the standard Server-Timing header, 429 and 503 included; card helper-serves-many-users-at-once: the
           // chain's budget in the IETF RateLimit-Policy field (rpc.ts policyOf), every answer of a known chain
           .then((a) => {
-            const policy = rpc.policyOf?.(chain);
+            const policy = rpc.policyOf?.(chain, mode);
             const extra: Headers = { ...("timing" in a && Array.isArray(a.timing) ? { "Server-Timing": (a.timing as string[]).join(", ") } : {}), ...(policy === undefined ? {} : { "RateLimit-Policy": policy }) };
             return reply(Object.keys(extra).length === 0 ? a : { ...a, headers: { ...(a as { headers?: Headers }).headers, ...extra } });
           })
