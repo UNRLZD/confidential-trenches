@@ -1114,16 +1114,16 @@ export const MARKET_SCAN_HOLD_MS = 10 * 60_000;
 const MARKET_SCAN_MAX = 8_192;
 /** A checked request's key as a market scan to share, or null: one getProgramAccounts on mainnet Solana in the CLMM
  *  scan's exact shape. */
-export function marketScanKeyOf(chain: RpcChain, req: unknown, keyedOnly: boolean): string | null {
+export function marketScanKeyOf(chain: RpcChain, req: unknown, keyedOnly: KeyedMode): string | null {
   if (chain !== "solana" || !isPlain(req) || req.method !== "getProgramAccounts" || !Array.isArray(req.params) || req.params[0] !== SOLANA_CLMM_PROGRAM || !poolScanAllowed(req)) return null;
-  return `${chain}${keyedOnly ? " keyed" : ""} ${JSON.stringify(req.params)}`;
+  return `${chain}${modeTag(keyedOnly)} ${JSON.stringify(req.params)}`;
 }
 const SHARED_METHODS: ReadonlySet<string> = new Set(["getMultipleAccounts", "getAccountInfo"]);
 const SHARED_COMMITMENTS: ReadonlySet<unknown> = new Set(["confirmed", "finalized"]);
 /** A checked request's key for sharing (SHARED_ACCOUNTS), or null when it is not one to share: one request (not a
  *  batch) on mainnet Solana, getMultipleAccounts or getAccountInfo of the named accounts alone, its options base64 at
  *  confirmed or finalized and a minContextSlot at most. */
-export function sharedKeyOf(chain: RpcChain, req: unknown, keyedOnly: boolean): string | null {
+export function sharedKeyOf(chain: RpcChain, req: unknown, keyedOnly: KeyedMode): string | null {
   if (chain !== "solana" || !isPlain(req) || typeof req.method !== "string" || !SHARED_METHODS.has(req.method)) return null;
   const p = req.params;
   if (!Array.isArray(p) || p.length < 1 || p.length > 2) return null;
@@ -1135,8 +1135,15 @@ export function sharedKeyOf(chain: RpcChain, req: unknown, keyedOnly: boolean): 
     if (o.encoding !== "base64" || !SHARED_COMMITMENTS.has(o.commitment)) return null;
     if (Object.hasOwn(o, "minContextSlot") && !(typeof o.minContextSlot === "number" && Number.isSafeInteger(o.minContextSlot) && o.minContextSlot >= 0)) return null;
   }
-  return `${chain}${keyedOnly ? " keyed" : ""} ${JSON.stringify([req.method, p])}`;
+  return `${chain}${modeTag(keyedOnly)} ${JSON.stringify([req.method, p])}`;
 }
+/** The route's keyed mode (server.ts, POST /v1/rpc/{chain}?keyed=): false none; true ?keyed=only, the chain's keyed URLs
+ *  in order (card evm-pool-leaves-any-source); "quicknode" ?keyed=quicknode, the chain's QuickNode URL alone (card
+ *  robinhood-warm-tap-inside-2s): one company, so the device can count the route as QuickNode beside its own providers,
+ *  where ?keyed=only may answer from a dRPC key, the company of robinhood.drpc.org. */
+export type KeyedMode = boolean | "quicknode";
+/** A shared answer's key part for `m`: an answer read in one mode is never handed to a caller of another. */
+const modeTag = (m: KeyedMode): string => (m === false ? "" : m === true ? " keyed" : ` keyed ${m}`);
 
 export function createRpc(env: Record<string, string | undefined>, deps: Deps = {}) {
   const doFetch = deps.fetch ?? fetch;
@@ -1726,16 +1733,16 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
    * the caller's address (../limits/limits.ts clientOf). The helper's own cached reads (Discover's lists, the token
    * page) pass none: they draw from the provider's total, never a caller's share; `reserved` marks the ones RPC_RESERVE
    * holds room for (Discover's), which alone may draw it. `keyedOnly`: the caller's ?keyed=only (card
-   * evm-pool-leaves-any-source), the chain's keyed URLs alone.
+   * evm-pool-leaves-any-source), the chain's keyed URLs alone, or ?keyed=quicknode, its QuickNode URL alone (KeyedMode).
    */
-  async function handle(chain: string, contentType: string | undefined, body: string, client?: string, reserved = false, keyedOnly = false): Promise<Answer> {
+  async function handle(chain: string, contentType: string | undefined, body: string, client?: string, reserved = false, keyedOnly: KeyedMode = false): Promise<Answer> {
     const t: Trace = { waitMs: 0 };
     const a = await traces.run(t, () => route(chain, contentType, body, client, reserved, keyedOnly));
     // card base-reads-never-starve-max: an EVM read's refusal names its shape in the refusal log (server.ts reply)
     return { ...a, ...(a.why !== undefined && t.shape !== undefined ? { why: `${a.why} ${t.shape}` } : {}), timing: timingOf(t) };
   }
 
-  async function route(chain: string, contentType: string | undefined, body: string, client: string | undefined, reserved: boolean, keyedOnly: boolean): Promise<Answer> {
+  async function route(chain: string, contentType: string | undefined, body: string, client: string | undefined, reserved: boolean, keyedOnly: KeyedMode): Promise<Answer> {
     if (!(RPC_CHAINS as readonly string[]).includes(chain)) return error(404, "not_found");
     const c = chain as RpcChain;
     // card solana-marks-route-answers: route B is never off, its keyless providers (MARKS_KEYLESS) serve with no keyed name set
@@ -1860,7 +1867,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
   };
 
   /** A checked read sent on its route (route). */
-  async function send(c: RpcChain, out: unknown, forward: string, methods: string[], client: string | undefined, reserved: boolean, keyedOnly: boolean): Promise<Answer> {
+  async function send(c: RpcChain, out: unknown, forward: string, methods: string[], client: string | undefined, reserved: boolean, keyedOnly: KeyedMode): Promise<Answer> {
     // a keyed Solana provider fallen back (rpc/slot.ts): the public endpoint, on its own budget; the key while it serves
     // card rpc-keyed-lists: past the first (fallen back, or held by its 429), its keyed spares on their own budget, then
     // the public endpoint
@@ -1890,13 +1897,16 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     // only when this seat and its other, dRPC read device-direct, agree byte for byte, so this seat must be another
     // operator: never dRPC's URL or any other company's, and none of FastNEAR's set is 503
     if (keyedOnly) {
-      const own = upstreams[c].keyed.filter((k) => !k.keyless && (c !== "near" || operatorOf(k.url) === NEAR_SEAT)).map((k) => k.url);
+      // card robinhood-warm-tap-inside-2s: ?keyed=quicknode, the chain's QuickNode URL alone (KeyedMode)
+      const own = upstreams[c].keyed.filter((k) => !k.keyless && (c !== "near" || operatorOf(k.url) === NEAR_SEAT) && (keyedOnly !== "quicknode" || KEYED_PROVIDER[k.env] === "quicknode")).map((k) => k.url);
       if (own.length === 0) return UPSTREAM();
       // card helper-robinhood-route-serves-a-device-sync: a pool index read draws its own allowance (INDEX_CLIENT)
       const mine = client !== undefined && indexReadOf(c, out, poolManagerOf(c)) ? `${INDEX_CLIENT} ${client}` : client;
       // card helper-pool-logs-outside-the-caller-budget: a finalized page of logs kept before is answered here, drawing
-      // nothing; a first ask draws as any read, and is kept once its toBlock reads finalized (LOG_CACHE_ENTRIES)
-      const logs = Array.isArray(out) ? null : finalLogsOf(c, out as Record<string, unknown>, poolOf(c));
+      // nothing; a first ask draws as any read, and is kept once its toBlock reads finalized (LOG_CACHE_ENTRIES). Never
+      // in ?keyed=quicknode: the cache and the pool store hold answers of every keyed company, so its ranges go to its
+      // one URL as any read (card robinhood-warm-tap-inside-2s)
+      const logs = Array.isArray(out) || keyedOnly === "quicknode" ? null : finalLogsOf(c, out as Record<string, unknown>, poolOf(c));
       if (logs !== null) {
         const id = (out as { id: unknown }).id;
         const kept = logCacheGet(logs.key);
