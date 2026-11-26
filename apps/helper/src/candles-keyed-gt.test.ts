@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, test } from "node:test";
-import { CG_BLIP_HOLD_S, CG_DAY, CG_ONCHAIN, CG_URL, coingeckoPace, createKeyed } from "./data/coingecko.ts";
+import { CG_BLIP_HOLD_S, CG_DAY, CG_DOWN_HOLD_S, CG_ONCHAIN, CG_URL, coingeckoPace, createKeyed } from "./data/coingecko.ts";
 import { geckoBudget } from "./data/gecko.ts";
 import { createSolanaToken, GT_BASE } from "./data/solana/token.ts";
 import { providerHolds } from "./limits/limits.ts";
@@ -135,6 +135,35 @@ test("Solana, keyed refused 401 / 429 / 5xx: CoinGecko is not asked again while 
     await token.candles(WIF, "15m", null, 500);
     assert.ok(v.cgCalls().length > asked, "the hold over, asked again");
   }
+});
+
+// card cg-breaker-trips-on-a-failure-share: helper 244, 26 Nov 01:16:31-01:18:31Z, a burst of 187 listed charts: CoinGecko
+// served 177 calls with 4 downs among them, then 182 reads "held" in one minute (a CG_DOWN_HOLD_S hold's worth at the
+// burst's rate) went keyless, where GeckoTerminal's window was full, and charts refused. A hold now needs the
+// downs to be CG_DOWN_SHARE of the calls answered in the last CG_DOWN_WINDOW_MS (CG_DOWN_TRIP of them at least): two
+// downs among a burst's answers are a blip each, while two with no answer between them still trip it.
+test("card cg-breaker-trips-on-a-failure-share: two timeouts in a row among a burst's 40 answered calls hold CoinGecko only a blip each, never CG_DOWN_HOLD_S; two with nothing answered between them still do (red at aee8cfdda: held 30 s)", async () => {
+  const ok = () => true;
+  let fail = false;
+  const v = vendors(() => (fail ? Promise.reject(new DOMException("The operation was aborted due to timeout", "TimeoutError")) : json(FX.gt_token)));
+  const { keyed, holds, t } = solana(ENV, v);
+  for (let i = 0; i < 40; i++, t.t += 500) assert.notEqual(await keyed!.read(`/networks/solana/tokens/a${i}`, ok), undefined);
+  fail = true;
+  assert.equal(await keyed!.read("/networks/solana/tokens/down1", ok), undefined);
+  assert.equal(Math.round(holds.heldMs(CG_URL) / 1000), CG_BLIP_HOLD_S, "the first: a blip");
+  t.t += CG_BLIP_HOLD_S * 1000 + 1;
+  assert.equal(await keyed!.read("/networks/solana/tokens/down2", ok), undefined);
+  assert.equal(Math.round(holds.heldMs(CG_URL) / 1000), CG_BLIP_HOLD_S, "the second in a row, 2 of 42 answered: a blip, not the down hold");
+  fail = false;
+  t.t += CG_BLIP_HOLD_S * 1000 + 1;
+  assert.notEqual(await keyed!.read("/networks/solana/tokens/after", ok), undefined, "asked again once the blip is over");
+  assert.match(keyed!.minute()!, /down 2/);
+  // a quiet key (no call answered in the window) that meets two downs holds as before
+  const q = solana(ENV, vendors(() => Promise.reject(new DOMException("The operation was aborted due to timeout", "TimeoutError"))));
+  assert.equal(await q.keyed!.read("/networks/solana/tokens/q1", ok), undefined);
+  q.t.t += CG_BLIP_HOLD_S * 1000 + 1;
+  assert.equal(await q.keyed!.read("/networks/solana/tokens/q2", ok), undefined);
+  assert.equal(Math.round(q.holds.heldMs(CG_URL) / 1000), CG_DOWN_HOLD_S, "2 of 2 answered: the down hold");
 });
 const DOGE = "7GCihgDB8fe6KNjn2MYtkzZcRjQy3t9GHdC8uHYmW2hr";
 const WIF = "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm";
