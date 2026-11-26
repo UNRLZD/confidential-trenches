@@ -8,13 +8,16 @@
 // read only as the helper writes them; rows newer than a first answer's newest are not judged; a first answer of 50 rows
 // misses none below its oldest; a chain with no coin read FAILs.
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { createServer } from "node:http";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { CHAINS, COINS_MAX, handedOf, handoverOf, judge, missed, read, RESTART_MS } from "./helper-tape-handover.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
+const PRIME = path.join(HERE, "../../apps/helper/deploy/prime-books.mjs");
 const A = JSON.parse(readFileSync(path.join(HERE, "helper-tape-handover.answers.json"), "utf8"));
 const bad = (r) => r.lines.filter((l) => l.startsWith("BAD"));
 const BASE = ["base"];
@@ -132,4 +135,37 @@ test("read: past its first 3 coins a chain reads on, up to COINS_MAX, only while
   assert.deepEqual(await n(all, 4), { base: 5, robinhood: 3 }, "the fifth coin answered as handed: stop");
   assert.deepEqual(await n(all, 0), { base: 3, robinhood: 3 });
   assert.deepEqual(await n(null, 99), { base: 3, robinhood: 3 }, "no counts: the first 3");
+});
+
+test("card helper-tape-handover-reads-a-handed-book: the old helper's read before its stop (apps/helper/deploy/prime-books.mjs) reads the very coins this check reads on the next, every chain, and prints counts, never a coin", async () => {
+  const coin = (i) => `0x${String(i).padStart(40, "0")}`;
+  // lists with a coin twice, one in capitals and one not an address, more than COINS_MAX coins; trades never marked
+  // handed, so the check reads its every coin
+  const lists = { hot: [{ token: coin(1) }, { token: coin(2) }, { token: "0xABC" + "0".repeat(37) }, { token: "nope" }], new: Array.from({ length: 12 }, (_, i) => ({ token: coin(i) })) };
+  const asked = [];
+  const srv = createServer((req, res) => {
+    const u = new URL(req.url, "http://h.test");
+    const json = (b, h = {}) => (res.writeHead(200, { "content-type": "application/json", ...h }), res.end(JSON.stringify(b)));
+    if (u.pathname === "/v1/health") return json({ commit: "rig" }, { "x-helper-started": "1", "x-helper-handover": "base books held 2 restored 2, robinhood books held 2 restored 2, solana tapes held 0 restored 0" });
+    if (u.pathname === "/v1/market/lists") return json({ lists });
+    if (u.pathname === "/v1/market/trades") {
+      asked.push(`${u.searchParams.get("chain")} ${u.searchParams.get("token")}`);
+      return json({ trades: [{ tx: "0x1", t_ms: 1 }], src: "chain" });
+    }
+    res.writeHead(404).end();
+  });
+  await new Promise((ok) => srv.listen(0, "127.0.0.1", ok));
+  try {
+    const base = `http://127.0.0.1:${srv.address().port}`;
+    const out = await new Promise((ok, no) => execFile(process.execPath, [PRIME, base], { timeout: 60_000 }, (e, stdout) => (e ? no(e) : ok(stdout))));
+    const primed = asked.splice(0);
+    const run = await read(base);
+    const checked = Object.entries(run.chains).flatMap(([c, v]) => v.tapes.map((t) => `${c} ${t.coin}`));
+    assert.equal(checked.length, CHAINS.length * COINS_MAX, checked.join("\n"));
+    assert.deepEqual(primed, checked, "the read before the stop is the check's own coins, in its order");
+    assert.match(out, new RegExp(CHAINS.map((c) => `${c} ${COINS_MAX} of ${COINS_MAX}`).join(", ")));
+    assert.doesNotMatch(out, /0x[0-9a-fA-F]{40}/, "no coin printed");
+  } finally {
+    srv.close();
+  }
 });

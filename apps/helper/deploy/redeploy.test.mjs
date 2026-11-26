@@ -16,6 +16,7 @@ import { rpcLeastShare, RPC_RESERVE } from "../src/rpc/rpc.ts";
 import { PROXY_MIN_SHARE, PROXY_RESERVE } from "../src/proxy/proxy.ts";
 
 const SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), "redeploy.sh");
+const PRIME = path.join(path.dirname(fileURLToPath(import.meta.url)), "prime-books.mjs");
 const REL = "apps/helper/deploy/redeploy.sh";
 const GIT_ENV = { GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t", GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null" };
 // a value that must never appear in the script's output
@@ -37,6 +38,7 @@ function server() {
     writeFileSync(path.join(remote, REL), text, { mode: 0o755 });
     writeFileSync(path.join(remote, "apps/helper/deploy/compose.yaml"), `# ${msg}\n`);
     writeFileSync(path.join(remote, "apps/helper/deploy/Caddyfile"), `# the Caddyfile of ${msg}\n`);
+    writeFileSync(path.join(remote, "apps/helper/deploy/prime-books.mjs"), `${readFileSync(PRIME, "utf8")}// ${msg}\n`);
     git(remote, "add", "--", "apps");
     git(remote, "commit", "-q", "--no-gpg-sign", "-m", msg);
     return git(remote, "rev-parse", "HEAD");
@@ -63,7 +65,9 @@ function server() {
   // and `compose exec -T caddy sh -c 'test -S <socket>'` passes only with STUB_CADDY=socket (the default; nosocket: a Caddy
   // started with admin off). The other `compose exec` (the Caddy reload) writes its stdin to reload.in and exits 1 when
   // STUB_RELOAD=0 (a Caddyfile Caddy refuses). STUB_ADD=0 makes it add none and STUB_IMAGE
-  // names the image it adds. `inspect -f <fmt> <id>` prints the id's image; `stop -t <s> <id>` leaves it exited;
+  // names the image it adds. `exec -i <id> ...` (the old helper's read before its stop, card
+  // helper-tape-handover-reads-a-handed-book) writes its stdin to prime.in and prints the script's counts, or exits 1 when
+  // STUB_PRIME=0. `inspect -f <fmt> <id>` prints the id's image; `stop -t <s> <id>` leaves it exited;
   // caddy's names are modelled in "<state>.caddy" as "<id> <HELPER_SITE>" once seeded or made (before that, caddy-1 on
   // compose.yaml's default ct-api.unrealized.trade): `compose config caddy` prints the HELPER_SITE compose resolves (the
   // shell's, else that default), `compose ps -q caddy` the id, a caddy id's `inspect -f` its environment, and an up that
@@ -118,6 +122,10 @@ case "$1 $2" in
     done
     [ "\${STUB_READY:-1}" = 0 ] && exit 1
     ;;
+  "exec -i")
+    cat > "${dir}/prime.in"
+    [ "\${STUB_PRIME:-1}" = 1 ] || { echo "Error response from daemon: container $3 is not running" >&2; exit 1; }
+    echo "read the lists' first coins' trades: base 8 of 8, robinhood 8 of 8" ;;
   "inspect -f") awk -v id="$4" '$1 == id { print $3 }' "$S" ;;
   "logs --tail") echo "helper: POOL_EVM_ADDRESS_BASE must be an address ($4)" >&2 ;;
   "rm -f") drop "$3" ;;
@@ -665,6 +673,39 @@ test("two old helpers running: the new one is scale 3, and both old ones are sto
     assert.ok(calls.includes("compose up -d --no-deps --no-recreate --scale helper=3 --wait --wait-timeout 300 helper"), calls.join("\n"));
     for (const id of ["old-1", "old-2"]) assert.ok(calls.indexOf(`stop -t 60 ${id}`) > 0 && calls.indexOf(`rm ${id}`) > calls.indexOf(`stop -t 60 ${id}`), id);
     assert.deepEqual(s.running(), ["new-1"]);
+  } finally {
+    s.done();
+  }
+});
+
+test("card helper-tape-handover-reads-a-handed-book: once the new helper is ready, each old one runs the checkout's prime-books.mjs on its own node before its stop; a read that fails is named and the swap goes on; a new one never ready reads none", () => {
+  for (const prime of ["1", "0"]) {
+    const s = server();
+    try {
+      s.seed("old-1", "old-2");
+      const r = s.runWith({ STUB_PRIME: prime }, s.B);
+      assert.equal(r.status, 0, r.out);
+      const calls = lines(s);
+      const up = calls.findIndex((c) => c.startsWith("compose up ") && c.includes("--wait"));
+      for (const id of ["old-1", "old-2"]) {
+        const exec = calls.indexOf(`exec -i ${id} node --input-type=module -`);
+        assert.ok(up >= 0 && exec > up && exec < calls.indexOf(`stop -t 60 ${id}`), `${id}: up < exec < stop:\n${calls.join("\n")}`);
+        assert.match(r.out, new RegExp(`redeploy: the old helper ${id} ${prime === "1" ? "read the lists' first coins' trades: base 8 of 8, robinhood 8 of 8" : "could not read the lists' first coins before its stop"}`));
+      }
+      assert.equal(readFileSync(path.join(s.dir, "prime.in"), "utf8"), readFileSync(path.join(s.deployDir, "prime-books.mjs"), "utf8"), "the checkout's script, B's");
+      assert.match(readFileSync(path.join(s.dir, "prime.in"), "utf8"), /\/\/ B\n$/);
+      assert.deepEqual(s.running(), ["new-1"]);
+    } finally {
+      s.done();
+    }
+  }
+  const s = server();
+  try {
+    s.seed("old-1");
+    const r = s.runWith({ STUB_READY: "0" }, s.B);
+    assert.equal(r.status, 1, r.out);
+    assert.ok(!lines(s).some((c) => c.startsWith("exec ")), lines(s).join("\n"));
+    assert.deepEqual(s.running(), ["old-1"]);
   } finally {
     s.done();
   }
