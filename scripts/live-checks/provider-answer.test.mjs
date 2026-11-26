@@ -333,6 +333,26 @@ test("rpcBatchAnswer: a whole-batch no-answer (an HTTP 500 page, a 429, a lone r
   assert.deepEqual(e.error, { code: -32600, message: "batch too large" });
 });
 
+test("rpcBatchAnswer: retry false asks once, so a 429 the next ask would serve is the answer; headers and redirect go with the POST", async () => {
+  let n = 0;
+  const seen = [];
+  const fetchFn = async (url, init) => {
+    seen.push([init.headers, init.redirect]);
+    return n++ === 0 ? new Response("", { status: 429 }) : new Response(JSON.stringify([{ jsonrpc: "2.0", id: 1, result: "0x1" }]), { status: 200 });
+  };
+  const once = await rpcBatchAnswer("https://p.example/rpc", [["eth_blockNumber", []]], { fetchFn, headers: { origin: "https://page.example" }, redirect: "error", retry: false });
+  assert.equal(n, 1, "asked once");
+  assert.equal(once.status, 429);
+  assert.match(once.noAnswer, /HTTP 429/);
+  assert.deepEqual(seen[0], [{ "content-type": "application/json", origin: "https://page.example" }, "error"]);
+  // the default still reads again once: the 429 is gone from its answer
+  n = 0;
+  const again = await rpcBatchAnswer("https://p.example/rpc", [["eth_blockNumber", []]], { fetchFn });
+  assert.equal(n, 2);
+  assert.deepEqual(again.answers, [{ result: "0x1" }]);
+  assert.deepEqual(seen.at(-1), [{ "content-type": "application/json" }, undefined]);
+});
+
 test("rpcBatchAnswer: a call the batch left out or throttled is read again once; each answer classified as one", async () => {
   let n = 0;
   const a = await rpcBatchAnswer("https://p.example/rpc", [["eth_chainId", []], ["eth_chainId", []], ["eth_chainId", []]], {

@@ -1,5 +1,5 @@
 // node --test scripts/live-checks/robinhood-warm-tap-inside-2s.test.mjs: the live check replays recorded runs
-// (robinhood-warm-tap-inside-2s.answers.json). good: this card's code from a Mac, 26 Nov 16:24Z: SIGN_HOST's index.html
+// (robinhood-warm-tap-inside-2s.answers.json). good: this card's code from a Mac, 26 Nov 16:49Z: SIGN_HOST's index.html
 // and app.js built from it, the seat its helper (server.ts handler and rpc.ts on 127.0.0.1 with the Robinhood Alchemy
 // key), publicnode the real one: the seat named, the page's origin admitted, the head from ROBINHOOD_RPC_URL under a
 // share of 300, the seat and publicnode one block, 294 calls in 98 posts in one window: PASS. bad: the hosts as deployed
@@ -28,7 +28,7 @@ test("the check reads the seat the page names, from the key the helper names, an
   // read as text: a file outside the kit imports only its entry, which does not export the venues
   const venues = readFileSync(path.join(HERE, "../../packages/kit/src/trade/evm/buy-unpinned.ts"), "utf8");
   const pace = readFileSync(path.join(HERE, "../../packages/kit/src/checks/evm/pace.ts"), "utf8");
-  assert.ok(venues.includes("providers: Object.freeze([`${EVM_HELPER_ORIGIN}/v1/rpc/robinhood?keyed=alchemy`, "), "the seat first in Robinhood's quote list");
+  assert.ok(venues.includes("      seat: `${EVM_HELPER_ORIGIN}/v1/rpc/robinhood?keyed=alchemy`,\n"), "Robinhood's venue seat, which a quote ranks with its providers");
   assert.equal(`${/export const EVM_HELPER_ORIGIN = "([^"]+)";/.exec(pace)?.[1]}/v1/rpc/robinhood?keyed=alchemy`, SEAT);
   assert.equal(RPC_UPSTREAMS.robinhood.env, SEAT_NAME, "the route's own name, the Alchemy key's");
   assert.ok(TAP_BURST <= SEAT_SHARE, `${TAP_BURST} calls against the seat's share ${SEAT_SHARE}`);

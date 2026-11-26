@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-// Live check of card robinhood-warm-tap-inside-2s: the mainnet signing page asks our helper's Robinhood seat first, POST
-// /v1/rpc/robinhood?keyed=alchemy (packages/kit/src/trade/evm/buy-unpinned.ts, Robinhood's quote list), one company's key
-// under a share of its own sized to the tap check's heaviest burst (apps/helper/src/rpc/rpc.ts SEAT_SHARE). Before it a
+// Live check of card robinhood-warm-tap-inside-2s: the mainnet signing page's Robinhood quote asks our helper's seat with
+// its keyless providers, POST /v1/rpc/robinhood?keyed=alchemy (packages/kit/src/trade/evm/buy-unpinned.ts, Robinhood's
+// venue `seat`), one company's key under a share of its own sized to the tap check's heaviest burst
+// (apps/helper/src/rpc/rpc.ts SEAT_SHARE). Before it a
 // warm Robinhood tap waited on the keyless four and took 2.7 to 24 s (the tap check's own quotes from the Mac, 26 Nov
 // 15:0xZ); the tap check (evm-buy-and-sell-on-mainnet) judges each warm tap inside 2 s after every sign deploy. This
 // reads, after every sign and helper deploy:
@@ -26,7 +27,7 @@ import "../net-window.mjs";
 import { createHash } from "node:crypto";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { EXIT, preflight, preflightRefuses, rpcAnswer, verdictOf } from "./provider-answer.mjs";
+import { EXIT, preflight, preflightRefuses, rpcAnswer, rpcBatchAnswer, verdictOf } from "./provider-answer.mjs";
 
 const KEY = "robinhood-warm-tap-inside-2s";
 export const SIGN = "https://confidential.unrealized.trade";
@@ -113,20 +114,12 @@ async function blockAt(url, n, fetchFn) {
 /** One post of the burst, `n` calls in a batch as the kit sends them, asked once: a 429 is never retried away (the kit
  *  holds the seat on it), so the share is judged as the page meets it. */
 async function burstPost(n, fetchFn) {
-  const body = JSON.stringify(Array.from({ length: n }, (_, i) => ({ jsonrpc: "2.0", id: i + 1, method: "eth_blockNumber", params: [] })));
-  let r;
-  try {
-    r = await fetchFn(SEAT, { method: "POST", headers: { "content-type": "application/json", origin: SIGN }, body, redirect: "error", signal: AbortSignal.timeout(10_000) });
-  } catch (e) {
-    return { status: null, ok: false, why: String(e?.cause?.message ?? e?.message ?? e).slice(0, 120) };
-  }
-  const text = await r.text().catch(() => "");
-  let j;
-  try {
-    j = JSON.parse(text);
-  } catch {}
-  const ok = r.status === 200 && Array.isArray(j) && Array.from({ length: n }, (_, i) => i + 1).every((id) => j.some((y) => y?.id === id && typeof y.result === "string"));
-  return ok ? { status: 200, ok } : { status: r.status, ok: false, why: `HTTP ${r.status} ${text.slice(0, 80)}` };
+  const calls = Array.from({ length: n }, () => ["eth_blockNumber", []]);
+  const a = await rpcBatchAnswer(SEAT, calls, { fetchFn, headers: { origin: SIGN }, redirect: "error", retry: false, timeoutMs: 10_000 });
+  const ok = a.status === 200 && a.noAnswer === undefined && a.error === undefined && Array.isArray(a.answers) && a.answers.length === n && a.answers.every((x) => x?.noAnswer === undefined && x?.error === undefined && typeof x?.result === "string");
+  if (ok) return { status: 200, ok };
+  const miss = a.noAnswer ?? (a.error !== undefined ? JSON.stringify(a.error) : (a.answers ?? []).find((x) => x?.noAnswer !== undefined || x?.error !== undefined));
+  return { status: a.status ?? null, ok: false, why: `HTTP ${a.status ?? "none"} ${typeof miss === "string" ? miss : JSON.stringify(miss ?? null)}`.slice(0, 160) };
 }
 
 /** Reads SIGN_HOST, the seat and publicnode as the page does. `clock` is the epoch ms (tests move it in `wait`). */
