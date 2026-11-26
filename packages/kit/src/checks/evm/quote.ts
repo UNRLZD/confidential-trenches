@@ -4197,7 +4197,8 @@ async function buyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: readonly EvmRpc
   // a buy has, and holds the WETH route only as R does (below_reference, within the slippage bought at its own minOut).
   // NVDA and SPCX on Robinhood, whose only native route at least as good goes through such a hook (0x6d03f039), were
   // refused native_first naming it on every tap (mainnet from the Mac, 26 Nov 08:5xZ)
-  const natives = (ownFits && v.nativeFirst && wethStart ? priced.filter((c) => startsNative(c.route)) : []).filter((c) => c.held !== true && !hookedRoute(chain, c.route));
+  const natives = ownFits && v.nativeFirst && wethStart ? priced.filter((c) => startsNative(c.route)) : [];
+  const takeable = natives.filter((c) => c.held !== true && !hookedRoute(chain, c.route));
   const exits = ownFits && unlisted.length > 0 ? priced.filter((r) => evmSellExits(chain, token, r.route)) : [];
   const all = () => true;
   const near = (x: bigint, r: bigint) => x * 10000n >= r * BigInt(10000 - slippageBps);
@@ -4221,7 +4222,7 @@ async function buyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: readonly EvmRpc
   const fitted = await bestFits([
     { l: [{ route, amountOut: value }], band: all },
     { l: priced, band: ownFits ? (c) => c.amountOut >= value : all },
-    { l: natives, band: (c) => c.amountOut >= value },
+    { l: takeable, band: (c) => c.amountOut >= value },
     { l: exits, band: (c) => c.amountOut * 10000n >= value * BigInt(10000 - slippageBps) },
   ]);
   const own = fitted[0] ?? null;
@@ -4233,7 +4234,7 @@ async function buyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: readonly EvmRpc
   }
   if (reference === null && filled.length > 0) return refuse("over_gas_floor", `no standard pool's route runs its swap in ${FIT_TEXT}`, null);
 
-  const nativeExists = v.nativeFirst && (natives.some((c) => fits(c.route) === true) || firstHop.some((c) => fills(c)));
+  const nativeExists = v.nativeFirst && (takeable.some((c) => fits(c.route) === true) || firstHop.some((c) => fills(c)));
   // R is the best of every pool, whatever it starts from: a native pool someone seeded is held to the token's WETH
   // pools too (a launchpad's, on Robinhood). Where a native pool exists a route starts native unless it quotes strictly
   // more than the best native route (native when at least as good); the native_first refusal names that native route.
