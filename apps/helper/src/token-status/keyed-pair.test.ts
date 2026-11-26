@@ -127,3 +127,109 @@ test("the deposit carry's start (its send, trade and delivery reads, and the int
   assert.ok(r.sent.length >= 2);
   assert.deepEqual(hosts(r.sent), [DRPC, FASTNEAR].sort());
 });
+
+// ---- card near-pair-falls-over-a-refused-key: a dead key never refuses a read or a send ----
+// The FastNEAR plan switch of 30 Nov removes the host's key (the owner, 26 Nov 11:19Z). Each company answers a dead key
+// so (read 26 Nov 11:3xZ with made-up keys): FastNEAR HTTP 403 "Invalid API key", dRPC HTTP 403 {"error":{"message":
+// "Your token is invalid or expired","code":4}}; a 401 is the same refusal.
+
+type PairFetch = (env: Record<string, string | undefined>, fetchFn?: typeof fetch, now?: () => number, log?: (line: string) => void) => typeof fetch;
+// read by name, as pairNames above
+const pairFetch: PairFetch = (...a) => (status as unknown as { pairFetch: PairFetch }).pairFetch(...a);
+const keyRestMs = () => (status as unknown as { KEY_REST_MS: number }).KEY_REST_MS;
+
+/** Both keys dead with `code`; every other URL recorded and answering 503, so each path stops at its first read. */
+function deadKeys(code: 401 | 403) {
+  const sent: string[] = [];
+  const fetch = (async (url: string | URL | Request) => {
+    const u = String(url);
+    sent.push(u);
+    if (u === FASTNEAR) return new Response("Invalid API key", { status: code });
+    if (u === DRPC) return new Response(JSON.stringify({ id: 1, jsonrpc: "2.0", error: { message: "Your token is invalid or expired", code: 4 } }), { status: code });
+    return new Response("{}", { status: 503 });
+  }) as typeof globalThis.fetch;
+  return { sent, fetch };
+}
+
+for (const code of [403, 401] as const) {
+  test(`HTTP ${code} on both keys: the fee quoter, the token watch, the withdrawal carry and the deposit carry each go on to the two free endpoints (red before the card: each stopped at the dead keys)`, async () => {
+    const paths: [string, (f: typeof fetch) => Promise<void>][] = [
+      ["fee quoter", async (f) => void (await feeQuoterFromEnv({ ...KEYED, WITHDRAW_RELAYER_MAINNET: "relay.test.near", WITHDRAW_FEE_RECIPIENT_MAINNET: "relay.test.near" }, f).quote(USDC).catch(() => undefined))],
+      ["token watch", async (f) => void (await tokenWatchesFromEnv(KEYED, { fetch: f, store: null }).mainnet.status().catch(() => undefined))],
+      [
+        "withdrawal carry",
+        async (f) => {
+          const quoter = { networkOf: () => null, quote: async () => { throw new Error("no"); }, reads: () => ({ feeMin: async () => 0n }) };
+          const env = { ...KEYED, WITHDRAW_VAULT_MAINNET: MAINNET_VAULT, WITHDRAW_RELAYER_KEYS_MAINNET: key, WITHDRAW_RELAYER_MAINNET: "relay.test.near", WITHDRAW_FEE_RECIPIENT_MAINNET: "relay.test.near", HELPER_RELEASE: "1", HELPER_STORE_DIR: mkdtempSync(join(tmpdir(), "kdead-w-")) };
+          const s = withdrawSenderFromEnv(env, quoter as never, {}, f);
+          s.warm();
+          await settle();
+          s.stop();
+        },
+      ],
+      [
+        "deposit carry",
+        async (f) => {
+          const env = { ...KEYED, BIND_VAULT_MAINNET: MAINNET_VAULT, BIND_RELAYER_MAINNET: "bind.test.near", BIND_RELAYER_KEY_MAINNET: key, BIND_MARGIN_K: "20", HELPER_RELEASE: "1", HELPER_STORE_DIR: mkdtempSync(join(tmpdir(), "kdead-b-")) };
+          const s = bindSenderFromEnv(env, {}, f);
+          s.warm();
+          await settle();
+          s.stop();
+        },
+      ],
+    ];
+    for (const [name, run] of paths) {
+      const r = deadKeys(code);
+      await run(r.fetch);
+      assert.deepEqual(hosts(r.sent), [DRPC, FASTNEAR, ...FREE].sort(), `${name}: ${hosts(r.sent).join(", ")}`);
+    }
+  });
+}
+
+test("pairFetch: a refused key rests KEY_REST_MS (its reads go to the slot's free endpoint, the same request first), then is asked again; one line per rest names the variable, never a URL or a key", async () => {
+  let t = 1_000;
+  const lines: string[] = [];
+  const asked: string[] = [];
+  let dead = true;
+  const fetchFn = (async (url: string | URL | Request, init?: RequestInit) => {
+    asked.push(`${String(url)} ${String(init?.body)}`);
+    if (String(url) === FASTNEAR && dead) return new Response("Invalid API key", { status: 403 });
+    return new Response('{"result":1}', { status: 200 });
+  }) as typeof globalThis.fetch;
+  const f = pairFetch(KEYED, fetchFn, () => t, (l) => lines.push(l));
+  const r1 = await f(FASTNEAR, { method: "POST", body: "one" });
+  assert.equal(r1.status, 200);
+  assert.deepEqual(asked.splice(0), [`${FASTNEAR} one`, `${FREE[0]} one`], "the refused request is sent once more, to the slot's own free endpoint");
+  t += keyRestMs() - 1;
+  await f(FASTNEAR, { method: "POST", body: "two" });
+  assert.deepEqual(asked.splice(0), [`${FREE[0]} two`], "inside the rest: the free endpoint only");
+  t += 1;
+  dead = false;
+  await f(FASTNEAR, { method: "POST", body: "three" });
+  assert.deepEqual(asked.splice(0), [`${FASTNEAR} three`], "past the rest: the key again, kept while it answers");
+  await f(DRPC, { method: "POST", body: "four" });
+  assert.deepEqual(asked.splice(0), [`${DRPC} four`], "a key that answers is never passed over");
+  await f("https://other.example", { method: "POST", body: "five" });
+  assert.deepEqual(asked.splice(0), ["https://other.example five"], "a URL of no slot goes as it is");
+  assert.equal(lines.length, 1, lines.join("\n"));
+  assert.match(lines[0]!, /NEAR_RPC_URL_FASTNEAR/);
+  assert.ok(!lines[0]!.includes("apiKey") && !lines[0]!.includes("f".repeat(8)) && !lines[0]!.includes("https://"), lines[0]);
+});
+
+test("pairFetch: a slot whose free endpoint is the other slot's company keeps its own URL, so the pair never reads one company twice", async () => {
+  // the two keys set in each other's slot: slot one's free endpoint (FastNear's) is slot two's company and slot two's
+  // (dRPC's near.drpc.org, one company with lb.drpc.live) is slot one's, so neither slot falls over and each refusal
+  // comes back as it is
+  const env = { NEAR_RPC_URL: DRPC, NEAR_RPC_URL_B: FASTNEAR };
+  const asked: string[] = [];
+  const fetchFn = (async (url: string | URL | Request) => {
+    asked.push(String(url));
+    return new Response("Invalid API key", { status: 403 });
+  }) as typeof globalThis.fetch;
+  const lines: string[] = [];
+  const f = pairFetch(env, fetchFn, () => 0, (l) => lines.push(l));
+  assert.equal((await f(DRPC, { method: "POST", body: "x" })).status, 403);
+  assert.equal((await f(FASTNEAR, { method: "POST", body: "x" })).status, 403);
+  assert.deepEqual(asked, [DRPC, FASTNEAR], "no free endpoint asked: each is the other slot's company");
+  assert.deepEqual(lines, []);
+});

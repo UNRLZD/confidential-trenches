@@ -18,7 +18,7 @@ import { type CreateDeps, deliveryReads, onStatusAnswer } from "./create.ts";
 import { carryTrade, createTradeReads, createTradeStore, isTradeBody, type TradeAnswer, type TradeDeps } from "./trade.ts";
 import { parseRecordBody, readRecords, type RecordAnswer, type RecordDeps } from "./record.ts";
 import { carryDeposit, createFileStore, createSendReads, nearRpc, relayerKey, RPC_TIMEOUT_MS, startLockRounds, startRelayer, type Answer, type Rpc, type SendDeps } from "./send.ts";
-import { readUrls, tokenHeld, tokenWatchesFromEnv, WATCHED, type TokenNetwork, type TokenWatch } from "../token-status/status.ts";
+import { pairFetch, readUrls, tokenHeld, tokenWatchesFromEnv, WATCHED, type TokenNetwork, type TokenWatch } from "../token-status/status.ts";
 import { isAccountId } from "../withdraw/checks.ts";
 import { agreedBlock, RELAYER_ENV, STORE_ENV, viewAt } from "../withdraw/fee.ts";
 import { MAINNET_VAULT, OUTCOME_ROUND_MS, RELEASE_ENV, SEND_ENV } from "../withdraw/send.ts";
@@ -152,6 +152,8 @@ export function bindSenderFromEnv(
   const withdrawKeys = Object.fromEntries(nets.map((n) => [n, env[SEND_ENV[n][1]] ?? ""])) as Record<TokenNetwork, string>;
   const withdrawRelayer = Object.fromEntries(nets.map((n) => [n, env[RELAYER_ENV[n][0]] ?? ""])) as Record<TokenNetwork, string>;
   const urls: Record<TokenNetwork, readonly [string, string]> = { mainnet: readUrls(env, "mainnet"), testnet: readUrls(env, "testnet") };
+  // a slot whose key is refused reads its own company's free endpoint (card near-pair-falls-over-a-refused-key)
+  const viaPair = pairFetch(env, fetchFn);
 
   type Net = { network: TokenNetwork; vault: string; account: string; key: string };
   const carried = new Map<string, Net>();
@@ -191,7 +193,7 @@ export function bindSenderFromEnv(
   const stops: (() => void)[] = [];
   const init = async (net: Net): Promise<SendDeps> => {
     const token = WATCHED[net.network].token;
-    const rpcs = urls[net.network].map((u) => nearRpc(u, fetchFn, RPC_TIMEOUT_MS)) as unknown as readonly [Rpc, Rpc];
+    const rpcs = urls[net.network].map((u) => nearRpc(u, viaPair, RPC_TIMEOUT_MS)) as unknown as readonly [Rpc, Rpc];
     const block = await agreedBlock(rpcs, Date.now);
     const c = await viewAt(rpcs, block, net.vault, "config", {});
     if (!isObj(c) || c.asset !== token) throw new Error("the vault's config() names another token");
@@ -259,7 +261,7 @@ export function bindSenderFromEnv(
         vault: net.vault,
         usdc: WATCHED.mainnet.token,
         store: openIntents()!,
-        reads: intentsReads(urls.mainnet.map((u) => nearRpc(u, fetchFn, RPC_TIMEOUT_MS)) as unknown as readonly [Rpc, Rpc]),
+        reads: intentsReads(urls.mainnet.map((u) => nearRpc(u, viaPair, RPC_TIMEOUT_MS)) as unknown as readonly [Rpc, Rpc]),
         relayer: { send: async (...a) => (await relayer()).send(...a), resolve: async (...a) => (await relayer()).resolve(...a), balance: async () => (await relayer()).balance() },
         // card intents-u-registered-first (review F1): no storage_deposit while mainnet's token watch holds; no watch holds
         held: async () => {
@@ -301,7 +303,7 @@ export function bindSenderFromEnv(
         if (net.network !== "mainnet" || mainnet === undefined) return no("token_not_accepted");
         try {
           const s = openIntents()!;
-          const reads = (onwardReads ??= createSendReads(urls.mainnet.map((u) => nearRpc(u, fetchFn, RPC_TIMEOUT_MS)) as unknown as readonly [Rpc, Rpc], { vault: net.vault, token: receiver }));
+          const reads = (onwardReads ??= createSendReads(urls.mainnet.map((u) => nearRpc(u, viaPair, RPC_TIMEOUT_MS)) as unknown as readonly [Rpc, Rpc], { vault: net.vault, token: receiver }));
           const v = await checkOnward(body, { token: receiver, vault: net.vault, relayer: net.account }, reads, { seen: (x) => s.seen(x), quote: (x) => s.quote(x) });
           if (!v.ok) return { status: STATUS[v.code] ?? 400, body: { error: { code: v.code } } };
           return await intentsOf(mainnet).onward(v.move, () => reads.finalHeight());
