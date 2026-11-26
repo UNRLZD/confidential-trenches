@@ -1790,14 +1790,21 @@ test("RX2 a warm quote reads the routes through X's markets its last quote did n
   const pools = [seeded(token), real, market, thin];
   let rounds = 0;
   let open = 0;
+  // card quote-mutants-killed-after-fewer-rounds: a read sent once another read of the quote has answered is a round's
+  // own too, though reads beside the first round are still open (card evm-quote-fewer-rounds sends them behind the
+  // round's own, so `rounds` alone missed a second round of the routes read there: mutants 899 and 900 lived in sweep
+  // 45741947145)
+  let answered = false;
+  let late = 0;
   const counted = (rpc: EvmRpc): EvmRpc => async (calls) => {
     const reads = calls.some((c) => c.method === "eth_call");
     if (reads && open++ === 0) rounds++;
+    if (reads && answered) late++;
     try {
       await new Promise((go) => setTimeout(go, 5));
       return await rpc(calls);
     } finally {
-      if (reads) open--;
+      if (reads) open--, (answered = true);
     }
   };
   const scan = scanner(5_000_000, logs);
@@ -1805,9 +1812,12 @@ test("RX2 a warm quote reads the routes through X's markets its last quote did n
   await assert.rejects(at(AMOUNT, NOW), heldTo(x0));
   const cold = rounds;
   rounds = 0;
+  answered = false;
+  late = 0;
   // the next quote of the token, warm
   await assert.rejects(at(AMOUNT, NOW + 1_000), heldTo(x0));
   assert.equal(rounds, 1, `the warm quote read in ${rounds} rounds (the cold one in ${cold})`);
+  assert.equal(late, 0, `the warm quote sent ${late} reads once another had answered`);
 });
 
 // Card evm-warm-tap-ends-inside-two-seconds: the routes one level further (Y's market, X's pool with Y, the token's pool
@@ -10539,6 +10549,47 @@ test("FH5 a provider that answers HTTP 500 to a warm quote's early swap fits is 
   }
   assert.ok(second.failed > 0, "the second provider answered HTTP 500 to the warm quote's early fits");
   assert.equal(second.readsAfter, 0, `${second.readsAfter} first-round requests were sent to the provider after its HTTP 500 in the same round`);
+});
+
+// Card quote-mutants-killed-after-fewer-rounds: card evm-quote-fewer-rounds sends the early fits behind the first
+// round's own reads, so FH5's order (fits first) no longer happens and its count is 0 whatever the round's hold: mutants
+// 870 and 871 (the fits off the round's hold, the round's reads off it) lived in sweep 45741947145. The hold now matters
+// the other way: a provider that answers HTTP 500 to the first round's batches is sent none of the fits queued behind them.
+test("FH6 a provider that answers HTTP 500 to a warm quote's first-round batches is sent none of the early swap fits queued behind them", { timeout: 20_000 }, async () => {
+  const token = "0x00000000000000000000000000000000000f1f16";
+  const K = 6;
+  const fakes: ModelPool[] = Array.from({ length: K }, (_, i) => ({ key: keyOf(token, NATIVE, 2000 + i, 50, NATIVE), give: (a) => a, gas: 600_000n }));
+  const pools = [{ ...gfMarket(token), give: (a: bigint) => a / 2n }, gfSeeded(token), ...fakes];
+  const logs = fakes.map((p) => ({ key: p.key, at: 4_500_000 }));
+  const datas = (calls: readonly EvmRpcCall[]) => calls.map((c) => String((c.params[0] as { data?: string } | undefined)?.data));
+  const second = { on: false, failed: 0, fitsAfter: 0 };
+  const p1 = chain(pools, 1);
+  // the second provider, while `on`: every aggregate3 request (the first round's reads) answered HTTP 500 after 200 ms;
+  // `fitsAfter`: the swap fits sent to it once a 500 came back
+  const failing: EvmRpc = async (calls) => {
+    const d = datas(calls);
+    if (second.on && second.failed > 0 && d.some((x) => x.startsWith("0x" + SEL_BUY_SWAP))) second.fitsAfter++;
+    if (second.on && d.some((x) => x.startsWith("0x82ad56cb"))) {
+      await new Promise((r) => setTimeout(r, 200));
+      second.failed++;
+      throw new Error("the provider answered HTTP 500");
+    }
+    return p1(calls);
+  };
+  // one read a call, so the first round is more batches than the provider's gate sends at once (Robinhood's, 2), and
+  // the fits wait in the gate behind them
+  quoteMod.evmReadsPerCall(1);
+  try {
+    const ask = () => evmPoolBuyQuoteWith({ chain: "robinhood", token, amountIn: AMOUNT, slippageBps: 100, route: marketRoute(token) }, [chain(pools, 0), failing, chain(pools, 0), chain(pools, 1)], NOW, scanner(5_000_000, logs));
+    const q1 = await ask();
+    second.on = true;
+    const q2 = await ask();
+    assert.equal(q2.amountOut, q1.amountOut);
+  } finally {
+    quoteMod.evmReadsPerCall();
+  }
+  assert.ok(second.failed > 0, "the second provider answered HTTP 500 to the warm quote's first round");
+  assert.equal(second.fitsAfter, 0, `${second.fitsAfter} early swap fits were sent to the provider after its HTTP 500 to the round`);
 });
 
 test("GF11 out of gas is no fit only for the swap read: the same words to any other read (the hookless read here) refuse rpc_error", async () => {
