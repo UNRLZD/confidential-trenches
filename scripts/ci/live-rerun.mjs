@@ -11,6 +11,10 @@
 //     provider-answer.mjs writes), the job prints a notice with that reason, writes it to the job's verdict file, and
 //     exits 0, so the run is red only when a check judged the build bad; the live job lists every inconclusive check by
 //     key with its reason on every run (scripts/ci/live-verdicts.mjs), so one that never judges is seen;
+//   - but a run still INCONCLUSIVE after the last one whose every run named the same host taking no connection at all
+//     (refused, not found, its certificate refused: NO_CONNECTION) is a FAIL naming that host (card
+//     live-check-fails-a-dead-provider): three runs over about a minute with no connection is an outage of a provider
+//     the deployed code reads, never a passing fault;
 //   - a check that maps its own INCONCLUSIVE to exit 2 so that it is never run again (hosts-main-on-top,
 //     solana-mint-supply-moves: waits measured in minutes to hours) is read by its last verdict line: exit 2 whose last
 //     `live-check <key>: <VERDICT>` line is INCONCLUSIVE is inconclusive, never run again; any other exit 2 is an ERROR;
@@ -64,6 +68,27 @@ const NO_ANSWER = new RegExp(`(?<![\\w.:\\[\\]-])(${HOST})(?: HTTP \\d{3}: |: no
 /** The hosts named as not answering in a check's output, sorted, each once. */
 export function noAnswerHosts(output) {
   return [...new Set([...String(output).matchAll(NO_ANSWER)].map((m) => m[1].toLowerCase()))].sort();
+}
+
+// Card live-check-fails-a-dead-provider: a no-answer that is no connection at all, as provider-answer.mjs words a fetch
+// that threw (`<host>: no answer (<its cause's code>)`): the name not found (ENOTFOUND), the port refusing
+// (ECONNREFUSED), or TLS refusing the host's certificate. A throttle (HTTP 429), a timeout (TimeoutError,
+// UND_ERR_CONNECT_TIMEOUT), a reset (ECONNRESET) or a DNS retry (EAI_AGAIN) is not one: a busy provider answers those.
+// Sign live run 45736762709 (26 Nov 01:35Z) read found-wallet-sweep-reads-on-a-pair-that-answers INCONCLUSIVE three
+// times, each `public.rpc.solanavibestation.com: no answer (ECONNREFUSED)`, and its job was green while the page's token
+// seat had refused every connection since 24 Nov.
+export const NO_CONNECTION = /^(?:ENOTFOUND|ECONNREFUSED|CERT_[A-Z_]+|ERR_TLS_[A-Z_]+|ERR_SSL_[A-Z_]+|DEPTH_ZERO_SELF_SIGNED_CERT|SELF_SIGNED_CERT_IN_CHAIN|UNABLE_TO_VERIFY_LEAF_SIGNATURE|UNABLE_TO_GET_ISSUER_CERT_LOCALLY)$/;
+const UNREACHED = new RegExp(`(?<![\\w.:\\[\\]-])(${HOST}): no answer \\(([A-Za-z_]+)\\)`, "gi");
+
+/** The hosts a check's output names as taking no connection (NO_CONNECTION), each with its codes: Map host -> codes. */
+export function unreachedHosts(output) {
+  const out = new Map();
+  for (const m of String(output).matchAll(UNREACHED)) {
+    if (!NO_CONNECTION.test(m[2])) continue;
+    const h = m[1].toLowerCase();
+    out.set(h, [...new Set([...(out.get(h) ?? []), m[2]])].sort());
+  }
+  return out;
 }
 
 /** A run's result: pass, fail, inconclusive or error (see the header). */
@@ -169,6 +194,8 @@ export async function rerun(key, args, { run, sleep = (ms) => new Promise((r) =>
   let code = null;
   let last = { verdict: "error", reason: "not run" };
   const quiet = [];
+  // the hosts that took no connection in every run so far, with their codes (card live-check-fails-a-dead-provider)
+  let dead = null;
   const end = (runs, stopped) => ({ code, runs, stopped, ...last, exit: exitOf(last.verdict, code) });
   for (let n = 1; ; n++) {
     if (!(await before(n))) {
@@ -189,6 +216,16 @@ export async function rerun(key, args, { run, sleep = (ms) => new Promise((r) =>
     }
     const hosts = noAnswerHosts(output);
     for (const h of hosts) if (!quiet.includes(h)) quiet.push(h);
+    const unreached = unreachedHosts(output);
+    dead = new Map([...(dead ?? unreached)].filter(([h]) => unreached.has(h)).map(([h, c]) => [h, [...new Set([...c, ...unreached.get(h)])].sort()]));
+    if (n >= policy.runs && dead.size > 0) {
+      // every run's no-answer named the same host taking no connection: that provider is down, and what the deployed
+      // code reads on it is down with it: a FAIL naming it, never an INCONCLUSIVE that keeps the job green
+      const down = [...dead].sort(([a], [b]) => (a < b ? -1 : 1)).map(([h, c]) => `${h} took no connection in any run (${c.join(", ")})`).join("; ");
+      say(`live-rerun ${key}: FAIL after ${n} runs: ${down}`);
+      last = { verdict: "fail", reason: `after ${n} runs: ${down}` };
+      return end(n, false);
+    }
     if (n >= policy.runs) {
       say(`live-rerun ${key}: INCONCLUSIVE after ${n} runs, never a pass; no answer from: ${named(hosts)}`);
       last = { verdict, reason: `after ${n} runs: ${reasonOf(key, output, hosts)}` };

@@ -79,6 +79,51 @@ test("the process run: a check that is INCONCLUSIVE once and then passes ends 0;
   }
 });
 
+// card live-check-fails-a-dead-provider: sign live run 45736762709 (26 Nov 01:35Z) read found-wallet-sweep-reads-on-a-pair-
+// that-answers INCONCLUSIVE three times over, each run's no-answer `public.rpc.solanavibestation.com: no answer
+// (ECONNREFUSED)`, and its job was green while the page's token seat refused every connection since 24 Nov
+test("planted: a host that takes no connection in every run (refused, not found, its certificate refused) is a FAIL naming it, never an INCONCLUSIVE", async () => {
+  RETRY.ms = 0;
+  const words = async (code) => (await rpcAnswer("https://public.rpc.solanavibestation.com/", "getSlot", [], { fetchFn: async () => { throw Object.assign(new TypeError("fetch failed"), { cause: { code } }); } })).noAnswer;
+  const refused = await words("ECONNREFUSED");
+  assert.equal(refused, "public.rpc.solanavibestation.com: no answer (ECONNREFUSED)", "provider-answer.mjs's own words for a refused port");
+  for (const code of ["ECONNREFUSED", "ENOTFOUND", "CERT_HAS_EXPIRED", "ERR_TLS_CERT_ALTNAME_INVALID"]) {
+    const out = [`NO-ANSWER ${await words(code)}`, "OK https://ct-api.unrealized.trade/v1/rpc/solana getTokenAccountsByOwner: 116 accounts", "live-check k: INCONCLUSIVE (1 of 2 answered)"].join("\n");
+    const lines = [];
+    const r = await rerun("k", [], { run: async () => ({ code: 3, output: out }), sleep: async () => {}, say: (l) => lines.push(l) });
+    assert.equal(r.verdict, "fail", `${code}: ${r.reason}`);
+    assert.equal(r.exit, 1, code);
+    assert.equal(r.runs, 3, "the three runs first: one refusal is no outage");
+    assert.match(r.reason, new RegExp(`^after 3 runs: public\\.rpc\\.solanavibestation\\.com took no connection in any run \\(${code}\\)`), code);
+    assert.match(lines.at(-1), new RegExp(`^live-rerun k: FAIL after 3 runs: public\\.rpc\\.solanavibestation\\.com took no connection in any run \\(${code}\\)`), code);
+  }
+});
+
+test("planted: a throttle, a timeout, a reset, a DNS retry, or a refusal that one run got past stays INCONCLUSIVE", async () => {
+  RETRY.ms = 0;
+  const words = async (code, name) => (await rpcAnswer("https://solana.api.pocket.network/", "getSlot", [], { fetchFn: async () => { throw Object.assign(new Error("x"), name ? { name } : { cause: { code } }); } })).noAnswer;
+  const quiet = [classify("solana.api.pocket.network", 429, "").noAnswer, await words(undefined, "TimeoutError"), await words("UND_ERR_CONNECT_TIMEOUT"), await words("ECONNRESET"), await words("EAI_AGAIN")];
+  for (const q of quiet) {
+    const r = await rerun("k", [], { run: async () => ({ code: 3, output: `NO-ANSWER ${q}\nlive-check k: INCONCLUSIVE` }), sleep: async () => {}, say: () => {} });
+    assert.equal(r.verdict, "inconclusive", q);
+    assert.equal(r.exit, 0, q);
+  }
+  // refused in the first two runs, a throttle only in the last: the host took a connection once, no outage
+  const runs = ["NO-ANSWER solana.api.pocket.network: no answer (ECONNREFUSED)", "NO-ANSWER solana.api.pocket.network: no answer (ECONNREFUSED)", "NO-ANSWER solana.api.pocket.network HTTP 429: 429 Too Many Requests"];
+  let n = 0;
+  const r = await rerun("k", [], { run: async () => ({ code: 3, output: `${runs[n++]}\nlive-check k: INCONCLUSIVE` }), sleep: async () => {}, say: () => {} });
+  assert.equal(r.verdict, "inconclusive", r.reason);
+  // each run refused by a different host: no one host down in every run
+  const hosts = ["a.example.org", "b.example.org", "c.example.org"];
+  let m = 0;
+  const s = await rerun("k", [], { run: async () => ({ code: 3, output: `NO-ANSWER ${hosts[m++]}: no answer (ECONNREFUSED)` }), sleep: async () => {}, say: () => {} });
+  assert.equal(s.verdict, "inconclusive", s.reason);
+  // a refusal and then a PASS is the PASS
+  let k = 0;
+  const p = await rerun("k", [], { run: async () => (k++ === 0 ? { code: 3, output: "NO-ANSWER solana.api.pocket.network: no answer (ECONNREFUSED)" } : { code: 0, output: "live-check k: PASS" }), sleep: async () => {}, say: () => {} });
+  assert.equal(p.verdict, "pass");
+});
+
 // review of 9eaf059a, P3-1: a provider named by its address or host:port is named too, as provider-answer.mjs words it
 test("a provider at an IPv4 address, an IPv6 one or a bare host:port is named", () => {
   const out = [

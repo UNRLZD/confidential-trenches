@@ -94,7 +94,9 @@ test("live-inconclusive-rerun: both runners hold every rerun case, and live.yml 
   const { rerunProblems, RERUN_CASES } = await gate();
   assert.deepEqual(await rerunProblems(), []);
   assert.ok(LIVE.includes('          node .live-runner/scripts/ci/live-rerun.mjs --log "$out/$ID.log" "$KEY" $ARGS\n'), "the single-check step");
-  assert.deepEqual(RERUN_CASES.map((c) => c.codes.join(",")), ["0", "3,0", "3", "3,1", "1", "2", "2", "2", ""]);
+  assert.deepEqual(RERUN_CASES.map((c) => c.codes.join(",")), ["0", "3,0", "3", "3", "3,1", "1", "2", "2", "2", ""]);
+  // card live-check-fails-a-dead-provider: the case of a host taking no connection in every run is red, a FAIL
+  assert.deepEqual(RERUN_CASES.filter((c) => /no connection/.test(c.name)).map((c) => [c.verdict, c.pass, c.code]), [["fail", false, 1]]);
   // card live-run-red-means-the-build: each result in the cases, and a FAIL and a crash red in every one that has them
   assert.deepEqual([...new Set(RERUN_CASES.map((c) => c.verdict))].sort(), ["error", "fail", "inconclusive", "pass"]);
   assert.ok(RERUN_CASES.every((c) => (c.verdict === "fail" || c.verdict === "error" ? c.pass === false : c.pass === true)));
