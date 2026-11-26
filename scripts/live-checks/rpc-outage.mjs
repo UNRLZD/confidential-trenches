@@ -91,8 +91,17 @@ const FAILED_PREFLIGHT = new RegExp(`^Access to fetch at '(https?:\\/\\/[^'\\s]+
 // line says the read came from, and its path is a page's (not /assets/ and not a script file; a route may hold a dot,
 // /token/near/wrap.near), so an app's own console.error that prints
 // Chrome's words from /assets/index-*.js is no preflight line
-const preflightOf = (line) => {
-  const m = FAILED_PREFLIGHT.exec(line);
+// The answer itself refused (card app-shell-passes-a-walked-past-provider): the preflight passed and the RPC's answer to
+// the read carried no Access-Control-Allow-Origin, as a CDN's throttle or block page does: "Access to fetch at '<url>' ...
+// blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.", located at the
+// page as the preflight's line is (app live run 45779843438, 26 Nov 08:02Z: PublicNode to GitHub's runner). Chrome names
+// no status, so it may be the RPC refusing the app's origin: it is let through as a 4xx is, only as a walked-past pool read
+const FAILED_ANSWER_CORS = new RegExp(`^Access to fetch at '(https?:\\/\\/[^'\\s]+)' from origin '[^'\\s]+' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource\\. \\((https?:\\/\\/[^\\s()]+)\\)${TAG}$`);
+const preflightOf = (line) => atPage(FAILED_PREFLIGHT, line);
+/** The address a line of `re`'s form names, when Chrome located it at the page that made the read (the location's origin
+ *  is the origin the line says the read came from, and its path a page's, not a script's), else null. */
+const atPage = (re, line) => {
+  const m = re.exec(line);
   if (!m) return null;
   const from = /from origin '([^'\s]+)'/.exec(line)?.[1];
   const at = originOf(m[2]);
@@ -111,6 +120,8 @@ const failedOrigin = (line) => originOf((FAILED_LOAD.exec(line)?.[1] ?? prefligh
 // a load an RPC answered with a 4xx other than 429: an error, except a walked-past pool read's (above)
 const FAILED_4XX = new RegExp(`^Failed to load resource: the server responded with a status of 4(?!29)\\d\\d(?: \\([^()]*\\))? \\((https?:\\/\\/[^\\s()]+)\\)${TAG}$`);
 const failed4xxOrigin = (line) => originOf(FAILED_4XX.exec(line)?.[1] ?? "") ?? "";
+/** The origin of a read whose answer carried no Access-Control-Allow-Origin (FAILED_ANSWER_CORS), "" for any other line. */
+const corsAnswerOrigin = (line) => originOf(atPage(FAILED_ANSWER_CORS, line) ?? "") ?? "";
 
 /** The pool chains whose row reads two operators of a list (an EVM chain's the kit's read list, Solana's its three):
  *  each chain, to its list's origins. */
@@ -273,7 +284,7 @@ function pairsOf(network) {
 export function outages(lines, verify, network = "mainnet", footer = null) {
   const rows = rpcRows(network);
   const near = new Set((VERIFY_RELEASES[network]?.rpcs ?? []).map(originOf));
-  const failedAt = new Set(lines.flatMap((l) => [failedOrigin(l), failed4xxOrigin(l)]).filter(Boolean));
+  const failedAt = new Set(lines.flatMap((l) => [failedOrigin(l), failed4xxOrigin(l), corsAnswerOrigin(l)]).filter(Boolean));
   const lists = poolLists(network);
   const chainOf = (origin) => [...lists].find(([, l]) => l.includes(origin))?.[0];
   const pairs = pairsOf(network);
@@ -298,13 +309,13 @@ export function outages(lines, verify, network = "mainnet", footer = null) {
     kept.push(refused.at(-1));
   };
   for (const line of lines) {
-    const origin = failedOrigin(line) || failed4xxOrigin(line);
+    const origin = failedOrigin(line) || failed4xxOrigin(line) || corsAnswerOrigin(line);
     const named = origin && rows.get(origin);
     const chain = origin ? chainOf(origin) : undefined;
     const walked = chain === undefined ? "not a list" : notWalkedPast(origin, chain, lists.get(chain), verify, failedAt);
     if (named && walked === null && !pairDown(origin)) down.add(origin);
-    else if (failed4xxOrigin(line)) {
-      if (named && chain !== undefined) refuse(line, origin, `a 4xx, not walked past: ${walked}`);
+    else if (failed4xxOrigin(line) || corsAnswerOrigin(line)) {
+      if (named && chain !== undefined) refuse(line, origin, `${failed4xxOrigin(line) ? "a 4xx" : "an answer with no Access-Control-Allow-Origin"}, not walked past: ${walked}`);
       else kept.push(line);
     } else if (!named) kept.push(line);
     else if (pairDown(origin)) refuse(line, origin, "and every RPC of its pair failed a load");

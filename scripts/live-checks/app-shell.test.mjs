@@ -445,6 +445,37 @@ test("planted: a walked-past EVM read is let through only when its row shows ok 
   assert.equal(outages([line(400)], dom("warn", [])).kept.length, 1, "a 4xx and an amber row");
 });
 
+// card app-shell-passes-a-walked-past-provider: app live run 45779843438 (26 Nov 08:02Z, app-shell 139772993192) read
+// /verify on phone and desktop with PublicNode answering Verify's Solana (and Base) read on GitHub's runner with no
+// Access-Control-Allow-Origin after a preflight that passed; the page walked past it and drew each row ok on two other
+// operators (the same run's verify-row-survives-one-provider PASS). Chrome's line for that answer names no status, so it
+// is let through as a 4xx is: only as a walked-past pool read
+test("planted: a pool read answered with no Access-Control-Allow-Origin is let through only when walked past, as a 4xx is", () => {
+  const app = "https://ct-app.unrealized.trade";
+  const refused = (origin, at = `${app}/verify`) => consoleLine(`Access to fetch at '${origin}/' from origin '${app}/' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.`, at);
+  const dom = (status, hosts) => ({ state: "read", code: "ok", funds: "ok", pools: { solana: status, base: "ok", robinhood: "ok" }, poolRpcs: { solana: hosts } });
+  const good = ["solana.api.pocket.network", "solana-mainnet.gateway.tatum.io"];
+  // PASS: the run's own line, the row ok on two other operators of its list
+  assert.equal(refused(SOLANA), `Access to fetch at '${SOLANA}/' from origin '${app}/' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource. (${app}/verify)`);
+  assert.deepEqual(outages([refused(SOLANA)], dom("ok", good)), { kept: [], down: [SOLANA], refused: [], verifyDown: [] });
+  // FAIL: ok shown on the host that refused, on one host only, or on a host that also failed a load
+  assert.equal(outages([refused(SOLANA)], dom("ok", [new URL(SOLANA).host, "solana.api.pocket.network"])).kept.length, 1, "ok on the refused host");
+  assert.equal(outages([refused(SOLANA)], dom("ok", ["solana.api.pocket.network"])).kept.length, 1, "one host");
+  assert.equal(outages([refused(SOLANA), failed("https://solana.api.pocket.network", "net::ERR_CONNECTION_RESET")], dom("ok", good)).kept.length, 2, "a named host failed too");
+  // FAIL: the row amber is no walk: Chrome names no status, so it may be the RPC refusing the app's origin
+  const amber = outages([refused(SOLANA)], dom("warn", []));
+  assert.equal(amber.kept.length, 1);
+  assert.match(amber.kept[0], /\[https:\/\/solana-rpc\.publicnode\.com is a release RPC, an answer with no Access-Control-Allow-Origin, not walked past: solana warn\]$/);
+  // FAIL: a host no list names, a NEAR RPC (it feeds no pool list), and the same words located at a script or another site
+  assert.equal(outages([refused("https://solana.rpc.example.org")], dom("ok", good)).kept.length, 1, "unlisted host");
+  assert.equal(outages([refused(NEAR)], dom("ok", good)).kept.length, 1, "a NEAR RPC");
+  assert.equal(outages([refused(SOLANA, `${app}/assets/index-abc.js`)], dom("ok", good)).kept.length, 1, "located at a script");
+  assert.equal(outages([refused(SOLANA, "https://other.example/verify")], dom("ok", good)).kept.length, 1, "located at another site");
+  // FAIL: any other CORS refusal of the same answer
+  const other = consoleLine(`Access to fetch at '${SOLANA}/' from origin '${app}/' has been blocked by CORS policy: The 'Access-Control-Allow-Origin' header has a value 'https://x.example' that is not equal to the supplied origin.`, `${app}/verify`);
+  assert.equal(outages([other], dom("ok", good)).kept.length, 1, "another CORS refusal");
+});
+
 // release 116's app live run 43027406881 (app-shell 130545665879, app-verify-mount 130545675235, app-shell-rpc-outage-judge
 // 130545665615): robinhood.drpc.org answered five of Verify's six reads at the fresh height 400, the page walked past it
 // and drew the Robinhood row ok, closed; the page drew a row's hosts only when open, so the judge read "ok on 0 host(s)".
