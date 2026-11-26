@@ -15,6 +15,7 @@ import { EVM_POOL_HISTORY, evmPoolProvidersOf, evmPoolVenues, evmRpcOperator } f
 import { bindSenderFromEnv } from "./bind/env.ts";
 import { aCandidates, MARKS_A_SLOTS, MARKS_KEYLESS, planSpent, marksRoutes, operatorOf, readUpstreams, RPC_SCAN_PROGRAM_ENV, RPC_UPSTREAMS } from "./rpc/rpc.ts";
 import { CREDITS } from "./rpc/slot.ts";
+import { nearKeyDayOf } from "./limits/key-reads.ts";
 import { RETRY_AFTER_MAX_S } from "./limits/limits.ts";
 import { evmPoolSendersFromEnv } from "./pool/evm.ts";
 import { solanaPoolSendersFromEnv } from "./pool/solana.ts";
@@ -102,6 +103,8 @@ const UNASKED: FeeQuoter = {
  * nothing is sent until a request, and both are stopped here.
  */
 export function checkSenderEnv(env: Record<string, string | undefined>, mainnetVault: string = MAINNET_VAULT): void {
+  // card near-off-the-fastnear-key: the FastNEAR key's daily ceiling, read as the start reads it
+  nearKeyDayOf(env);
   const watches = tokenWatchesFromEnv(env);
   withdrawSenderFromEnv(env, UNASKED, statusesOf(watches), fetch, mainnetVault).stop();
   bindSenderFromEnv(env, watches, fetch, mainnetVault).stop();

@@ -73,6 +73,7 @@
 import { VAULT_CONSTANTS, VAULT_TOKEN_CODE_HASH, type HelperTokenStatusAnswer } from "@blindfill/kit";
 import * as nodeFs from "node:fs";
 import { join } from "node:path";
+import { NEAR_KEY_READS, type KeyReads } from "../limits/key-reads.ts";
 import { operatorOf, providerName } from "../rpc/operator.ts";
 import { openDurableDir, type DurableDir } from "../store/durable.ts";
 
@@ -414,6 +415,24 @@ export function readUrls(env: Record<string, string | undefined>, network: Token
 
 /** How long a slot's URL that refused its key (HTTP 401 or 403) rests before it is asked again (pairFetch). */
 export const KEY_REST_MS = 10 * 60_000;
+/** How long a slot's key has to start answering a read before that read goes to the slot's free endpoint (pairFetch;
+ *  card near-off-the-fastnear-key). [design: a second: the pair's reads answer within 1 s at p99 (READ_TIMEOUT_MS's
+ *  note), and the free endpoint keeps the rest of the caller's own deadline: READ_TIMEOUT_MS 2 s for the watch,
+ *  bind/send.ts RPC_TIMEOUT_MS 10 s for the fee quoter and the carries] */
+export const KEY_TRY_MS = 1_000;
+/** Methods that wait on the chain by design (a send, a transaction's status), held to the caller's deadline alone:
+ *  never cut at KEY_TRY_MS. */
+const WAITS: ReadonlySet<string> = new Set(["send_tx", "broadcast_tx_async", "broadcast_tx_commit", "tx", "EXPERIMENTAL_tx_status"]);
+/** How often one slot's fall to its free endpoint for one reason is logged. [design: a minute] */
+const NOTE_MS = 60_000;
+const methodOf = (init: RequestInit): string | undefined => {
+  try {
+    const m = typeof init.body === "string" ? (JSON.parse(init.body) as { method?: unknown } | null)?.method : undefined;
+    return typeof m === "string" ? m : undefined;
+  } catch {
+    return undefined;
+  }
+};
 
 /**
  * The fetch every reader of a NEAR pair sends through (card near-pair-falls-over-a-refused-key: the fee quoter, the
@@ -424,8 +443,18 @@ export const KEY_REST_MS = 10 * 60_000;
  * "Your token is invalid or expired","code":4}}; FastNEAR's plan switch of 30 Nov removes the host's key. A slot whose
  * free endpoint is the other slot's company keeps its own URL only, so the pair never reads one company twice. One line
  * per rest names the variable, never a URL: a keyed URL carries its key. Any other URL is sent as it is.
+ * Card near-off-the-fastnear-key: the key is never the only path. A slot's key that answers HTTP 429 or 5xx, fails to
+ * connect, or has not started answering a read within KEY_TRY_MS (a send or a status wait keeps the caller's deadline)
+ * has that request sent to the slot's free endpoint; the next request asks the key again. Every request sent to
+ * NEAR_RPC_URL_FASTNEAR counts in `reads`' helper bucket, and past its daily ceiling the key is not asked: the slot reads
+ * its free endpoint until the next UTC day.
  */
-export function pairFetch<F extends (url: string, init: RequestInit) => Promise<Response>>(env: Record<string, string | undefined>, fetchFn: F, now: () => number = () => performance.now(), log: (line: string) => void = (l) => console.error(l)): F {
+export function pairFetch<F extends (url: string, init: RequestInit) => Promise<Response>>(env: Record<string, string | undefined>, fetchFn: F, now: () => number = () => performance.now(), log: (line: string) => void = (l) => console.error(l), tryMs = KEY_TRY_MS, reads: KeyReads = NEAR_KEY_READS): F {
+  const key = env.NEAR_RPC_URL_FASTNEAR === undefined || env.NEAR_RPC_URL_FASTNEAR === "" ? undefined : env.NEAR_RPC_URL_FASTNEAR;
+  const send = (url: string, init: RequestInit): Promise<Response> => {
+    if (url === key) reads.add("helper");
+    return fetchFn(url, init);
+  };
   const free = new Map<string, { name: string; url: string }>();
   for (const network of ["mainnet", "testnet"] as const) {
     const slots: readonly Slot[] = WATCHED[network].rpcs;
@@ -442,17 +471,48 @@ export function pairFetch<F extends (url: string, init: RequestInit) => Promise<
     });
   }
   const resting = new Map<string, number>();
+  const noted = new Map<string, number>();
+  const note = (to: { name: string; url: string }, why: string) => {
+    const k = `${to.name} ${why}`;
+    const at = noted.get(k);
+    if (at !== undefined && now() - at < NOTE_MS) return;
+    noted.set(k, now());
+    log(`near pair: ${to.name} ${why}: the read went to ${providerName(to.name, to.url)}`);
+  };
   return (async (url: string, init: RequestInit) => {
     const to = free.get(url);
-    if (to === undefined) return fetchFn(url, init);
+    if (to === undefined) return send(url, init);
     const until = resting.get(url);
-    if (until !== undefined && now() < until) return fetchFn(to.url, init);
-    const res = await fetchFn(url, init);
+    if (until !== undefined && now() < until) return send(to.url, init);
+    if (url === key && !reads.open()) {
+      note(to, "is past its day's ceiling (NEAR_KEY_DAY)");
+      return send(to.url, init);
+    }
+    // a read the key has not started answering within tryMs goes to the free endpoint; the bound ends with the answer's
+    // headers, so a body still arriving is never cut
+    const waits = WAITS.has(methodOf(init) ?? "");
+    const tried = waits ? undefined : new AbortController();
+    const timer = tried === undefined ? undefined : setTimeout(() => tried.abort(), tryMs);
+    let res: Response;
+    try {
+      res = await send(url, tried === undefined ? init : { ...init, signal: init.signal ? AbortSignal.any([init.signal, tried.signal]) : tried.signal });
+    } catch (e) {
+      if (init.signal?.aborted) throw e; // the caller's own deadline: nothing left to ask the free endpoint with
+      note(to, tried?.signal.aborted ? `did not answer within ${tryMs} ms` : "did not connect");
+      return send(to.url, init);
+    } finally {
+      clearTimeout(timer);
+    }
+    if (res.status === 429 || res.status >= 500) {
+      await res.body?.cancel().catch(() => undefined);
+      note(to, `answered HTTP ${res.status}`);
+      return send(to.url, init);
+    }
     if (res.status !== 401 && res.status !== 403) return res;
     await res.body?.cancel().catch(() => undefined);
     resting.set(url, now() + KEY_REST_MS);
     log(`near pair: ${to.name} refused its key (HTTP ${res.status}): its reads go to ${providerName(to.name, to.url)} for ${KEY_REST_MS / 60_000} min`);
-    return fetchFn(to.url, init);
+    return send(to.url, init);
   }) as F;
 }
 

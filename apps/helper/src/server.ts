@@ -65,6 +65,7 @@ import { isMainnetEvm, isMainnetSolana } from "./pool/mainnet-only.ts";
 import { poolSendLine, type PoolSendNote } from "./pool/send-log.ts";
 import { evmFeeWarm, evmPoolSendersFromEnv, POOL_EVM_BODY_MAX, POOL_EVM_SELL_BODY_MAX, POOL_LIFE_MAX_MS, type EvmPoolSender } from "./pool/evm.ts";
 import { clientOf, clientWindow, PROVIDER_PACE, providerHolds, refusalLog, throttled, throttleOf, upstreamBudget, type ProviderHolds } from "./limits/limits.ts";
+import { NEAR_KEY_READS, NEAR_KEY_READS_HEADER, nearKeyDayOf } from "./limits/key-reads.ts";
 import { openDurableDir } from "./store/durable.ts";
 import { createSlot, type Slot, type SlotName, type SlotState } from "./rpc/slot.ts";
 import { evmMarketOf, readWarm, restoreEvmMarket, seedGecko, writeWarm, type Warm } from "./data/warm.ts";
@@ -477,7 +478,7 @@ export function handler(
         const period = epochStartOf(now());
         const fees = [...evmPools.values()].filter((p) => isMainnetEvm(p.network)).map((p) => ({ network: p.network, fee: p.feeNow(period) })).sort((x, y) => (x.network < y.network ? -1 : 1));
         const named = fees.map((f) => `${f.network} ${f.fee === null ? "none" : String(f.fee)}`).join(", ");
-        return send(200, health(commit, SERVED, release, ready() && fees.every((f) => f.fee !== null), solana(), rpc.keyed(), bind.carried?.() ?? {}), { ...cors(req), [NEAR_PAIR_HEADER]: nearPair.join(", "), [STARTED_HEADER]: String(STARTED_MS), [POOL_FEES_HEADER]: named, [HANDOVER_HEADER]: handoverNamed(evmSwaps), [CG_PACE_HEADER]: cgPace });
+        return send(200, health(commit, SERVED, release, ready() && fees.every((f) => f.fee !== null), solana(), rpc.keyed(), bind.carried?.() ?? {}), { ...cors(req), [NEAR_PAIR_HEADER]: nearPair.join(", "), [NEAR_KEY_READS_HEADER]: NEAR_KEY_READS.header(), [STARTED_HEADER]: String(STARTED_MS), [POOL_FEES_HEADER]: named, [HANDOVER_HEADER]: handoverNamed(evmSwaps), [CG_PACE_HEADER]: cgPace });
       }
       if (path === TOKEN_STATUS) {
         if (req.method !== "GET" && req.method !== "HEAD") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "GET, HEAD, OPTIONS" });
@@ -1528,6 +1529,9 @@ if (import.meta.main) {
     const cgNamed = coingeckoNamed(process.env, cgPlan);
     console.log(`helper: coingecko pace ${cgNamed}`);
     const holds = providerHolds(undefined, { ...PROVIDER_PACE, ...keyedPaces(process.env), ...coingeckoPace(process.env, cgPlan) }, dayFiles(storeDir, id));
+    // card near-off-the-fastnear-key: the FastNEAR key's reads, counted per UTC day in the store beside the day files, and
+    // their daily ceiling (limits/key-reads.ts); a bad NEAR_KEY_DAY stops the start
+    NEAR_KEY_READS.attach(storeDir, id, nearKeyDayOf(process.env));
     // every chart's read asks CoinGecko's keyed API first when COINGECKO_API_KEY is set; none set, null: every read keyless
     const keyed = createKeyed(process.env, holds);
     // an EVM chain's callers may be answered by the swap reads' pinned providers when its own is held or has no room

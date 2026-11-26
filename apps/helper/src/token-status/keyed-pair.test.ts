@@ -13,6 +13,7 @@ import { test } from "node:test";
 import { bindSenderFromEnv } from "../bind/env.ts";
 import { feeQuoterFromEnv } from "../withdraw/fee.ts";
 import { MAINNET_VAULT, withdrawSenderFromEnv } from "../withdraw/send.ts";
+import { keyReads, type KeyReads } from "../limits/key-reads.ts";
 import * as status from "./status.ts";
 import { readUrls, tokenWatchesFromEnv, USDC, WATCH_RPCS } from "./status.ts";
 
@@ -46,12 +47,14 @@ const key = (() => {
   return `ed25519:${base58(Buffer.concat([seed, pub]))}`;
 })();
 
-/** A fetch that records every URL it is sent to and answers 503, so each path stops at its first read. */
+/** A fetch that records every URL it is sent to and answers 400, so each path stops at its first read (card
+ *  near-off-the-fastnear-key: a key's 429 or 5xx now sends that read on to the slot's free endpoint, so a stop is an
+ *  answer no slot falls over on). */
 function recording() {
   const sent: string[] = [];
   const fetch = (async (url: string | URL | Request) => {
     sent.push(String(url));
-    return new Response("{}", { status: 503 });
+    return new Response("{}", { status: 400 });
   }) as typeof globalThis.fetch;
   return { sent, fetch };
 }
@@ -133,7 +136,7 @@ test("the deposit carry's start (its send, trade and delivery reads, and the int
 // so (read 26 Nov 11:3xZ with made-up keys): FastNEAR HTTP 403 "Invalid API key", dRPC HTTP 403 {"error":{"message":
 // "Your token is invalid or expired","code":4}}; a 401 is the same refusal.
 
-type PairFetch = (env: Record<string, string | undefined>, fetchFn?: typeof fetch, now?: () => number, log?: (line: string) => void) => typeof fetch;
+type PairFetch = (env: Record<string, string | undefined>, fetchFn?: typeof fetch, now?: () => number, log?: (line: string) => void, tryMs?: number, reads?: KeyReads) => typeof fetch;
 // read by name, as pairNames above
 const pairFetch: PairFetch = (...a) => (status as unknown as { pairFetch: PairFetch }).pairFetch(...a);
 const keyRestMs = () => (status as unknown as { KEY_REST_MS: number }).KEY_REST_MS;
@@ -232,4 +235,76 @@ test("pairFetch: a slot whose free endpoint is the other slot's company keeps it
   assert.equal((await f(FASTNEAR, { method: "POST", body: "x" })).status, 403);
   assert.deepEqual(asked, [DRPC, FASTNEAR], "no free endpoint asked: each is the other slot's company");
   assert.deepEqual(lines, []);
+});
+
+// card near-off-the-fastnear-key: the key is never the only path, and every request to it is counted and bounded
+/** FastNEAR's key answering `answer` (a status, a thrown error, or never until aborted); every other URL 200. */
+function keyAnswers(answer: number | "throw" | "hang") {
+  const asked: string[] = [];
+  const fetchFn = (async (url: string | URL | Request, init?: RequestInit) => {
+    asked.push(`${String(url)} ${String(init?.body)}`);
+    if (String(url) !== FASTNEAR) return new Response('{"result":1}', { status: 200 });
+    if (answer === "throw") throw new TypeError("fetch failed");
+    if (answer === "hang") {
+      const signal = init?.signal;
+      return new Promise<Response>((_, no) => {
+        if (signal?.aborted) return no(signal.reason);
+        signal?.addEventListener("abort", () => no(signal.reason), { once: true });
+      });
+    }
+    return new Response("busy", { status: answer });
+  }) as typeof globalThis.fetch;
+  return { asked, fetchFn };
+}
+const READ = JSON.stringify({ jsonrpc: "2.0", id: "1", method: "query", params: {} });
+
+for (const answer of [429, 500, 502, 503, "throw"] as const) {
+  test(`card near-off-the-fastnear-key: the key answering ${answer === "throw" ? "no connection" : `HTTP ${answer}`}: that request goes to the slot's free endpoint, the next asks the key again (no rest); one line a minute names the variable, never a URL or a key`, async () => {
+    let t = 0;
+    const lines: string[] = [];
+    const { asked, fetchFn } = keyAnswers(answer);
+    const f = pairFetch(KEYED, fetchFn, () => t, (l) => lines.push(l), 1_000, keyReads(() => 0));
+    assert.equal((await f(FASTNEAR, { method: "POST", body: READ })).status, 200);
+    assert.deepEqual(asked.splice(0), [`${FASTNEAR} ${READ}`, `${FREE[0]} ${READ}`]);
+    t += 1_000;
+    await f(FASTNEAR, { method: "POST", body: READ });
+    assert.deepEqual(asked.splice(0), [`${FASTNEAR} ${READ}`, `${FREE[0]} ${READ}`], "the key asked again: a busy answer is no rest");
+    assert.equal(lines.length, 1, lines.join("\n"));
+    assert.match(lines[0]!, /NEAR_RPC_URL_FASTNEAR/);
+    assert.ok(!lines[0]!.includes("f".repeat(8)) && !lines[0]!.includes("https://"), lines[0]);
+  });
+}
+
+// the hang bound is the test's own timeout (scripts/ci/no-wall-clock-asserts.mjs): a key that is never cut hangs past it
+test("card near-off-the-fastnear-key: a read the key has not started answering within the try bound goes to the free endpoint; a send is held to the caller's own deadline, never cut", { timeout: 10_000 }, async () => {
+  const { asked, fetchFn } = keyAnswers("hang");
+  const f = pairFetch(KEYED, fetchFn, () => 0, () => undefined, 30, keyReads(() => 0));
+  assert.equal((await f(FASTNEAR, { method: "POST", body: READ })).status, 200, "answered from the free endpoint past the bound");
+  assert.deepEqual(asked.splice(0), [`${FASTNEAR} ${READ}`, `${FREE[0]} ${READ}`]);
+  const SEND = JSON.stringify({ jsonrpc: "2.0", id: "1", method: "send_tx", params: { signed_tx_base64: "AAAA", wait_until: "EXECUTED" } });
+  const caller = new AbortController();
+  const sent = f(FASTNEAR, { method: "POST", body: SEND, signal: caller.signal });
+  await new Promise((go) => setTimeout(go, 120));
+  assert.deepEqual(asked.splice(0), [`${FASTNEAR} ${SEND}`], "past 4 bounds the send still waits on the key alone");
+  caller.abort(new Error("the caller's deadline"));
+  await assert.rejects(sent, /the caller's deadline/);
+  assert.deepEqual(asked, [], "the caller's own deadline ends it: nothing is asked of the free endpoint");
+});
+
+test("card near-off-the-fastnear-key: every request sent to the key counts in the helper bucket, a request to the free endpoint does not; past the day's ceiling the key is not asked until the next UTC day", async () => {
+  let wall = Date.UTC(2026, 10, 26, 23, 59);
+  const reads = keyReads(() => wall, 3);
+  const { asked, fetchFn } = keyAnswers(200);
+  const lines: string[] = [];
+  const f = pairFetch(KEYED, fetchFn, () => 0, (l) => lines.push(l), 1_000, reads);
+  for (let i = 0; i < 3; i++) await f(FASTNEAR, { method: "POST", body: READ });
+  await f(DRPC, { method: "POST", body: READ });
+  assert.equal(asked.splice(0).filter((a) => a.startsWith(FASTNEAR)).length, 3);
+  assert.match(reads.header(), /^2026-11-26 helper=3 seat=0 of 3 hit/);
+  await f(FASTNEAR, { method: "POST", body: READ });
+  assert.deepEqual(asked.splice(0), [`${FREE[0]} ${READ}`], "past the ceiling: the free endpoint first, the key never asked");
+  assert.match(lines.join("\n"), /NEAR_RPC_URL_FASTNEAR is past its day's ceiling \(NEAR_KEY_DAY\)/);
+  wall += 60_000;
+  await f(FASTNEAR, { method: "POST", body: READ });
+  assert.deepEqual(asked.splice(0), [`${FASTNEAR} ${READ}`], "the next UTC day: the key again");
 });

@@ -64,6 +64,9 @@ services:
       RPC_DAY_QUICKNODE: ${RPC_DAY_QUICKNODE:-}
       RPC_DAY_DRPC: ${RPC_DAY_DRPC:-}
       RPC_DAY_FASTNEAR: ${RPC_DAY_FASTNEAR:-}
+      # card near-off-the-fastnear-key: the FastNEAR key's daily ceiling, helper and seat reads together (src/limits/key-reads.ts;
+      # unset: 300,000, a quarter of the shared Pro plan's month a day)
+      NEAR_KEY_DAY: ${NEAR_KEY_DAY:-}
       # a keyed company's pace on a paid plan, "<calls a second>,<at once>" (src/rpc/rpc.ts keyedPaceOf), not a secret;
       # empty: its free plan's (src/limits/limits.ts KEYED_PACE: dRPC 0.8 a second, measured 16 Nov)
       RPC_PACE_QUICKNODE: ${RPC_PACE_QUICKNODE:-}

@@ -68,6 +68,7 @@ import {
   solanaDlmmPairScan,
 } from "@blindfill/kit";
 import { budgetFromEnv, EVM_RANGE_MESSAGE, evmThrottleS, KEYED_COST, KEYED_DAY, KEYED_PACE, keyedDayEnv, LIMIT_CLIENTS, LIMIT_WINDOW_MS, LOGS_REFUSED, PROVIDER_PACE, providerHolds, RETRY_AFTER_MAX_S, throttled, upstreamBudget, upstreamRetryAfterS, type BudgetLimits, type KeyedProvider, type Pace, type ProviderHolds } from "../limits/limits.ts";
+import { NEAR_KEY_READS, type KeyReads } from "../limits/key-reads.ts";
 import { RPC_BATCH_MAX, RPC_BODY_MAX, RPC_CHAINS, RPC_METHODS, type RpcChain } from "./methods.ts";
 import { createSlot, CREDITS, SLOT_RETRY_MS, type Slot, type SlotName } from "./slot.ts";
 import { companyOf, isKeyless, keyTag, operatorOf, providerName } from "./operator.ts";
@@ -716,7 +717,7 @@ type Fetch = (url: string, init: RequestInit) => Promise<Response>;
 /** `pacer`: another client's, when this one sends to the same keyed URL (card helper-crowd-429); else its own. */
 /** `sleep`: the waits' timer (card helper-rpc-wait-timing), a test's clock beside `now`. */
 /** `seatClients`: how many callers the NEAR seat's day map holds (LIMIT_CLIENTS); smaller only in a test. */
-type Deps = { seatClients?: number; fetch?: Fetch; now?: () => number; sleep?: (ms: number) => Promise<unknown>; log?: (line: string) => void; slot?: SlotName; publicFallback?: boolean; holds?: ProviderHolds; pinned?: Partial<Record<RpcChain, readonly string[]>>; pacer?: Pacer; batch?: BatchSizes };
+type Deps = { seatClients?: number; fetch?: Fetch; keyReads?: KeyReads; now?: () => number; sleep?: (ms: number) => Promise<unknown>; log?: (line: string) => void; slot?: SlotName; publicFallback?: boolean; holds?: ProviderHolds; pinned?: Partial<Record<RpcChain, readonly string[]>>; pacer?: Pacer; batch?: BatchSizes };
 /** `why`: a 429's limit, for the refusal log (limits.ts throttled), never sent. */
 /** `timing` (card helper-ready-page-warm): this read's Server-Timing entries, the wait before its send (a hold or the
  *  provider's pace) and the send, and a keyed Solana provider's time before the read fell back to the public endpoint.
@@ -1139,6 +1140,11 @@ export function sharedKeyOf(chain: RpcChain, req: unknown, keyedOnly: boolean): 
 
 export function createRpc(env: Record<string, string | undefined>, deps: Deps = {}) {
   const doFetch = deps.fetch ?? fetch;
+  // card near-off-the-fastnear-key: every request to the FastNEAR key is counted (limits/key-reads.ts): a relayed read in
+  // the seat bucket (fitPost), the identity read in the helper's; past the day's ceiling the key is skipped as a URL
+  // past its own day is (callList)
+  const keyReads = deps.keyReads ?? NEAR_KEY_READS;
+  const nearKey = env.NEAR_RPC_URL_FASTNEAR === undefined || env.NEAR_RPC_URL_FASTNEAR === "" ? undefined : env.NEAR_RPC_URL_FASTNEAR;
   // the budgets', holds' and paces' clock: monotonic, in epoch ms (a wall clock that steps back would hold callers
   // for the step's length; card helper-crowd-429)
   const now = deps.now ?? (() => performance.timeOrigin + performance.now());
@@ -1682,6 +1688,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
       }
       return joinParts(await Promise.all(sent), parts);
     }
+    if (url === nearKey) keyReads.add("seat");
     const r = await doFetch(url, { method: "POST", headers: { accept: "application/json", "content-type": "application/json" }, body: forward, redirect: "error", signal: AbortSignal.timeout(sendMs(by - now())) });
     const text = await readAnswer(r);
     const said = batchRefusal(r.status, text, n);
@@ -2192,7 +2199,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
         // review M1, L3: a read past a URL's plan's batch (dRPC free: 3, its HTTP 400 code 31 past it) or its second's
         // bucket leaves in parts of both (partOf, fitPost), never put out for its size (card helper-receipts-past-retention)
         // review M3: a URL past its day's budget is out until the next UTC day, which is no wait: down for this read
-        if (holds.dayOut(url, methods.length)) {
+        if (holds.dayOut(url, methods.length) || (url === nearKey && !keyReads.open())) {
           down = true;
           daysOut++;
           continue;
@@ -2597,9 +2604,12 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
           // card helper-live-red: drawn on the day's probe share (limits.ts PROBE_DAY_SHARE), so a URL whose day the reads
           // spent is still read, never past its plan's day
           if (holdsAll.heldMs(k.url) > 0 || holdsAll.take(k.url, 1, true, false, true) > 0) return;
+          // card near-off-the-fastnear-key: past the day's ceiling the key is not asked, its last state kept
+          if (k.url === nearKey && !keyReads.open()) return;
           probedAt.set(k.url, now());
           let state: KeyedState = "down";
           try {
+            if (k.url === nearKey) keyReads.add("helper");
             const r = await doFetch(k.url, { method: "POST", headers: { accept: "application/json", "content-type": "application/json" }, body: KEYED_IDENTITY[c].body, redirect: "error", signal: AbortSignal.timeout(RPC_TIMEOUT_MS) });
             if (r.status === 429) {
               // card helper-solana-off-a-spent-key: a 429 naming a spent plan is "spent", out of the mark routes

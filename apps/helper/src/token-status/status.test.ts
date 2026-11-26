@@ -45,10 +45,15 @@ const CHANGED = "GT71B8i42Z2xegTKpA6TUJQYghRqZfyJUNJG6rKf21DT"; // another real 
 const ENV = { NEAR_RPC_URL: A, NEAR_RPC_URL_B: B };
 const VAULT = "vault.test.near";
 const WITH_VAULT = { ...ENV, WITHDRAW_VAULT_MAINNET: VAULT };
+/** A provider of the pair is its slot: its set URL and, where that answers 429 or 5xx or does not connect, its own
+ *  company's free endpoint (pairFetch, card near-off-the-fastnear-key). A provider that fails here fails on both, so each
+ *  test below holds the watch to a provider that cannot answer, not to one whose key alone is down. */
+const SLOT: Readonly<Record<string, ReadonlySet<string>>> = { [A]: new Set([A, WATCH_RPCS[0]!.fallback]), [B]: new Set([B, WATCH_RPCS[1]!.fallback]) };
+const on = (slot: string, u: string): boolean => SLOT[slot]!.has(u);
 /** One provider's every answer replaced by `answer` (the other answers as nearcore does). */
 function oneBroken(url: string, answer: () => Response | Promise<Response>, views: Views = {}) {
   const good = nearPair(views);
-  return { seen: good.seen, fetch: async (u: string, init: RequestInit) => (u === url ? answer() : good.fetch(u, init)) };
+  return { seen: good.seen, fetch: async (u: string, init: RequestInit) => (on(url, u) ? answer() : good.fetch(u, init)) };
 }
 const short = (c: { url: string; method: string; params: Record<string, unknown> }) =>
   `${c.url === A ? "A" : "B"} ${c.method === "block" ? "block" : String(c.params.method_name ?? c.params.request_type)} ${String(c.params.block_id ?? c.params.finality)}`;
@@ -363,7 +368,7 @@ test("(r1) PROBE: the wall clock stepped back 60 s never keeps an old answer: a 
 test("(r1) the status at one H is read once (kept by block); a status not caught up is never kept", async () => {
   let fail = true;
   const p = nearPair({});
-  const fetch = async (u: string, init: RequestInit) => (fail && u === B && String(init.body).includes("is_blocklisted") ? new Response("{}", { status: 500 }) : p.fetch(u, init));
+  const fetch = async (u: string, init: RequestInit) => (fail && on(B, u) && String(init.body).includes("is_blocklisted") ? new Response("{}", { status: 500 }) : p.fetch(u, init));
   const w = createTokenWatch("mainnet", WITH_VAULT, { fetch });
   assert.equal((await w.statusAt("lower")).caught_up, false);
   fail = false;
@@ -404,7 +409,7 @@ test("(r1) pausedAt: decided by both providers, the pin on both, and a null neve
   // B fails: not known, though A alone says paused
   for (const what of ["ft_balance_of", "block", "view_account"]) {
     const p = nearPair(v);
-    const fetch = async (u: string, init: RequestInit) => (u === B && String(init.body).includes(`"${what}"`) ? new Response("{}", { status: 500 }) : p.fetch(u, init));
+    const fetch = async (u: string, init: RequestInit) => (on(B, u) && String(init.body).includes(`"${what}"`) ? new Response("{}", { status: 500 }) : p.fetch(u, init));
     assert.equal(await createTokenWatch("mainnet", WITH_VAULT, { fetch }).pausedAt(100n), null, `B's ${what} fails`);
   }
   // the pin on A only
@@ -413,7 +418,7 @@ test("(r1) pausedAt: decided by both providers, the pin on both, and a null neve
   // null is not kept: B's ft_balance_of down, then back
   let down = true;
   const p = nearPair(v);
-  const w = createTokenWatch("mainnet", WITH_VAULT, { fetch: async (u, init) => (down && u === B && String(init.body).includes('"ft_balance_of"') ? new Response("{}", { status: 500 }) : p.fetch(u, init)) });
+  const w = createTokenWatch("mainnet", WITH_VAULT, { fetch: async (u, init) => (down && on(B, u) && String(init.body).includes('"ft_balance_of"') ? new Response("{}", { status: 500 }) : p.fetch(u, init)) });
   assert.equal(await w.pausedAt(100n), null);
   down = false;
   assert.equal(await w.pausedAt(100n), true, "read again once B answers");
@@ -438,7 +443,8 @@ test("(r1) one 429 is waited out (Retry-After, at most BACKOFF_429_MS) and the r
     const p = nearPair({});
     const waits: number[] = [];
     let n = 0;
-    const fetch = async (u: string, init: RequestInit) => (u === A && n++ < limit ? new Response("", { status: 429, headers: retry === null ? {} : { "retry-after": retry } }) : p.fetch(u, init));
+    // each of the watch's reads is two sends while they answer 429: the key, then its company's free endpoint (SLOT)
+    const fetch = async (u: string, init: RequestInit) => (on(A, u) && n++ < 2 * limit ? new Response("", { status: 429, headers: retry === null ? {} : { "retry-after": retry } }) : p.fetch(u, init));
     const w = createTokenWatch("mainnet", WITH_VAULT, { fetch, sleep: async (ms) => void waits.push(ms) });
     const s = await w.status();
     assert.equal(s.caught_up, want, `${limit} 429s`);

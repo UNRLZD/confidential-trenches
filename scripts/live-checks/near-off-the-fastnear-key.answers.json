@@ -1,0 +1,37 @@
+{
+ "_note": "good: this card's helper in-process (a scratch recorder), made-up keyed FastNEAR and dRPC URLs whose sends went to the same companies' free mainnet endpoints, public account ids for the mainnet relayer settings, 26 Nov 14:1xZ: the fee quote 200, the helper's key reads 0 -> 5: PASS. bad_pre_card: the deployed helper (ddbca59ec, release 258) read live 26 Nov 14:1xZ with --record: its fee quote 200 but no X-Helper-Near-Key-Reads: FAIL.",
+ "good": {
+  "base": "in-process",
+  "before": {
+   "at": 1795701550188,
+   "status": 200,
+   "line": "2026-11-26 helper=0 seat=0 of 300000 open, 2026-11-25 helper=0 seat=0 of 300000 open"
+  },
+  "fee": {
+   "status": 200,
+   "body": "{\"relayer_account\":\"relay.aurora\",\"fee_recipient\":\"near\",\"relay_fee\":\"158596\",\"gp\":\"100000000\",\"px\":\"3.08263238864\",\"g_w\":\"92505000000000\",\"valid_until_block\":226315474}"
+  },
+  "after": {
+   "at": 1795701553994,
+   "status": 200,
+   "line": "2026-11-26 helper=5 seat=0 of 300000 open, 2026-11-25 helper=0 seat=0 of 300000 open"
+  }
+ },
+ "bad_pre_card": {
+  "base": "https://ct-api.unrealized.trade",
+  "before": {
+   "at": 1795701561764,
+   "status": 200,
+   "line": null
+  },
+  "fee": {
+   "status": 200,
+   "body": "{\"relayer_account\":\"4519129d35447942d92ef046ffa52af0430fb06b95b59936d7173290a6972756\",\"fee_recipient\":\"fees.unrlzd.near\",\"relay_fee\":\"158596\",\"gp\":\"100000000\",\"px\":\"3.08263238864\",\"g_w\":\"92505000000000\",\"valid_until_block\":226315495}"
+  },
+  "after": {
+   "at": 1795701565498,
+   "status": 200,
+   "line": null
+  }
+ }
+}
