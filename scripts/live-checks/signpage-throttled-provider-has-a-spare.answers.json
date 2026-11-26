@@ -1,12 +1,119 @@
 {
  "_note": {
-  "good": "a real run (14 Nov, its `at`) of read() with the page's Origin: the three public seats read live, and SIGN_HOST's index.html and /app.js served from the 141 branch's build (card move-sends-or-says-why, a9e862cbd base; build-app --out), which names the third seat before SIGN_HOST does; re-record from SIGN_HOST (`--record`) once that release is served",
+  "good": "a real run (26 Nov, its `at`) of read() with the page's Origin: the three public seats read live (one getMultipleAccounts of the ten each), and SIGN_HOST's index.html and /app.js from this branch's build (card solana-lists-drop-the-dead-provider; build-app --out), which names Tatum's gateway before SIGN_HOST does; re-record from SIGN_HOST (`--record`) once that release is served",
+  "served": "a real run of the check (`--record`, 26 Nov, its `at`) on SIGN_HOST before the release that names Tatum's gateway: every seat answers the same bytes, but the served script names no third seat: FAIL",
+  "before": "the good run of 14 Nov (the 141 branch's build, card move-sends-or-says-why), its second spare Solana Vibe Station: on today's seats, FAIL",
   "bad": "planted on good: the spare answers other bytes for the stable accounts",
   "bad2": "planted on good: the spare refuses the page (a non-JSON 403 with no allow-origin, as api.mainnet-beta answers a page)",
   "quiet": "planted on good: the spare answers 429 to the read (a no-answer): INCONCLUSIVE, never PASS",
-  "bad3": "planted on good: the second spare (solanavibestation) answers other bytes for the stable accounts"
+  "bad3": "planted on good: the second spare (Tatum's gateway) answers other bytes for the stable accounts"
  },
  "good": {
+  "at": "2026-11-26T06:38:26.853Z",
+  "index": "<!doctype html>\n<html lang=\"en\" translate=\"no\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-39OryyiA4TQ2MuPWgibRsgpQ75VSV5ur9fA/B8O4ojL0CoJPiSGy2MEHIXzKX8GY\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "app": {
+   "sha384": "sha384-39OryyiA4TQ2MuPWgibRsgpQ75VSV5ur9fA/B8O4ojL0CoJPiSGy2MEHIXzKX8GY",
+   "names": [
+    "https://solana-rpc.publicnode.com",
+    "https://solana.api.pocket.network",
+    "https://solana-mainnet.gateway.tatum.io"
+   ]
+  },
+  "seats": {
+   "https://solana-rpc.publicnode.com": {
+    "preflight": {
+     "status": 204,
+     "acao": "*",
+     "allowHeaders": "content-type"
+    },
+    "post": {
+     "status": 200,
+     "acao": "*",
+     "accounts": 10,
+     "sha256": "adc1db6294ff542a2bc5b06abede4aa0797c827fa9f0caf202110c96470fac17"
+    }
+   },
+   "https://solana.api.pocket.network": {
+    "preflight": {
+     "status": 204,
+     "acao": "https://confidential.unrealized.trade",
+     "allowHeaders": "content-type"
+    },
+    "post": {
+     "status": 200,
+     "acao": "https://confidential.unrealized.trade",
+     "accounts": 10,
+     "sha256": "adc1db6294ff542a2bc5b06abede4aa0797c827fa9f0caf202110c96470fac17"
+    }
+   },
+   "https://solana-mainnet.gateway.tatum.io": {
+    "preflight": {
+     "status": 204,
+     "acao": "https://confidential.unrealized.trade",
+     "allowHeaders": "X-API-Key,solana-client,DNT,x-ttm-sdk-retry,Authorization,x-ttm-sdk-version,x-ttm-sdk-product,Content-Type,tron-client,x-ttm-sdk-debug,Cache-Control,x-ttm-session"
+    },
+    "post": {
+     "status": 200,
+     "acao": "https://confidential.unrealized.trade",
+     "accounts": 10,
+     "sha256": "adc1db6294ff542a2bc5b06abede4aa0797c827fa9f0caf202110c96470fac17"
+    }
+   }
+  }
+ },
+ "served": {
+  "at": "2026-11-26T06:37:48.957Z",
+  "index": "<!doctype html>\n<html lang=\"en\" translate=\"no\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-J7YwpUZDO2ZLzVIzIMdTBo2vBBcS5OQFFgBLXv3ubA0/Hreqx2T/1j5+u5n8w/A2\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "app": {
+   "sha384": "sha384-J7YwpUZDO2ZLzVIzIMdTBo2vBBcS5OQFFgBLXv3ubA0/Hreqx2T/1j5+u5n8w/A2",
+   "names": [
+    "https://solana-rpc.publicnode.com",
+    "https://solana.api.pocket.network"
+   ]
+  },
+  "seats": {
+   "https://solana-rpc.publicnode.com": {
+    "preflight": {
+     "status": 204,
+     "acao": "*",
+     "allowHeaders": "content-type"
+    },
+    "post": {
+     "status": 200,
+     "acao": "*",
+     "accounts": 10,
+     "sha256": "adc1db6294ff542a2bc5b06abede4aa0797c827fa9f0caf202110c96470fac17"
+    }
+   },
+   "https://solana.api.pocket.network": {
+    "preflight": {
+     "status": 204,
+     "acao": "https://confidential.unrealized.trade",
+     "allowHeaders": "content-type"
+    },
+    "post": {
+     "status": 200,
+     "acao": "https://confidential.unrealized.trade",
+     "accounts": 10,
+     "sha256": "adc1db6294ff542a2bc5b06abede4aa0797c827fa9f0caf202110c96470fac17"
+    }
+   },
+   "https://solana-mainnet.gateway.tatum.io": {
+    "preflight": {
+     "status": 204,
+     "acao": "https://confidential.unrealized.trade",
+     "allowHeaders": "X-API-Key,solana-client,DNT,x-ttm-sdk-retry,Authorization,x-ttm-sdk-version,x-ttm-sdk-product,Content-Type,tron-client,x-ttm-sdk-debug,Cache-Control,x-ttm-session"
+    },
+    "post": {
+     "status": 200,
+     "acao": "https://confidential.unrealized.trade",
+     "accounts": 10,
+     "sha256": "adc1db6294ff542a2bc5b06abede4aa0797c827fa9f0caf202110c96470fac17"
+    }
+   }
+  }
+ },
+ "before": {
   "at": "2026-11-14T14:05:37.700Z",
   "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-BNLgYZh6WTjZfCsEUOTgOktuRRu4HsbCRUvj8IiiUiG3rUJ+RYZSEpJ2A0rcqW2W\"></script>\n  </head>\n  <body></body>\n</html>\n",
   "app": {
@@ -60,14 +167,14 @@
   }
  },
  "bad": {
-  "at": "2026-11-14T14:05:37.700Z",
-  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-BNLgYZh6WTjZfCsEUOTgOktuRRu4HsbCRUvj8IiiUiG3rUJ+RYZSEpJ2A0rcqW2W\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "at": "2026-11-26T06:38:26.853Z",
+  "index": "<!doctype html>\n<html lang=\"en\" translate=\"no\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-39OryyiA4TQ2MuPWgibRsgpQ75VSV5ur9fA/B8O4ojL0CoJPiSGy2MEHIXzKX8GY\"></script>\n  </head>\n  <body></body>\n</html>\n",
   "app": {
-   "sha384": "sha384-BNLgYZh6WTjZfCsEUOTgOktuRRu4HsbCRUvj8IiiUiG3rUJ+RYZSEpJ2A0rcqW2W",
+   "sha384": "sha384-39OryyiA4TQ2MuPWgibRsgpQ75VSV5ur9fA/B8O4ojL0CoJPiSGy2MEHIXzKX8GY",
    "names": [
     "https://solana-rpc.publicnode.com",
     "https://solana.api.pocket.network",
-    "https://public.rpc.solanavibestation.com"
+    "https://solana-mainnet.gateway.tatum.io"
    ]
   },
   "seats": {
@@ -81,7 +188,7 @@
      "status": 200,
      "acao": "*",
      "accounts": 10,
-     "sha256": "8db39047d5c88dc061a39a4c3906f04e3d62a16e5e4825329aaf6fb4bfdb46d4"
+     "sha256": "adc1db6294ff542a2bc5b06abede4aa0797c827fa9f0caf202110c96470fac17"
     }
    },
    "https://solana.api.pocket.network": {
@@ -97,30 +204,30 @@
      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
     }
    },
-   "https://public.rpc.solanavibestation.com": {
+   "https://solana-mainnet.gateway.tatum.io": {
     "preflight": {
      "status": 204,
-     "acao": "*",
-     "allowHeaders": "Content-Type,Authorization,Solana-Client"
+     "acao": "https://confidential.unrealized.trade",
+     "allowHeaders": "X-API-Key,solana-client,DNT,x-ttm-sdk-retry,Authorization,x-ttm-sdk-version,x-ttm-sdk-product,Content-Type,tron-client,x-ttm-sdk-debug,Cache-Control,x-ttm-session"
     },
     "post": {
      "status": 200,
-     "acao": "*",
+     "acao": "https://confidential.unrealized.trade",
      "accounts": 10,
-     "sha256": "8db39047d5c88dc061a39a4c3906f04e3d62a16e5e4825329aaf6fb4bfdb46d4"
+     "sha256": "adc1db6294ff542a2bc5b06abede4aa0797c827fa9f0caf202110c96470fac17"
     }
    }
   }
  },
  "bad2": {
-  "at": "2026-11-14T14:05:37.700Z",
-  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-BNLgYZh6WTjZfCsEUOTgOktuRRu4HsbCRUvj8IiiUiG3rUJ+RYZSEpJ2A0rcqW2W\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "at": "2026-11-26T06:38:26.853Z",
+  "index": "<!doctype html>\n<html lang=\"en\" translate=\"no\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-39OryyiA4TQ2MuPWgibRsgpQ75VSV5ur9fA/B8O4ojL0CoJPiSGy2MEHIXzKX8GY\"></script>\n  </head>\n  <body></body>\n</html>\n",
   "app": {
-   "sha384": "sha384-BNLgYZh6WTjZfCsEUOTgOktuRRu4HsbCRUvj8IiiUiG3rUJ+RYZSEpJ2A0rcqW2W",
+   "sha384": "sha384-39OryyiA4TQ2MuPWgibRsgpQ75VSV5ur9fA/B8O4ojL0CoJPiSGy2MEHIXzKX8GY",
    "names": [
     "https://solana-rpc.publicnode.com",
     "https://solana.api.pocket.network",
-    "https://public.rpc.solanavibestation.com"
+    "https://solana-mainnet.gateway.tatum.io"
    ]
   },
   "seats": {
@@ -134,7 +241,7 @@
      "status": 200,
      "acao": "*",
      "accounts": 10,
-     "sha256": "8db39047d5c88dc061a39a4c3906f04e3d62a16e5e4825329aaf6fb4bfdb46d4"
+     "sha256": "adc1db6294ff542a2bc5b06abede4aa0797c827fa9f0caf202110c96470fac17"
     }
    },
    "https://solana.api.pocket.network": {
@@ -149,30 +256,30 @@
      "noAnswer": "solana.api.pocket.network HTTP 403: not JSON (Forbidden)"
     }
    },
-   "https://public.rpc.solanavibestation.com": {
+   "https://solana-mainnet.gateway.tatum.io": {
     "preflight": {
      "status": 204,
-     "acao": "*",
-     "allowHeaders": "Content-Type,Authorization,Solana-Client"
+     "acao": "https://confidential.unrealized.trade",
+     "allowHeaders": "X-API-Key,solana-client,DNT,x-ttm-sdk-retry,Authorization,x-ttm-sdk-version,x-ttm-sdk-product,Content-Type,tron-client,x-ttm-sdk-debug,Cache-Control,x-ttm-session"
     },
     "post": {
      "status": 200,
-     "acao": "*",
+     "acao": "https://confidential.unrealized.trade",
      "accounts": 10,
-     "sha256": "8db39047d5c88dc061a39a4c3906f04e3d62a16e5e4825329aaf6fb4bfdb46d4"
+     "sha256": "adc1db6294ff542a2bc5b06abede4aa0797c827fa9f0caf202110c96470fac17"
     }
    }
   }
  },
  "quiet": {
-  "at": "2026-11-14T14:05:37.700Z",
-  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-BNLgYZh6WTjZfCsEUOTgOktuRRu4HsbCRUvj8IiiUiG3rUJ+RYZSEpJ2A0rcqW2W\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "at": "2026-11-26T06:38:26.853Z",
+  "index": "<!doctype html>\n<html lang=\"en\" translate=\"no\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-39OryyiA4TQ2MuPWgibRsgpQ75VSV5ur9fA/B8O4ojL0CoJPiSGy2MEHIXzKX8GY\"></script>\n  </head>\n  <body></body>\n</html>\n",
   "app": {
-   "sha384": "sha384-BNLgYZh6WTjZfCsEUOTgOktuRRu4HsbCRUvj8IiiUiG3rUJ+RYZSEpJ2A0rcqW2W",
+   "sha384": "sha384-39OryyiA4TQ2MuPWgibRsgpQ75VSV5ur9fA/B8O4ojL0CoJPiSGy2MEHIXzKX8GY",
    "names": [
     "https://solana-rpc.publicnode.com",
     "https://solana.api.pocket.network",
-    "https://public.rpc.solanavibestation.com"
+    "https://solana-mainnet.gateway.tatum.io"
    ]
   },
   "seats": {
@@ -186,7 +293,7 @@
      "status": 200,
      "acao": "*",
      "accounts": 10,
-     "sha256": "8db39047d5c88dc061a39a4c3906f04e3d62a16e5e4825329aaf6fb4bfdb46d4"
+     "sha256": "adc1db6294ff542a2bc5b06abede4aa0797c827fa9f0caf202110c96470fac17"
     }
    },
    "https://solana.api.pocket.network": {
@@ -201,30 +308,30 @@
      "noAnswer": "solana.api.pocket.network HTTP 429: 429 Too Many Requests"
     }
    },
-   "https://public.rpc.solanavibestation.com": {
+   "https://solana-mainnet.gateway.tatum.io": {
     "preflight": {
      "status": 204,
-     "acao": "*",
-     "allowHeaders": "Content-Type,Authorization,Solana-Client"
+     "acao": "https://confidential.unrealized.trade",
+     "allowHeaders": "X-API-Key,solana-client,DNT,x-ttm-sdk-retry,Authorization,x-ttm-sdk-version,x-ttm-sdk-product,Content-Type,tron-client,x-ttm-sdk-debug,Cache-Control,x-ttm-session"
     },
     "post": {
      "status": 200,
-     "acao": "*",
+     "acao": "https://confidential.unrealized.trade",
      "accounts": 10,
-     "sha256": "8db39047d5c88dc061a39a4c3906f04e3d62a16e5e4825329aaf6fb4bfdb46d4"
+     "sha256": "adc1db6294ff542a2bc5b06abede4aa0797c827fa9f0caf202110c96470fac17"
     }
    }
   }
  },
  "bad3": {
-  "at": "2026-11-14T14:05:37.700Z",
-  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-BNLgYZh6WTjZfCsEUOTgOktuRRu4HsbCRUvj8IiiUiG3rUJ+RYZSEpJ2A0rcqW2W\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "at": "2026-11-26T06:38:26.853Z",
+  "index": "<!doctype html>\n<html lang=\"en\" translate=\"no\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <title>Confidential Trenches</title>\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-39OryyiA4TQ2MuPWgibRsgpQ75VSV5ur9fA/B8O4ojL0CoJPiSGy2MEHIXzKX8GY\"></script>\n  </head>\n  <body></body>\n</html>\n",
   "app": {
-   "sha384": "sha384-BNLgYZh6WTjZfCsEUOTgOktuRRu4HsbCRUvj8IiiUiG3rUJ+RYZSEpJ2A0rcqW2W",
+   "sha384": "sha384-39OryyiA4TQ2MuPWgibRsgpQ75VSV5ur9fA/B8O4ojL0CoJPiSGy2MEHIXzKX8GY",
    "names": [
     "https://solana-rpc.publicnode.com",
     "https://solana.api.pocket.network",
-    "https://public.rpc.solanavibestation.com"
+    "https://solana-mainnet.gateway.tatum.io"
    ]
   },
   "seats": {
@@ -238,7 +345,7 @@
      "status": 200,
      "acao": "*",
      "accounts": 10,
-     "sha256": "8db39047d5c88dc061a39a4c3906f04e3d62a16e5e4825329aaf6fb4bfdb46d4"
+     "sha256": "adc1db6294ff542a2bc5b06abede4aa0797c827fa9f0caf202110c96470fac17"
     }
    },
    "https://solana.api.pocket.network": {
@@ -251,18 +358,18 @@
      "status": 200,
      "acao": "https://confidential.unrealized.trade",
      "accounts": 10,
-     "sha256": "8db39047d5c88dc061a39a4c3906f04e3d62a16e5e4825329aaf6fb4bfdb46d4"
+     "sha256": "adc1db6294ff542a2bc5b06abede4aa0797c827fa9f0caf202110c96470fac17"
     }
    },
-   "https://public.rpc.solanavibestation.com": {
+   "https://solana-mainnet.gateway.tatum.io": {
     "preflight": {
      "status": 204,
-     "acao": "*",
-     "allowHeaders": "Content-Type,Authorization,Solana-Client"
+     "acao": "https://confidential.unrealized.trade",
+     "allowHeaders": "X-API-Key,solana-client,DNT,x-ttm-sdk-retry,Authorization,x-ttm-sdk-version,x-ttm-sdk-product,Content-Type,tron-client,x-ttm-sdk-debug,Cache-Control,x-ttm-session"
     },
     "post": {
      "status": 200,
-     "acao": "*",
+     "acao": "https://confidential.unrealized.trade",
      "accounts": 10,
      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
     }

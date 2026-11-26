@@ -549,10 +549,13 @@ test("sign-out-sends-nothing planted: sent before the hearing but routed after i
 // each before its record's ms ended, the route up to 15 ms behind the send; PASS. Moved by its route lag, the same run
 // FAILs: the price read's wave sent 2 ms before another tab's sign out was heard is routed after it.
 const SENDS = ANSWERS.sends.chromium.phone;
+// the run was recorded on 20 Nov, when the public seat's second spare was Solana Vibe Station (card
+// solana-lists-drop-the-dead-provider put Tatum's gateway in its place): it replays on its own day's list
+const ITS_DAY = PINNED_HOSTS.map((h) => (h === "solana-mainnet.gateway.tatum.io" ? "public.rpc.solanavibestation.com" : h));
 test("recorded run on this card's check (chromium, phone): PASS, its requests read at their browser sends", () => {
-  const r = judge(SENDS);
+  const r = judge(SENDS, ITS_DAY);
   assert.equal(r.ok, true, r.lines.join("\n"));
-  const pinned = SENDS.requests.filter((x) => PINNED_HOSTS.includes(x.host));
+  const pinned = SENDS.requests.filter((x) => ITS_DAY.includes(x.host));
   const sent = pinned.filter((x) => typeof x.sent === "number");
   assert.ok(sent.length * 2 > pinned.length, `${sent.length} of ${pinned.length} pinned requests matched to a send`);
   assert.ok(sent.every((x) => x.sent < x.t + 1), "no send after its record's ms");
@@ -560,10 +563,17 @@ test("recorded run on this card's check (chromium, phone): PASS, its requests re
   const end = SENDS.steps.wordsOut.doc;
   const wave = clone(SENDS);
   wave.requests.push({ t: end + 3, sent: end - 2, host: "rpc.mainnet.chain.robinhood.com", path: "/", method: "POST", rpc: [{ method: "eth_chainId", params: [] }] });
-  assert.equal(judge(wave).ok, true, judge(wave).lines.join("\n"));
+  assert.equal(judge(wave, ITS_DAY).ok, true, judge(wave, ITS_DAY).lines.join("\n"));
   // without its send (node's clock alone): BAD, as main's check read it
   delete wave.requests.at(-1).sent;
-  assert.equal(judge(wave).ok, false, judge(wave).lines.join("\n"));
+  assert.equal(judge(wave, ITS_DAY).ok, false, judge(wave, ITS_DAY).lines.join("\n"));
+});
+
+test("(card solana-lists-drop-the-dead-provider) a page that still reads Solana Vibe Station fails: the 20 Nov run on today's list", () => {
+  assert.ok(!PINNED_HOSTS.includes("public.rpc.solanavibestation.com") && PINNED_HOSTS.includes("solana-mainnet.gateway.tatum.io"));
+  const r = judge(SENDS);
+  assert.equal(r.ok, false);
+  assert.ok(r.lines.some((l) => /^BAD no request leaves SIGN_HOST and APP_HOST but for the pinned pool's hosts \(87: public\.rpc\.solanavibestation\.com/.test(l)), r.lines.join("\n"));
 });
 
 test("stampSends: a record takes its browser send only where its shape's sends and records are as many, in order, and none later than its record", () => {

@@ -145,12 +145,13 @@ export function judge(rec) {
 
 /** The harness's Solana reads, recorded: the release's first two operators' answer to the page's read
  *  (apps/terminal/test/verify/pool-reads.json, the one app-in-shell.mjs answers the page from) and the third's
- *  (test/verify/pool-reads-solana-third-2026-11-19.json, read on 19 Nov), so a width whose planted host is one of the
+ *  (test/verify/pool-reads-solana-third-2026-11-26.json, read on 26 Nov on Tatum's gateway, the list's third since card
+ *  solana-lists-drop-the-dead-provider: the same two accounts as Solana Vibe Station's of 19 Nov), so a width whose planted host is one of the
  *  first two reads the other two. `fetch` answers the probe; `third(route)` the page's read on the third, else null. */
 function harnessRecorded() {
   const rd = (f) => JSON.parse(readFileSync(path.join(REPO, "apps/terminal/test/verify", f), "utf8"));
   const sol = rd("pool-reads.json").solana;
-  const third = rd("pool-reads-solana-third-2026-11-19.json");
+  const third = rd("pool-reads-solana-third-2026-11-26.json");
   const answers = new Map([...sol.rpcs.map((x) => [host(x.name), x.answers.accounts]), [host(third.url), third.answer]]);
   const headers = { "content-type": "application/json", "access-control-allow-origin": "*" };
   return {
