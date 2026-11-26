@@ -217,17 +217,19 @@ test("pairFetch: a refused key rests KEY_REST_MS (its reads go to the slot's fre
 });
 
 test("pairFetch: a slot whose free endpoint is the other slot's company keeps its own URL, so the pair never reads one company twice", async () => {
-  // a third company in slot one with FastNear's key in slot two: slot one's free endpoint (FastNear's) is slot two's
-  // company, so slot one has none; slot two's is dRPC's
-  const env = { NEAR_RPC_URL: "https://near.a-third.example", NEAR_RPC_URL_B: FASTNEAR };
+  // the two keys set in each other's slot: slot one's free endpoint (FastNear's) is slot two's company and slot two's
+  // (dRPC's near.drpc.org, one company with lb.drpc.live) is slot one's, so neither slot falls over and each refusal
+  // comes back as it is
+  const env = { NEAR_RPC_URL: DRPC, NEAR_RPC_URL_B: FASTNEAR };
   const asked: string[] = [];
   const fetchFn = (async (url: string | URL | Request) => {
     asked.push(String(url));
     return new Response("Invalid API key", { status: 403 });
   }) as typeof globalThis.fetch;
-  const f = pairFetch(env, fetchFn, () => 0, () => undefined);
-  assert.equal((await f("https://near.a-third.example", { method: "POST", body: "x" })).status, 403);
-  assert.deepEqual(asked.splice(0), ["https://near.a-third.example"]);
-  await f(FASTNEAR, { method: "POST", body: "x" });
-  assert.deepEqual(asked.splice(0), [FASTNEAR, FREE[1]], "slot two's free endpoint is dRPC's, not slot one's company");
+  const lines: string[] = [];
+  const f = pairFetch(env, fetchFn, () => 0, (l) => lines.push(l));
+  assert.equal((await f(DRPC, { method: "POST", body: "x" })).status, 403);
+  assert.equal((await f(FASTNEAR, { method: "POST", body: "x" })).status, 403);
+  assert.deepEqual(asked, [DRPC, FASTNEAR], "no free endpoint asked: each is the other slot's company");
+  assert.deepEqual(lines, []);
 });
