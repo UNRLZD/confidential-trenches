@@ -52,7 +52,7 @@ import { type HelperWithdrawFeeAnswer } from "@blindfill/kit";
 import { nearRpc, RPC_TIMEOUT_MS } from "../bind/send.ts";
 import type { Rpc } from "../near/pages.ts";
 import { openDurableDir, type DurableDir } from "../store/durable.ts";
-import { readUrls, TESTNET_RPCS, TESTNET_TOKEN, USDC } from "../token-status/status.ts";
+import { pairFetch, readUrls, TESTNET_RPCS, TESTNET_TOKEN, USDC } from "../token-status/status.ts";
 import { decimal, isAccountId, type CheckedWithdraw, type WithdrawReads } from "./checks.ts";
 import { MAX_FINAL_AGE_MS } from "./index.ts";
 
@@ -481,7 +481,9 @@ export const RELAYER_ENV = {
  * lock wait (store/durable.ts openDurableDir; 0 for a retry that must not block, server.ts sendersFromEnv).
  */
 export function feeQuoterFromEnv(env: Record<string, string | undefined>, fetchFn: typeof fetch = fetch, lockWaitMs?: number): FeeQuoter {
-  const mainnet = readUrls(env, "mainnet").map((u) => nearRpc(u, fetchFn, RPC_TIMEOUT_MS)) as [Rpc, Rpc];
+  // a slot whose key is refused reads its own company's free endpoint (card near-pair-falls-over-a-refused-key)
+  const viaPair = pairFetch(env, fetchFn);
+  const mainnet = readUrls(env, "mainnet").map((u) => nearRpc(u, viaPair, RPC_TIMEOUT_MS)) as [Rpc, Rpc];
   const testnetUrls = TESTNET_RPCS.map(({ env: k, fallback }) => {
     const v = env[k];
     if (v === undefined || v === "") return fallback;
@@ -495,7 +497,7 @@ export function feeQuoterFromEnv(env: Record<string, string | undefined>, fetchF
     return v;
   });
   if (testnetUrls[0] === testnetUrls[1]) throw new Error(`${TESTNET_RPCS[0].env} and ${TESTNET_RPCS[1].env} must be two different providers`);
-  const pairs: Record<FeeNetwork, readonly [Rpc, Rpc]> = { mainnet, testnet: testnetUrls.map((u) => nearRpc(u, fetchFn, RPC_TIMEOUT_MS)) as [Rpc, Rpc] };
+  const pairs: Record<FeeNetwork, readonly [Rpc, Rpc]> = { mainnet, testnet: testnetUrls.map((u) => nearRpc(u, viaPair, RPC_TIMEOUT_MS)) as [Rpc, Rpc] };
   const networks: Partial<Record<FeeNetwork, FeeNetworkConfig>> = {};
   for (const n of Object.keys(RELAYER_ENV) as FeeNetwork[]) {
     const [a, f] = RELAYER_ENV[n].map((k) => env[k] ?? "");

@@ -79,7 +79,7 @@ import { join } from "node:path";
 import { vaultWithdrawYocto, type HelperWithdrawCode } from "@blindfill/kit";
 import { base58 } from "../bind/checks.ts";
 import { createFileStore, nearRpc, relayerKey, RPC_TIMEOUT_MS, RpcError, startRelayer, type CreationEntry, type CreationRecord, type DepositStore, type Relayer, type Rpc, type TxOutcome, type TxRef } from "../bind/send.ts";
-import { readUrls, statusesOf, tokenHeld, tokenWatchesFromEnv, USDC, type HoldAt, type TokenStatus } from "../token-status/status.ts";
+import { pairFetch, readUrls, statusesOf, tokenHeld, tokenWatchesFromEnv, USDC, type HoldAt, type TokenStatus } from "../token-status/status.ts";
 import { checkWithdraw, decimal, isAccountId, type CheckedWithdraw, type WithdrawConfig, type WithdrawReads } from "./checks.ts";
 import { agreedBlock, FEE_A_FUND, FEE_ACCOUNT_NOT_READY, feeAccountReady, FeeReadRefused, HEIGHT_SPREAD_MAX, readFeeAccount, readRegisterMin, RELAYER_ENV, STORE_ENV, TESTNET_RPCS, TESTNET_TOKEN, viewAt, type Block, type FeeAccount, type FeeNetwork, type FeeQuoter } from "./fee.ts";
 import { checkNullifier, createLeavesIndex, createSpendsIndex, createWithdrawSendStore, nullifierKey, TREE_CAPACITY, type LeavesIndex, type SpendsIndex, type WithdrawSendStore } from "./index.ts";
@@ -720,6 +720,8 @@ export function withdrawSenderFromEnv(
   const mainnet = readUrls(env, "mainnet");
   const testnet = TESTNET_RPCS.map(({ env: k, fallback }) => env[k] || fallback);
   const urls: Record<FeeNetwork, readonly string[]> = { mainnet, testnet };
+  // a slot whose key is refused reads its own company's free endpoint (card near-pair-falls-over-a-refused-key)
+  const viaPair = pairFetch(env, fetchFn);
 
   type Net = { network: FeeNetwork; vault: string; keys: string[] };
   const nets = new Map<string, Net>();
@@ -740,7 +742,7 @@ export function withdrawSenderFromEnv(
   const landed: ((recipient: string) => void)[] = [];
   const stops: (() => void)[] = [];
   const init = async (net: Net): Promise<WithdrawSendDeps> => {
-    const rpcs = urls[net.network].map((u) => nearRpc(u, fetchFn, RPC_TIMEOUT_MS)) as unknown as readonly [Rpc, Rpc];
+    const rpcs = urls[net.network].map((u) => nearRpc(u, viaPair, RPC_TIMEOUT_MS)) as unknown as readonly [Rpc, Rpc];
     const block = await agreedBlock(rpcs, Date.now);
     const c = await viewAt(rpcs, block, net.vault, "config", {});
     const scope = isObj(c) ? decimal(c.scope, 1n << 256n) : null;

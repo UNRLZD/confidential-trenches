@@ -412,6 +412,50 @@ export function readUrls(env: Record<string, string | undefined>, network: Token
   return [a.url, b.url];
 }
 
+/** How long a slot's URL that refused its key (HTTP 401 or 403) rests before it is asked again (pairFetch). */
+export const KEY_REST_MS = 10 * 60_000;
+
+/**
+ * The fetch every reader of a NEAR pair sends through (card near-pair-falls-over-a-refused-key: the fee quoter, the
+ * token watch, the withdrawal and deposit carries). A slot's set URL (a keyed one carries its key) that answers HTTP 401
+ * or 403 rests KEY_REST_MS: that request is sent once more, and every one inside the rest goes, to the slot's own free
+ * endpoint (WATCH_RPCS, TESTNET_RPCS fallback), so a dead key never refuses a read or a send. Each company answers a
+ * dead key so (read 26 Nov 11:3xZ with made-up keys): FastNEAR 403 "Invalid API key", dRPC 403 {"error":{"message":
+ * "Your token is invalid or expired","code":4}}; FastNEAR's plan switch of 30 Nov removes the host's key. A slot whose
+ * free endpoint is the other slot's company keeps its own URL only, so the pair never reads one company twice. One line
+ * per rest names the variable, never a URL: a keyed URL carries its key. Any other URL is sent as it is.
+ */
+export function pairFetch<F extends (url: string, init: RequestInit) => Promise<Response>>(env: Record<string, string | undefined>, fetchFn: F, now: () => number = () => performance.now(), log: (line: string) => void = (l) => console.error(l)): F {
+  const free = new Map<string, { name: string; url: string }>();
+  for (const network of ["mainnet", "testnet"] as const) {
+    const slots: readonly Slot[] = WATCHED[network].rpcs;
+    const set = slots.map((slot) => {
+      const name = [slot.keyed, slot.env].find((n) => n !== undefined && env[n] !== undefined && env[n] !== "");
+      return name === undefined ? null : { name, url: env[name]! };
+    });
+    slots.forEach((slot, i) => {
+      const own = set[i];
+      if (own === null || own === undefined || own.url === slot.fallback) return;
+      const other = set[1 - i]?.url ?? slots[1 - i]!.fallback;
+      if (operatorOf(slot.fallback) === operatorOf(other)) return;
+      free.set(own.url, { name: own.name, url: slot.fallback });
+    });
+  }
+  const resting = new Map<string, number>();
+  return (async (url: string, init: RequestInit) => {
+    const to = free.get(url);
+    if (to === undefined) return fetchFn(url, init);
+    const until = resting.get(url);
+    if (until !== undefined && now() < until) return fetchFn(to.url, init);
+    const res = await fetchFn(url, init);
+    if (res.status !== 401 && res.status !== 403) return res;
+    await res.body?.cancel().catch(() => undefined);
+    resting.set(url, now() + KEY_REST_MS);
+    log(`near pair: ${to.name} refused its key (HTTP ${res.status}): its reads go to ${providerName(to.name, to.url)} for ${KEY_REST_MS / 60_000} min`);
+    return fetchFn(to.url, init);
+  }) as F;
+}
+
 /** Mainnet's pair as GET /v1/health names it (X-Helper-Near-Pair; rpc/rpc.ts providerName): "fastnear.com" and
  *  "drpc.live" on the two keys, "<company> keyless" on a free endpoint; never a URL or a key. */
 export const pairNames = (env: Record<string, string | undefined>): string[] => readPair(env, "mainnet").map((p) => providerName(p.name, p.url));
@@ -454,7 +498,8 @@ export function backoffOf(retryAfter: string | null): number {
 
 /** One network's watch: its own token (WATCHED) and the vault it carries (VAULT_ENV) read on its own pair. */
 export function createTokenWatch(network: TokenNetwork, env: Record<string, string | undefined>, deps: Deps = {}) {
-  const doFetch = deps.fetch ?? fetch;
+  // a slot whose key is refused reads its own company's free endpoint (card near-pair-falls-over-a-refused-key)
+  const doFetch = pairFetch(env, deps.fetch ?? fetch);
   const now = deps.now ?? Date.now; // the wall clock: only for H's age against its block time
   const clock = deps.clock ?? (() => performance.now()); // monotonic: the display's cache and the wait for H
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((ok) => setTimeout(ok, ms)));
