@@ -222,6 +222,8 @@ const LOGS_PAGE_TRIES = 3;
 const logsKey = (c: RpcChain): string => `${c}:logs`;
 /** Card helper-base-trade-reads-429: the budget a walk's send to one of `c`'s keyed URLs draws (createRpc keysGated). */
 const keysKey = (c: RpcChain): string => `${c}:keys`;
+/** Card robinhood-warm-tap-inside-2s: the budget a seat mode's read draws (?keyed=alchemy; SEAT_SHARE a caller). */
+const seatKey = (c: RpcChain): string => `${c}:seat`;
 /** A block number as an EVM node writes it: 0x, lowercase or uppercase hex, no leading zero, at most 64 bits. */
 const BLOCK_NUMBER = /^0x(0|[1-9a-fA-F][0-9a-fA-F]{0,15})$/;
 /**
@@ -660,7 +662,10 @@ export function keyedSpares(env: Record<string, string | undefined>, chain: RpcC
   return readUpstreams(env)[chain].keyed.filter((k) => KEYED_PROVIDER[k.env] !== undefined).map((k) => k.url);
 }
 /** Each new keyed URL set and its company's pace, for the helper's one providerHolds (server.ts): with its company's
- *  daily budget (limits.ts KEYED_DAY, or RPC_DAY_<COMPANY>) and the units one call on its chain spends (KEYED_COST). */
+ *  daily budget (limits.ts KEYED_DAY, or RPC_DAY_<COMPANY>) and the units one call on its chain spends (KEYED_COST).
+ *  Card robinhood-warm-tap-inside-2s: an EVM chain's Alchemy URL under its own name (ROBINHOOD_RPC_URL, Pay As You Go
+ *  with no cap of its own) is the company alchemy too, one bucket and one day for every chain's; Solana's is another
+ *  app's plan and keeps none. */
 export function keyedPaces(env: Record<string, string | undefined>): Record<string, Pace> {
   const out: Record<string, Pace> = {};
   for (const chain of RPC_CHAINS) {
@@ -668,6 +673,7 @@ export function keyedPaces(env: Record<string, string | undefined>): Record<stri
     for (const k of readUpstreams(env)[chain].keyed) {
       const co = KEYED_PROVIDER[k.env];
       if (co !== undefined) out[k.url] = { ...keyedPaceOf(env, co), group: keyedAccountOf(k.env), day: keyedDayOf(env, co), cost: KEYED_COST[co][family] };
+      else if (family === "evm" && !k.keyless && operatorOf(k.url) === SEAT_COMPANY.alchemy) out[k.url] = { ...keyedPaceOf(env, "alchemy"), day: keyedDayOf(env, "alchemy"), cost: KEYED_COST.alchemy.evm };
     }
   }
   return out;
@@ -1143,16 +1149,27 @@ export function sharedKeyOf(chain: RpcChain, req: unknown, keyedOnly: KeyedMode)
  *  QuickNode and the dRPC keys, and a dRPC key's answer is the company of robinhood.drpc.org, so the device's two answers
  *  could be one operator's. Alchemy, not QuickNode: Robinhood's QuickNode endpoint is a free trial paced at 7 calls a
  *  second (limits.ts KEYED_PACE), no faster than bloXroute's 6 on the device, where the Alchemy key is Pay As You Go
- *  (scripts/deploy/robinhood-alchemy-key.sh): this route answered an eth_call in 190-200 ms from macOS beside
- *  publicnode's 100-260, Robinhood's own 250-355 and bloXroute's 230-245 (26 Nov 12:5xZ). */
+ *  (limits.ts KEYED_DAY): this route answered an eth_call in 190-200 ms from macOS beside publicnode's 100-260,
+ *  Robinhood's own 250-355 and bloXroute's 230-245 (26 Nov 12:5xZ). */
 export type KeyedMode = boolean | "alchemy";
 /** The company each seat mode answers from (KeyedMode), as operatorOf names it. */
 const SEAT_COMPANY = { alchemy: "alchemy.com" } as const;
-/** A seat read's own allowance for the caller (card robinhood-warm-tap-inside-2s), as a pool index read has
- *  INDEX_CLIENT: the route's page share again (RPC_PAGE_NEED), never the caller's, which the page's background passes
- *  draw on the same address (INDEX_CLIENT's note: on 21 Nov they spent it and the device's sync met 429). The device
- *  paces the seat inside it (packages/kit/src/checks/evm/pace.ts EVM_PACE). */
-export const SEAT_CLIENT = "trade-seat";
+/**
+ * One caller's seat reads in any 10 s (card robinhood-warm-tap-inside-2s), on the seat's own budget (seatKey), never the
+ * caller's route share, which the page's background passes draw on the same address. A tap asks the seat up to 93 calls,
+ * and the tap check's heaviest coin, a cold tap and three warm, 294 in about 13 s (its own Robinhood quotes on mainnet
+ * with the seat first, 26 Nov 15:5xZ); at the route's page share of 30 the same run met the seat's 429 33 times and
+ * NVDA's warm tap took 4,990 ms. [design: 300, that burst; the device does not pace the seat: a 429 here holds it its
+ * Retry-After, 1 to 3 s (packages/kit/src/checks/evm/pace.ts evmThrottleHoldMs), and the quote reads the keyless list.]
+ */
+export const SEAT_SHARE = 300;
+/**
+ * The most seat reads one caller takes in a UTC day, as NEAR_SEAT_DAY bounds NEAR's seat: without it one caller at its
+ * share spends Alchemy's day (limits.ts KEYED_DAY, 333,333 calls) in 19 minutes and the seat is down for every page
+ * until midnight. Past it the caller's 429 names RETRY_AFTER_MAX_S, which the page takes for the seat held and reads its
+ * keyless providers. [design: 30,000: 320 taps of 93 seat calls; 11 callers at it fill the key's day.]
+ */
+export const ALCHEMY_SEAT_DAY = 30_000;
 /** A shared answer's key part for `m`: an answer read in one mode is never handed to a caller of another. */
 const modeTag = (m: KeyedMode): string => (m === false ? "" : m === true ? " keyed" : ` keyed ${m}`);
 
@@ -1170,15 +1187,16 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
   const upstreams = readUpstreams(env);
   // each caller's ?keyed=only NEAR reads this UTC day (NEAR_SEAT_DAY), in memory as the shares are; a new day clears it.
   // At most seatClients callers a day (LIMIT_CLIENTS, as the shares): a new one past that is refused, so its page reads
-  // its spare (review P3-2 of 997ce7a7f). `take`: false only looks
+  // its spare (review P3-2 of 997ce7a7f). `take`: false only looks. Card robinhood-warm-tap-inside-2s: a seat mode's reads
+  // too, each caller's under "<company> <caller>" up to `max` (ALCHEMY_SEAT_DAY)
   const seatClients = deps.seatClients ?? LIMIT_CLIENTS;
   const seatDay = { day: -1, used: new Map<string, number>() };
-  const seatDayTake = (client: string, n: number, take: boolean): boolean => {
+  const seatDayTake = (client: string, n: number, take: boolean, max = NEAR_SEAT_DAY): boolean => {
     const d = Math.floor(now() / SEAT_DAY_MS);
     if (d !== seatDay.day) (seatDay.day = d), seatDay.used.clear();
     const u = seatDay.used.get(client);
     if (u === undefined && seatDay.used.size >= seatClients) return false;
-    if ((u ?? 0) + n > NEAR_SEAT_DAY) return false;
+    if ((u ?? 0) + n > max) return false;
     if (take) seatDay.used.set(client, (u ?? 0) + n);
     return true;
   };
@@ -1252,8 +1270,12 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
   }
   /** Whether `url` serves an eth_getLogs of `span` blocks: no known span, or one at least that. */
   const covers = (url: string, span: bigint): boolean => (logsSpanByUrl.get(url) ?? span) >= span;
+  // card robinhood-warm-tap-inside-2s: the seat's budget (seatKey), KEYED_ROUTE_SHARE of Alchemy's pace for 10 s, the
+  // other half left to the route's other reads of the same key and the market-data reads; SEAT_SHARE a caller
+  const seatTotal = Math.floor(keyedPaceOf(env, "alchemy").perS * (LIMIT_WINDOW_MS / 1000) * KEYED_ROUTE_SHARE);
+  const seatLimits: Record<string, BudgetLimits & { perMethod?: number }> = Object.fromEntries(RPC_CHAINS.map((ch) => [seatKey(ch), { total: seatTotal, perClient: SEAT_SHARE, reserve: 0, userRoom: userRoomOf(seatTotal) }]));
   // a key is a chain, or "<chain> <method>" for one method's budget on it (no share: the chain's share bounds a caller)
-  const limitsOf = (k: string) => (k === PUBLIC_KEY ? publicLimits : k === SPARES_KEY ? limits.solana : (logsLimits[k] ?? keysLimits[k] ?? limits[k as RpcChain]));
+  const limitsOf = (k: string) => (k === PUBLIC_KEY ? publicLimits : k === SPARES_KEY ? limits.solana : (logsLimits[k] ?? keysLimits[k] ?? seatLimits[k] ?? limits[k as RpcChain]));
   const budget = upstreamBudget((key) => {
     const [k, method] = key.split(" ") as [string, string | undefined];
     const l = limitsOf(k);
@@ -1913,8 +1935,8 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
       const own = upstreams[c].keyed.filter((k) => !k.keyless && (c !== "near" || operatorOf(k.url) === NEAR_SEAT) && (company === undefined || operatorOf(k.url) === company)).map((k) => k.url);
       if (own.length === 0) return UPSTREAM();
       // card helper-robinhood-route-serves-a-device-sync: a pool index read draws its own allowance (INDEX_CLIENT); card
-      // robinhood-warm-tap-inside-2s: a seat read its own (SEAT_CLIENT)
-      const mine = client === undefined ? client : company !== undefined ? `${SEAT_CLIENT} ${client}` : indexReadOf(c, out, poolManagerOf(c)) ? `${INDEX_CLIENT} ${client}` : client;
+      // robinhood-warm-tap-inside-2s: a seat read the seat's budget (seatKey), below
+      const mine = client === undefined || company !== undefined ? client : indexReadOf(c, out, poolManagerOf(c)) ? `${INDEX_CLIENT} ${client}` : client;
       // card helper-pool-logs-outside-the-caller-budget: a finalized page of logs kept before is answered here, drawing
       // nothing; a first ask draws as any read, and is kept once its toBlock reads finalized (LOG_CACHE_ENTRIES). Never
       // in a seat mode: the cache and the pool store hold answers of every keyed company, so its ranges go to its
@@ -1977,15 +1999,18 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
         if (final) logCachePut(logs.key, a);
         return a;
       }
-      if (c !== "near" || client === undefined) return callList(c, own, forward, methods, mine, reserved, by);
+      // card robinhood-warm-tap-inside-2s: a seat mode's read draws the seat's budget (seatKey) and its own day
+      const bk = company === undefined ? c : seatKey(c);
+      if ((c !== "near" && company === undefined) || client === undefined) return callList(c, own, forward, methods, mine, reserved, by, bk);
       // the seat's day (review P3-3 of 997ce7a7f): looked at first, so a read past it costs no share; taken only once the
       // share admits the read (a share refusal spends none of it); given back when the walk answers its own 429 or 503 (no
       // provider answered: every one held past the wait, down or out)
-      const seat = client;
-      if (!seatDayTake(seat, methods.length, false)) return throttled(RETRY_AFTER_MAX_S, undefined, "near seat day");
+      const seat = company === undefined ? client : `${company} ${client}`;
+      const max = company === undefined ? NEAR_SEAT_DAY : ALCHEMY_SEAT_DAY;
+      if (!seatDayTake(seat, methods.length, false, max)) return throttled(RETRY_AFTER_MAX_S, undefined, `${c} seat day`);
       let takenOn = -1;
-      const a = await callList(c, own, forward, methods, client, reserved, by, c, () => {
-        if (!seatDayTake(seat, methods.length, true)) return false;
+      const a = await callList(c, own, forward, methods, client, reserved, by, bk, () => {
+        if (!seatDayTake(seat, methods.length, true, max)) return false;
         takenOn = seatDay.day;
         return true;
       });
@@ -2183,7 +2208,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
       if (!(await holdOver(key, deadline, undefined, waitFor))) return throttled(budget.heldFor(key), undefined, `${key} held`);
       const wait = budget.takeEach(drawsOf(key, methods), client, false, reserved);
       if (wait > 0) return throttled(wait, undefined, budget.refusedBy());
-      if (admit !== undefined && !admit()) return throttled(RETRY_AFTER_MAX_S, undefined, "near seat day");
+      if (admit !== undefined && !admit()) return throttled(RETRY_AFTER_MAX_S, undefined, `${c} seat day`);
     }
     // a log read is never sent to a provider that refuses every one (LOGS_REFUSED): its 429 would hold it for the reads
     // it does answer
@@ -2234,8 +2259,9 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
         }
         // card helper-base-trade-reads-429: a keyed URL takes the read only while the keys' part of the total has room;
         // else the walk goes on to the public spares (or, a keyed-only read, waits as for a held one)
-        // (a read that drew elsewhere, key null: a paged read's page on its logs allowance, sized to the keys alone)
-        if (key !== null && !keysDrawn && keysGated(c, url)) {
+        // (a read that drew elsewhere, key null: a paged read's page on its logs allowance, sized to the keys alone; a seat
+        // read, on the seat's own total, card robinhood-warm-tap-inside-2s)
+        if (key !== null && key !== seatKey(c) && !keysDrawn && keysGated(c, url)) {
           const kw = budget.takeEach([[keysKey(c), methods.length]], client, false, reserved);
           if (kw > 0) {
             soonestMs = Math.min(soonestMs, kw * 1000);
@@ -2663,10 +2689,11 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
   /** A chain's budget (card helper-serves-many-users-at-once) as the IETF RateLimit-Policy field
    *  (draft-ietf-httpapi-ratelimit-headers-11, 23 May 2026, read 11 Nov 06:01Z: `"burst";q=100;w=60`): "chain", what
    *  every caller together may draw in its window, and "client", one caller's share; numbers only, no provider, URL or
-   *  key. Undefined for a name that is no chain. /v1/health has no room for it (the kit's 1 KB at the longest config). */
-  const policyOf = (chain: string): string | undefined => {
+   *  key. Undefined for a name that is no chain. /v1/health has no room for it (the kit's 1 KB at the longest config).
+   *  A seat mode's answers name the seat's budget (seatKey; card robinhood-warm-tap-inside-2s). */
+  const policyOf = (chain: string, mode: KeyedMode = false): string | undefined => {
     if (!(RPC_CHAINS as readonly string[]).includes(chain)) return undefined;
-    const l = limits[chain as RpcChain];
+    const l = typeof mode === "string" ? seatLimits[seatKey(chain as RpcChain)]! : limits[chain as RpcChain];
     const w = LIMIT_WINDOW_MS / 1000;
     return `"chain";q=${l.total};w=${w}, "client";q=${l.perClient};w=${w}`;
   };

@@ -1325,7 +1325,7 @@ test("card evm-pool-leaves-any-source: ?keyed=only refuses what the route refuse
 // device, once dRPC is held (release 209, VRAX warm 3.2-3.4 s; ANT 5.8 s). The device may add this route as a seat only
 // if the route is one company: the quote keeps its two answers apart by host, and ?keyed=only walks on from Alchemy to
 // QuickNode and the dRPC keys, the last the same company as robinhood.drpc.org. So ?keyed=alchemy asks the chain's Alchemy
-// URL and nothing else, under its own allowance for the caller (rpc.ts SEAT_CLIENT).
+// URL and nothing else, on the seat's own budget (robinhood-seat.test.ts).
 const KO_ALCHEMY = "https://robinhood-mainnet.g.alchemy.com/v2/projectsegment0123456789";
 const KO_QN = "https://qn.test/quicknodesegment0123456789/";
 const KO_RH_DRPC = "https://lb.drpc.test/robinhood/drpckey0123456789abcdef";
@@ -1367,20 +1367,6 @@ test("card robinhood-warm-tap-inside-2s: ?keyed=alchemy never answers a log rang
   const a = await alchemyOnly(r, "robinhood", TRANSFERS());
   assert.equal(a.status, 200, a.body);
   assert.deepEqual(asked, [KO_ALCHEMY], "no finalized-head read and no other company");
-});
-
-test("card robinhood-warm-tap-inside-2s: a seat read draws its own allowance (SEAT_CLIENT): a caller whose share the page's reads spent still has the route's page share of seat reads, and no more", async () => {
-  const { r } = keyedOnlyRig(RH_KEYS, {}, "robinhood");
-  const keyedFor = (client: string) => (r.handle as (...a: unknown[]) => ReturnType<typeof r.handle>)("robinhood", JSON_T, JSON.stringify(BLOCK), client, false, true);
-  const CLIENT = "198.51.100.7";
-  let plain = 0;
-  while ((await keyedFor(CLIENT)).status === 200) if (++plain > 200) break;
-  assert.equal(plain, 30, "the caller's own share on the keyed route (RPC_PAGE_NEED robinhood)");
-  let seat = 0;
-  while ((await alchemyOnly(r, "robinhood", BLOCK, CLIENT)).status === 200) if (++seat > 200) break;
-  assert.equal(seat, 30, "the seat's own allowance, the page share again, then its 429");
-  assert.equal((await alchemyOnly(r, "robinhood", BLOCK, CLIENT)).status, 429);
-  assert.equal((await alchemyOnly(r, "robinhood", BLOCK, "198.51.100.8")).status, 200, "another caller's seat is its own");
 });
 
 test("card robinhood-warm-tap-inside-2s: a shared read's key and a market scan's key name the mode, so an answer read in one mode is never handed to another", () => {

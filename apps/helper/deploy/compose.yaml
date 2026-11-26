@@ -64,6 +64,8 @@ services:
       RPC_DAY_QUICKNODE: ${RPC_DAY_QUICKNODE:-}
       RPC_DAY_DRPC: ${RPC_DAY_DRPC:-}
       RPC_DAY_FASTNEAR: ${RPC_DAY_FASTNEAR:-}
+      # card robinhood-warm-tap-inside-2s: an EVM chain's Alchemy key's day in compute units (empty: 20,000,000)
+      RPC_DAY_ALCHEMY: ${RPC_DAY_ALCHEMY:-}
       # card near-off-the-fastnear-key: the FastNEAR key's daily ceiling, helper and seat reads together (src/limits/key-reads.ts;
       # unset: 300,000, a quarter of the shared Pro plan's month a day)
       NEAR_KEY_DAY: ${NEAR_KEY_DAY:-}
@@ -72,6 +74,7 @@ services:
       RPC_PACE_QUICKNODE: ${RPC_PACE_QUICKNODE:-}
       RPC_PACE_DRPC: ${RPC_PACE_DRPC:-}
       RPC_PACE_FASTNEAR: ${RPC_PACE_FASTNEAR:-}
+      RPC_PACE_ALCHEMY: ${RPC_PACE_ALCHEMY:-}
       # each chain's RPC budget per 10 s, "<total>,<per client>" (src/rpc/rpc.ts; empty: the public provider's limit)
       RPC_BUDGET_SOLANA: ${RPC_BUDGET_SOLANA:-}
       RPC_BUDGET_BASE: ${RPC_BUDGET_BASE:-}

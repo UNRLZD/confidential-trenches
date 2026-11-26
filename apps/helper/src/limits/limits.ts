@@ -286,6 +286,10 @@ export const KEYED_PACE = {
   drpc: { ...DRPC_IP_PACE, group: "drpc", batch: 3 },
   // docs.fastnear.com/pricing (read 2026-11-18 02:50Z): Dev "up to 10,000" requests a minute per key; 3,720 at most here
   fastnear: { perS: 60, burst: 120, unit: "call", group: "fastnear" },
+  // card robinhood-warm-tap-inside-2s: Robinhood's key, Pay As You Go, "10,000 CU/s" (alchemy.com/pricing, read 26 Nov);
+  // 150 calls a second at 60 CU each (KEYED_COST) is 9,000. Mapped by its URL's company, never an environment name (rpc.ts
+  // keyedPaces), so no route's total counts it (summedTotal)
+  alchemy: { perS: 150, burst: 150, unit: "call", group: "alchemy" },
 } as const satisfies Readonly<Record<string, Pace>>;
 export type KeyedProvider = keyof typeof KEYED_PACE;
 /**
@@ -301,16 +305,22 @@ export type KeyedProvider = keyof typeof KEYED_PACE;
  *     "Dev / 10,000,000 per month", one credit a request, docs.fastnear.com/pricing, read 2026-11-18 02:50Z):
  *     10,000,000 / 31 = 322,580 a day. Less the probes' 1% (PROBE_DAY_SHARE), 319,355 for reads: a NEAR quote of 29 seat
  *     reads is 11,012 quotes a day, of 18 reads 17,741 (card near-seat-pace-fits-one-quote).
+ *   - Alchemy, compute units: Pay As You Go, "$0.525/M CU" and no spending cap on the plan (alchemy.com/pricing, read 26 Nov),
+ *     so the day is ours to set (card robinhood-warm-tap-inside-2s): 20,000,000 CU, at most $10.50 a day, each call counted
+ *     at 60 (KEYED_COST); 333,333 calls, about 3,580 of a tap's 93 seat calls.
  */
-export const KEYED_DAY: Readonly<Record<KeyedProvider, number>> = { quicknode: 322_580, drpc: 7_000_000, fastnear: 322_580 };
+export const KEYED_DAY: Readonly<Record<KeyedProvider, number>> = { quicknode: 322_580, drpc: 7_000_000, fastnear: 322_580, alchemy: 20_000_000 };
 /** The units one call spends at each company, by chain family: QuickNode's "All methods" 20 credits on Base (and every
  *  EVM chain listed) and 30 on Solana (quicknode.com/api-credits, read 2026-11-07 09:15Z); dRPC's 20 CU for every
  *  method it lists but eth_chainId (0), eth_call, eth_getLogs, getSignaturesForAddress and getTransaction included, none
- *  above 20 (drpc.org/docs/pricing/compute-units, read 09:16Z); FastNear's one request a call. */
+ *  above 20 (drpc.org/docs/pricing/compute-units, read 09:16Z); FastNear's one request a call; Alchemy's dearest EVM
+ *  method the Robinhood route sends, eth_getLogs at 60 CU (eth_call 26, eth_blockNumber 10; alchemy.com/docs/reference/
+ *  compute-unit-costs, read 26 Nov), so the day never passes its CU (only EVM URLs map to it: rpc.ts keyedPaces). */
 export const KEYED_COST: Readonly<Record<KeyedProvider, Readonly<Record<"evm" | "solana" | "near", number>>>> = {
   quicknode: { evm: 20, solana: 30, near: 20 },
   drpc: { evm: 20, solana: 20, near: 20 },
   fastnear: { evm: 1, solana: 1, near: 1 },
+  alchemy: { evm: 60, solana: 60, near: 60 },
 };
 /** The environment name of a company's daily budget (KEYED_DAY), a non-secret whole number of its units. */
 export const keyedDayEnv = (p: KeyedProvider): string => `RPC_DAY_${p.toUpperCase()}`;

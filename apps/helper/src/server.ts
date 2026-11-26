@@ -907,7 +907,7 @@ export function handler(
           // in the standard Server-Timing header, 429 and 503 included; card helper-serves-many-users-at-once: the
           // chain's budget in the IETF RateLimit-Policy field (rpc.ts policyOf), every answer of a known chain
           .then((a) => {
-            const policy = rpc.policyOf?.(chain);
+            const policy = rpc.policyOf?.(chain, mode);
             const extra: Headers = { ...("timing" in a && Array.isArray(a.timing) ? { "Server-Timing": (a.timing as string[]).join(", ") } : {}), ...(policy === undefined ? {} : { "RateLimit-Policy": policy }) };
             return reply(Object.keys(extra).length === 0 ? a : { ...a, headers: { ...(a as { headers?: Headers }).headers, ...extra } });
           })
