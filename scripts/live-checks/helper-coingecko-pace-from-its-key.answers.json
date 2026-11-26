@@ -1,0 +1,18 @@
+{
+ "about": "Card helper-coingecko-pace-from-its-key. bad: read from the live helper 26 Nov 03:3xZ (helper 245, a3f1b2f7c, before the card): GET /v1/health answers 200 with no X-Helper-Coingecko-Pace header. good: not read live (no deployed helper has the card yet): the header as the card's code writes it for the helper's key (data/coingecko.ts coingeckoNamed on /key's Basic, 300 a minute, 100,000 a month, the settings at 100), shaped as read() records it, its commit a placeholder; the test holds it to coingeckoNamed's own output. The first deploy's live run with --record replaces it.",
+ "good": {
+  "base": "https://ct-api.unrealized.trade",
+  "status": 200,
+  "headers": {
+   "x-helper-coingecko-pace": "300 a minute, 3225 a day, from the key's plan Basic (the settings say 100)",
+   "x-helper-commit": "0000000000000000000000000000000000000000"
+  }
+ },
+ "bad": {
+  "base": "https://ct-api.unrealized.trade",
+  "status": 200,
+  "headers": {
+   "x-helper-commit": "a3f1b2f7c5d5dba684bdc0e6a7d1188802c0d39f"
+  }
+ }
+}

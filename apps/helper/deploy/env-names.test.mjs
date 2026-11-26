@@ -18,7 +18,7 @@ import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { checkVendorPlans, createProxy } from "../src/proxy/proxy.ts";
 import { createRpc, keyedPaces } from "../src/rpc/rpc.ts";
-import { coingeckoPace, createKeyed } from "../src/data/coingecko.ts";
+import { coingeckoNamed, coingeckoPace, coingeckoPlan, createKeyed } from "../src/data/coingecko.ts";
 import { providerHolds } from "../src/limits/limits.ts";
 import { bindSenderFromEnv } from "../src/bind/env.ts";
 import { pairNames, tokenWatchesFromEnv } from "../src/token-status/status.ts";
@@ -87,6 +87,10 @@ export const ENV_READERS = {
   // card helper-candles-keyed-gt: CoinGecko's key and its rate, read with a planted key present so the rate is read too
   coingeckoPace: (env) => coingeckoPace(new Proxy(env, { get: (t, k) => (t[k], k === "COINGECKO_API_KEY" ? "CG-plantedTESTkey0123456789abcdef" : k === "COINGECKO_CALLS_PER_MIN" ? "300" : t[k]) })),
   createKeyed: (env) => createKeyed(env, providerHolds(Date.now, {})),
+  // card helper-coingecko-pace-from-its-key: the start's /key read (its key read before any await; this file's fetch
+  // refuses the read, so it answers null) and the pace's name for /v1/health, each with the planted key present
+  coingeckoPlan: (env) => void coingeckoPlan(new Proxy(env, { get: (t, k) => (t[k], k === "COINGECKO_API_KEY" ? "CG-plantedTESTkey0123456789abcdef" : t[k]) })),
+  coingeckoNamed: (env) => coingeckoNamed(new Proxy(env, { get: (t, k) => (t[k], k === "COINGECKO_API_KEY" ? "CG-plantedTESTkey0123456789abcdef" : k === "COINGECKO_CALLS_PER_MIN" ? "300" : t[k]) }), null),
   tokenWatchesFromEnv,
   // card near-pair-on-keyed-providers: /v1/health's X-Helper-Near-Pair, the agreement pair's names
   pairNames,

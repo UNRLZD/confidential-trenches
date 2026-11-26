@@ -41,7 +41,7 @@ import { createGoPlus } from "./data/goplus.ts";
 import { nearAccount } from "./data/near/views.ts";
 import { geckoBudget, GT_LIMIT_PER_MIN, type GeckoBudget } from "./data/gecko.ts";
 import { AHEAD_TICK_MS, CANDLES_MAX, createSolanaToken, type DataAnswer } from "./data/solana/token.ts";
-import { coingeckoPace, createKeyed, type Keyed } from "./data/coingecko.ts";
+import { coingeckoNamed, coingeckoPace, coingeckoPlan, createKeyed, type Keyed } from "./data/coingecko.ts";
 import { createSolanaTrades, TRADES_RPCS, type SolanaTrades } from "./data/solana/trades.ts";
 import { health, releaseOf, type Part } from "./health.ts";
 import { checkVendorPlans, createProxy, PROXY_BODY_MAX } from "./proxy/proxy.ts";
@@ -102,6 +102,11 @@ export const STARTED_HEADER = "X-Helper-Started";
  *  "<chain> books held <n> restored <m>" per EVM chain and "solana tapes held <n> restored <m>", counts only, never a
  *  coin. The handover live check fails a deploy whose warm file held books this process did not restore. */
 export const HANDOVER_HEADER = "X-Helper-Handover";
+/** GET /v1/health's header naming CoinGecko's pace (card helper-coingecko-pace-from-its-key; data/coingecko.ts
+ *  coingeckoNamed): "<n> a minute, <d> a day, from the key's plan <name>" when the start read the key's plan, "... from the
+ *  settings" when it could not, "none" with no key; never the key. Its live check fails a deploy that paces from the
+ *  settings. */
+export const CG_PACE_HEADER = "X-Helper-Coingecko-Pace";
 /** The HANDOVER_HEADER value of a server's market parts (each part's handover(); one without it is not named). */
 export function handoverNamed(swaps: Swaps): string {
   const named: string[] = [];
@@ -340,6 +345,8 @@ export function handler(
   // card helper-answers-through-a-burst: whether the loop is past its capacity now, when market data is shed; start()
   // passes the process's own (limits/loop-busy.ts loopShed), so a test's handler sheds only when it asks to
   shed: () => boolean = () => false,
+  // card helper-coingecko-pace-from-its-key: CoinGecko's pace as the start set it, named on /v1/health in CG_PACE_HEADER
+  cgPace = "none",
 ) {
   if (!SHA.test(commit)) throw new Error("HELPER_COMMIT must be a full 40-hex commit");
   // card helper-id-intents: a mainnet withdrawal that landed to an arming account A makes A a seen signer on POST
@@ -470,7 +477,7 @@ export function handler(
         const period = epochStartOf(now());
         const fees = [...evmPools.values()].filter((p) => isMainnetEvm(p.network)).map((p) => ({ network: p.network, fee: p.feeNow(period) })).sort((x, y) => (x.network < y.network ? -1 : 1));
         const named = fees.map((f) => `${f.network} ${f.fee === null ? "none" : String(f.fee)}`).join(", ");
-        return send(200, health(commit, SERVED, release, ready() && fees.every((f) => f.fee !== null), solana(), rpc.keyed(), bind.carried?.() ?? {}), { ...cors(req), [NEAR_PAIR_HEADER]: nearPair.join(", "), [STARTED_HEADER]: String(STARTED_MS), [POOL_FEES_HEADER]: named, [HANDOVER_HEADER]: handoverNamed(evmSwaps) });
+        return send(200, health(commit, SERVED, release, ready() && fees.every((f) => f.fee !== null), solana(), rpc.keyed(), bind.carried?.() ?? {}), { ...cors(req), [NEAR_PAIR_HEADER]: nearPair.join(", "), [STARTED_HEADER]: String(STARTED_MS), [POOL_FEES_HEADER]: named, [HANDOVER_HEADER]: handoverNamed(evmSwaps), [CG_PACE_HEADER]: cgPace });
       }
       if (path === TOKEN_STATUS) {
         if (req.method !== "GET" && req.method !== "HEAD") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "GET, HEAD, OPTIONS" });
@@ -1431,12 +1438,12 @@ export function listenAt(port: number): { port: number; host?: string; backlog: 
  */
 export const LISTEN_BACKLOG = 4_096;
 
-export function start(commit: string, port: number, proxy?: Proxy, rpc?: Rpc, watches?: TokenWatches, lists?: Lists, fee?: Fee, withdraw?: WithdrawSender, token?: Token, bind?: BindSender, pools?: ReadonlyMap<string, SolanaPoolSender>, evmLists?: EvmLists, evmSwaps?: Swaps, ready?: () => boolean, senders: Promise<unknown> = Promise.resolve(), solana?: () => Partial<Record<SlotName, SlotState>>, release?: number | null, evmPools?: ReadonlyMap<string, EvmPoolSender>, evmTokens?: EvmTokens, held?: Held, near?: NearMarket, poolIndexes?: Partial<Record<"base" | "robinhood", Pick<PoolIndex, "pools">>>, shed: () => boolean = loopShed): Server {
+export function start(commit: string, port: number, proxy?: Proxy, rpc?: Rpc, watches?: TokenWatches, lists?: Lists, fee?: Fee, withdraw?: WithdrawSender, token?: Token, bind?: BindSender, pools?: ReadonlyMap<string, SolanaPoolSender>, evmLists?: EvmLists, evmSwaps?: Swaps, ready?: () => boolean, senders: Promise<unknown> = Promise.resolve(), solana?: () => Partial<Record<SlotName, SlotState>>, release?: number | null, evmPools?: ReadonlyMap<string, EvmPoolSender>, evmTokens?: EvmTokens, held?: Held, near?: NearMarket, poolIndexes?: Partial<Record<"base" | "robinhood", Pick<PoolIndex, "pools">>>, shed: () => boolean = loopShed, cgPace?: string): Server {
   const server = createServer(
     // Caddy keeps its upstream connections idle for 30 s (deploy/Caddyfile); ours outlive that, so no reused
     // connection is closed under a request
     { headersTimeout: 10_000, requestTimeout: 15_000, keepAliveTimeout: 65_000 },
-    handler(commit, proxy, rpc, watches, lists, fee, withdraw, token, bind, release, pools, evmPools, undefined, evmLists, evmSwaps, ready, senders, solana, undefined, evmTokens, held, undefined, undefined, near, undefined, poolIndexes, shed),
+    handler(commit, proxy, rpc, watches, lists, fee, withdraw, token, bind, release, pools, evmPools, undefined, evmLists, evmSwaps, ready, senders, solana, undefined, evmTokens, held, undefined, undefined, near, undefined, poolIndexes, shed, cgPace),
   );
   // card market-data-push: the push socket, upgraded for APP_HOST's Origin only, in its own window per client
   attachPush(server, { commit, readers: pushReaders(evmSwaps, near), allowed: (req) => originIn(req, PUSH_ORIGINS) !== null, client: clientOf, take: clientWindow(API_RATE_MAX).take });
@@ -1515,7 +1522,12 @@ if (import.meta.main) {
     // in the store and shared with the helper this one replaces (limits/day-spend.ts, review H1)
     // card helper-candles-keyed-gt: CoinGecko's keyed on-chain API (data/coingecko.ts) is one more paced account, its day
     // kept in the same day files
-    const holds = providerHolds(undefined, { ...PROVIDER_PACE, ...keyedPaces(process.env), ...coingeckoPace(process.env) }, dayFiles(storeDir, id));
+    // card helper-coingecko-pace-from-its-key: its rate and month as CoinGecko names the key's plan now (GET /api/v3/key,
+    // one call a start), the settings' rate and CG_DAY when it cannot say within CG_PLAN_TIMEOUT_MS
+    const cgPlan = await coingeckoPlan(process.env);
+    const cgNamed = coingeckoNamed(process.env, cgPlan);
+    console.log(`helper: coingecko pace ${cgNamed}`);
+    const holds = providerHolds(undefined, { ...PROVIDER_PACE, ...keyedPaces(process.env), ...coingeckoPace(process.env, cgPlan) }, dayFiles(storeDir, id));
     // every chart's read asks CoinGecko's keyed API first when COINGECKO_API_KEY is set; none set, null: every read keyless
     const keyed = createKeyed(process.env, holds);
     // an EVM chain's callers may be answered by the swap reads' pinned providers when its own is held or has no room
@@ -1659,7 +1671,7 @@ if (import.meta.main) {
         .catch((e: Error) => console.error(`helper: pool index stopped: ${e.message}`));
     }
     const listen = () => {
-      server = start(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists, swaps, ready, senders.held, () => Object.fromEntries([...slots].map(([k, v]) => [k, v.state()])), release, evmPools, evmTokens, held, near, poolIndexes ?? undefined); // warms both relayers once the senders are ours
+      server = start(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists, swaps, ready, senders.held, () => Object.fromEntries([...slots].map(([k, v]) => [k, v.state()])), release, evmPools, evmTokens, held, near, poolIndexes ?? undefined, undefined, cgNamed); // warms both relayers once the senders are ours
       drain = drainer(server);
       server.on("listening", () => console.log(`helper: listening on ${port}, commit ${commit}${ready() ? "" : ", warming"}`));
     };

@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, test } from "node:test";
-import { CG_BLIP_HOLD_S, CG_DAY, CG_DOWN_HOLD_S, CG_ONCHAIN, CG_URL, coingeckoPace, createKeyed } from "./data/coingecko.ts";
+import { CG_BLIP_HOLD_S, CG_DAY, CG_DOWN_HOLD_S, CG_ONCHAIN, CG_URL, coingeckoNamed, coingeckoPace, coingeckoPlan, createKeyed } from "./data/coingecko.ts";
 import { geckoBudget } from "./data/gecko.ts";
 import { createSolanaToken, GT_BASE } from "./data/solana/token.ts";
 import { providerHolds } from "./limits/limits.ts";
@@ -67,6 +67,60 @@ test("the pace: the key's rate less a tenth, a tenth of it at once and never pas
   assert.throws(() => coingeckoPace({ COINGECKO_API_KEY: "short", COINGECKO_CALLS_PER_MIN: "300" }), (e: Error) => /^COINGECKO_API_KEY is not an API key/.test(e.message) && !e.message.includes("short"));
   assert.throws(() => coingeckoPace({ COINGECKO_API_KEY: `${KEY} x`, COINGECKO_CALLS_PER_MIN: "300" }), (e: Error) => !e.message.includes(KEY));
   assert.equal(createKeyed({}, providerHolds(Date.now, {})), null, "no key: no keyed reads");
+});
+
+// card helper-coingecko-pace-from-its-key: the start reads the key's plan from CoinGecko (GET /api/v3/key) and paces at
+// its rate and month, whatever COINGECKO_CALLS_PER_MIN copied from the same read on 13 Nov (the deployed helper served
+// about 88 a minute in the 26 Nov 01:16Z burst, the bucket a setting of 100 builds, while our key's /key answers 300).
+// Red at 0ba510633: there is no plan read, the pace is the setting's.
+test("card helper-coingecko-pace-from-its-key: the pace is the key's plan as CoinGecko names it at start, the settings only when it cannot say", async () => {
+  const env100 = { COINGECKO_API_KEY: KEY, COINGECKO_CALLS_PER_MIN: "100" };
+  const asked: { url: string; init: RequestInit }[] = [];
+  const answering = (body: unknown, status = 200) => async (url: string, init: RequestInit) => (asked.push({ url, init }), typeof body === "string" ? new Response(body, { status }) : json(body, status));
+  const basic = { plan: "Basic", rate_limit_request_per_minute: 300, monthly_call_credit: 100_000, current_total_monthly_calls: 38_303, current_remaining_monthly_calls: 61_697 };
+  const plan = await coingeckoPlan(env100, { fetch: answering(basic) });
+  assert.deepEqual(plan, { plan: "Basic", perMin: 300, month: 100_000 });
+  // the key only in the request's header, to CoinGecko's /key, redirects refused, the read bounded
+  assert.equal(asked.length, 1);
+  assert.equal(asked[0]!.url, `${CG_URL}/api/v3/key`);
+  assert.equal(new Headers(asked[0]!.init.headers).get("x-cg-pro-api-key"), KEY);
+  assert.equal(asked[0]!.init.redirect, "error");
+  assert.ok(asked[0]!.init.signal instanceof AbortSignal);
+  assert.ok(!asked[0]!.url.includes(KEY));
+  const p = coingeckoPace(env100, plan)[CG_URL]!;
+  assert.deepEqual({ ...p, perS: Math.round(p.perS * 60) }, { perS: 243, burst: 27, unit: "call", group: "coingecko", day: 3_225 }, "the key's 300, not the setting's 100");
+  const s = coingeckoPace(env100)[CG_URL]!;
+  assert.deepEqual({ ...s, perS: Math.round(s.perS * 60) }, { perS: 81, burst: 9, unit: "call", group: "coingecko", day: CG_DAY }, "no plan read: the setting's 100, as before");
+  assert.equal(coingeckoNamed(env100, plan), "300 a minute, 3225 a day, from the key's plan Basic (the settings say 100)");
+  assert.equal(coingeckoNamed(ENV, plan), "300 a minute, 3225 a day, from the key's plan Basic");
+  assert.equal(coingeckoNamed(env100, null), "100 a minute, 3225 a day, from the settings");
+  assert.equal(coingeckoNamed({}, null), "none");
+  // a larger plan reaches the pace and the day with no settings edit (Analyst: 500 a minute, 500,000 a month)
+  const analyst = await coingeckoPlan(env100, { fetch: answering({ plan: "Analyst", api_key_rate_limit_request_per_minute: 500, rate_limit_request_per_minute: 300, monthly_call_credit: 500_000 }) });
+  const a = coingeckoPace(env100, analyst)[CG_URL]!;
+  assert.deepEqual({ burst: a.burst, perMin: Math.round(a.perS * 60), day: a.day }, { burst: 45, perMin: 405, day: 16_129 }, "the key's own rate first");
+  // no plan: no key or one the settings refuse (no call), a refusal, a timeout, a body it cannot read or bound
+  asked.length = 0;
+  assert.equal(await coingeckoPlan({}, { fetch: answering(basic) }), null);
+  assert.equal(await coingeckoPlan({ COINGECKO_API_KEY: "short", COINGECKO_CALLS_PER_MIN: "100" }, { fetch: answering(basic) }), null);
+  assert.equal(asked.length, 0, "no key, no call");
+  for (const [why, f] of [
+    ["401", answering({ status: { error_code: 401 } }, 401)],
+    ["500", answering(basic, 500)],
+    ["a timeout", async () => { throw new DOMException("timed out", "TimeoutError"); }],
+    ["not JSON", answering("<html>")],
+    ["JSON null", answering("null")],
+    ["no rate", answering({ ...basic, rate_limit_request_per_minute: undefined })],
+    ["a rate of 0", answering({ ...basic, rate_limit_request_per_minute: 0 })],
+    ["a rate as text", answering({ ...basic, rate_limit_request_per_minute: "300" })],
+    ["a rate past the settings' bound", answering({ ...basic, rate_limit_request_per_minute: 1_000_000 })],
+    ["a fractional month", answering({ ...basic, monthly_call_credit: 100_000.5 })],
+    ["no month", answering({ ...basic, monthly_call_credit: undefined })],
+    ["a body past its bound", answering(JSON.stringify({ ...basic, pad: "x".repeat(70_000) }))],
+  ] as const) assert.equal(await coingeckoPlan(env100, { fetch: f as never }), null, why);
+  // a plan name that is not a plain name is never carried into a header
+  const odd = await coingeckoPlan(env100, { fetch: answering({ ...basic, plan: "Basic\r\nX-Evil: 1" }) });
+  assert.equal(odd?.plan, "?");
 });
 
 test("Solana, keyed: a cold chart's top pool and bars are CoinGecko's, the key in the header alone, src coingecko, no GeckoTerminal call", async () => {
