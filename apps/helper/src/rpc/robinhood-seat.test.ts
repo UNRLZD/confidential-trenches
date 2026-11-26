@@ -86,7 +86,7 @@ test("every caller's seat reads in 10 s together stop at the seat's total, half 
 });
 
 test("a seat answer's RateLimit-Policy names the seat's own budget (its total and SEAT_SHARE), the route's answers keep the route's", () => {
-  const r = createRpc(KEYS, { log: () => undefined });
+  const r = createRpc(KEYS, { now: () => DAY_MS, log: () => undefined });
   const policyOf = r.policyOf as (chain: string, mode?: unknown) => string | undefined;
   const pace = L.KEYED_PACE.alchemy;
   assert.ok(pace !== undefined);
