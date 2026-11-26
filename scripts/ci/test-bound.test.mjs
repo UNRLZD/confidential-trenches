@@ -87,6 +87,48 @@ test("a process a test leaves behind holding the run's output is stopped at the 
     assert.equal(r.timedOut, false, "the run is still going at 60 s");
     assert.equal(r.signal, "SIGKILL", "the run's own process stopped by its watch");
     assert.ok(r.stderr.includes(`test-bound: the test run still running at its bound (${2 * FILE_MS} ms), stopped: ${path.join(ROOT, "packages/wallet")}`), r.stderr);
+    // card ci-kit-shard-never-stalls-silent: the stop names the process that held the output, by its command
+    assert.ok(r.stderr.includes("test-bound: its group's processes at the stop (pid ppid stat elapsed wchan command):\n"), r.stderr);
+    assert.match(r.stderr, /^test-bound: {3}\d+ \d+ \S+ \S+ \S+ \S*node -e setInterval\(\(\) => \{\}, 1000\)$/m, r.stderr);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Card ci-kit-shard-never-stalls-silent: merge queue run 45744571533 (job 139657420490) stopped the kit's run at the job's
+// deadline after 742 s with no line but the run's own: no file named, and nothing said whether a file was still running
+// or the runner was held. The run's stop now lists its group's processes (the runner, each file's process, any process
+// they started) with state, elapsed and wait channel, so a stall names what held it. Red at 0ba510633: no list.
+test("a run stopped at its bound lists its group's processes, the file still running named by its path", async () => {
+  const dir = plant();
+  try {
+    const { flags } = packages().find((p) => p.dir === "packages/wallet");
+    const top = path.join(dir, "top.test.mjs");
+    // the file's own bound left at FILE_MS (900 s), the run's at 2 * this file's FILE_MS: the run's stop comes first
+    const r = await run(process.execPath, ["--test", ...flags, top], { cwd: path.join(ROOT, "packages/wallet"), env: { ...ENV, TEST_BOUND_RUN_MS: String(2 * FILE_MS) }, timeoutMs: 60_000 });
+    assert.equal(r.timedOut, false, "the run is still going at 60 s");
+    assert.equal(r.signal, "SIGKILL", "the run's own process stopped by its watch");
+    assert.ok(r.stderr.includes(`test-bound: the test run still running at its bound (${2 * FILE_MS} ms), stopped: ${path.join(ROOT, "packages/wallet")}`), r.stderr);
+    const rows = r.stderr.split("\n").filter((l) => /^test-bound: {3}\d/.test(l));
+    // the file's process names its file at its command's end, past node's own flags, whatever their length
+    assert.ok(rows.some((l) => l.endsWith(top) && !/ --test( |$)/.test(l)), `the hung file's process named by its path\n${r.stderr}`);
+    assert.ok(rows.every((l) => l.length <= "test-bound:   ".length + 80 + 300), `each row bounded\n${r.stderr}`);
+    assert.ok(!rows.some((l) => / ps -A -o /.test(l)), `the list's own ps left out\n${r.stderr}`);
+    assert.ok(rows.some((l) => / --test /.test(l)), `the runner itself listed\n${r.stderr}`);
+    assert.ok(rows.every((l) => /^test-bound: {3}\d+ \d+ \S+ [0-9:-]+ \S+ /.test(l)), `each row pid, ppid, state, elapsed, wait channel, command\n${r.stderr}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a run whose group cannot be listed (no ps) says so, and its stop still lands", async () => {
+  const dir = plant();
+  try {
+    const { flags } = packages().find((p) => p.dir === "packages/wallet");
+    const r = await run(process.execPath, ["--test", ...flags, path.join(dir, "top.test.mjs")], { cwd: path.join(ROOT, "packages/wallet"), env: { ...ENV, PATH: dir, TEST_BOUND_RUN_MS: String(2 * FILE_MS) }, timeoutMs: 60_000 });
+    assert.equal(r.timedOut, false, "the run is still going at 60 s");
+    assert.equal(r.signal, "SIGKILL", "the stop landed with no list");
+    assert.match(r.stderr, /^test-bound: its processes could not be listed \(ps: ENOENT\)$/m, r.stderr);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

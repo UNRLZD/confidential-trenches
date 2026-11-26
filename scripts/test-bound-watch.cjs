@@ -6,6 +6,9 @@
 // mocked clock, cannot hold it, and an unref'd worker never keeps a process alive.
 const { isMainThread, Worker } = require("node:worker_threads");
 const { DEADLINE_GRACE_MS, FILE_MS, RUN_MS } = require("./test-bound.mjs");
+/** The bound on the run's stop listing its group (ps). [design: 5 s, a quarter of DEADLINE_GRACE_MS, so the list and
+ *  the kill land inside the job's limit; ps itself answers in well under a second] */
+const PS_MS = 5_000;
 
 // Card readme-run-fits-an-agent-timeout: node's own compile cache, in the run's process, each file's and every node
 // process a test starts (they inherit NODE_COMPILE_CACHE). A run is about 700 file processes, each compiling and
@@ -29,22 +32,46 @@ const lower = (name, ms) => {
   return Number.isInteger(v) && v > 0 && v < ms ? v : ms;
 };
 
+// Card ci-kit-shard-never-stalls-silent: the run's stop lists every process of the run's group (the runner, each test
+// file's process and any process they started, which keeps the group when its parent ends) with its state and what it
+// waits on, read by ps (the same keywords on Linux and macOS). Merge queue run 45744571533 (job 139657420490) stopped the
+// kit's run at the job's deadline after 742 s with no line, and nothing read said whether a file was still running (none
+// was named stopped at the deadline, 20 s before the run) or the runner itself was held. The list is bounded (PS_MS) and
+// never holds the kill.
 const WATCH = `
 const { workerData: w } = require("node:worker_threads");
 const { writeSync } = require("node:fs");
+const say = (t) => { try { writeSync(2, t); } catch {} };
 setTimeout(() => {
-  try { writeSync(2, "\\ntest-bound: " + w.what + " still running at " + w.at + ", stopped: " + w.name + "\\n"); } catch {}
+  say("\\ntest-bound: " + w.what + " still running at " + w.at + ", stopped: " + w.name + "\\n");
+  if (w.list) say(groupList(w.pid));
   process.kill(w.pid, "SIGKILL");
 }, w.ms);
+function groupList(pid) {
+  let rows;
+  try {
+    const out = require("node:child_process").execFileSync("ps", ["-A", "-o", "pid=,ppid=,pgid=,stat=,etime=,wchan=,command="], { encoding: "utf8", timeout: ${PS_MS}, maxBuffer: 1 << 24, stdio: ["ignore", "pipe", "ignore"] });
+    rows = out.split("\\n").map((l) => l.trim().split(/\\s+/)).filter((r) => r.length >= 7 && /^\\d+$/.test(r[0]));
+  } catch (e) {
+    return "test-bound: its processes could not be listed (ps: " + String(e && (e.code || e.message)).slice(0, 80) + ")\\n";
+  }
+  const own = rows.find((r) => r[0] === String(pid));
+  // the group but this list's own ps; a command's end kept, where a test file's process names its file (node puts the
+  // runner's flags first and the file last)
+  const group = own === undefined ? [] : rows.filter((r) => r[2] === own[2] && !(r[6] === "ps" && r[7] === "-A"));
+  const tail = (c) => (c.length > 300 ? "..." + c.slice(-297) : c);
+  return "test-bound: its group's processes at the stop (pid ppid stat elapsed wchan command):\\n" + group.map((r) => "test-bound:   " + r.slice(0, 2).join(" ") + " " + r.slice(3, 6).join(" ") + " " + tail(r.slice(6).join(" ")) + "\\n").join("");
+}
 `;
 
 /** Stops this process at its bound `ms`, or at the job's deadline (TEST_BOUND_DEADLINE, plus `grace`) when that comes
- *  first, printing which and `name`. A deadline that is not a whole number of ms since the epoch is ignored. */
-function arm(ms, grace, what, name) {
+ *  first, printing which and `name`, and with `list` its group's processes. A deadline that is not a whole number of ms
+ *  since the epoch is ignored. */
+function arm(ms, grace, what, name, list = false) {
   const d = Number(process.env.TEST_BOUND_DEADLINE);
   const left = Number.isSafeInteger(d) && d > 0 ? Math.max(1, d + grace - Date.now()) : Infinity;
   const at = left < ms ? { ms: left, at: "the job's deadline" } : { ms, at: `its bound (${ms} ms)` };
-  new Worker(WATCH, { eval: true, workerData: { pid: process.pid, ...at, what, name }, stdout: false, stderr: false }).unref();
+  new Worker(WATCH, { eval: true, workerData: { pid: process.pid, ...at, what, name, list }, stdout: false, stderr: false }).unref();
 }
 
 // Card test-count-never-short: stdout and stderr written in full before any exit. On macOS a pipe is written
@@ -64,4 +91,4 @@ if (reporting) for (const s of [process.stdout, process.stderr]) if (s._handle &
 // a test file's own process (the runner starts each with NODE_TEST_CONTEXT set), or the run's (node --test itself); a
 // worker thread (a test's own, which inherits --require, or this watch) arms nothing: its process is watched already
 if (isMainThread && process.env.NODE_TEST_CONTEXT !== undefined) arm(lower("TEST_BOUND_FILE_MS", FILE_MS), 0, "the test file", process.argv[1] ?? "?");
-else if (isMainThread && process.execArgv.includes("--test")) arm(lower("TEST_BOUND_RUN_MS", RUN_MS), DEADLINE_GRACE_MS, "the test run", process.cwd());
+else if (isMainThread && process.execArgv.includes("--test")) arm(lower("TEST_BOUND_RUN_MS", RUN_MS), DEADLINE_GRACE_MS, "the test run", process.cwd(), true);
