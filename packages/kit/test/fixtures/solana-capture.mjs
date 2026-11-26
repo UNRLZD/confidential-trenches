@@ -1,10 +1,12 @@
 // Captures the recorded answers for test/solana-quote.test.ts: two real Solana swaps the G1 phone proof built on the
 // device and landed (one buy, one sell; signatures from the research repo's
-// proofs/g1-phone-trade/results/live-2026-10-26T11-29-51-268Z.json, results[0] and results[1]), read back keyless from
-// two public RPCs, with the lookup table and the mint they use. Nothing is signed, sent or keyed: reads only.
+// proofs/g1-phone-trade/results/live-2026-10-26T11-29-51-268Z.json, results[0] and results[1]), read back on two RPCs,
+// with the lookup table and the mint they use. Nothing is signed or sent: reads only. The second is the helper's
+// /v1/rpc/solana since card solana-tools-drop-the-dead-provider (Solana Vibe Station refuses every connection since 24
+// Nov; PublicNode and Pocket answer these October transactions null, past their history, 26 Nov 07:38Z).
 //   node packages/kit/test/fixtures/solana-capture.mjs > packages/kit/test/fixtures/solana-swaps.json
 import { solanaDecodeTransaction } from "../../src/checks/solana/message.ts";
-const RPCS = ["https://api.mainnet-beta.solana.com", "https://public.rpc.solanavibestation.com"];
+const RPCS = ["https://api.mainnet-beta.solana.com", "https://ct-api.unrealized.trade/v1/rpc/solana"];
 const TRADES = [
   // results[0]: buy 9874873 lamports of the token, quote minOut 46256353721
   { side: "buy", sig: "2btTg7crbv6EL6DJtpNo67Vv9J2vioFHz4uMTuHR2hrWnJMumu7PQb9gYQwToV3ac55LGw418hL28JvChi8oc4Rv", amount: "9874873", minOut: "46256353721" },

@@ -160,7 +160,9 @@ for (const k of KINDS) {
         // every pool the page would find, each read for a buy and for a sell (a pool that refuses is left out)
         const { venue, find } = SCANNED[k];
         mainnetReads += 4;
-        const pools = await find([main[0], paced("https://public.rpc.solanavibestation.com")], main, c.mint);
+        // the scan pair: Solana's public RPC and the helper's /v1/rpc/solana, both answering the scans from the Mac (card
+        // solana-tools-drop-the-dead-provider: Solana Vibe Station, asked before, refuses every connection since 24 Nov)
+        const pools = await find([main[0], paced("https://ct-api.unrealized.trade/v1/rpc/solana")], main, c.mint);
         const read = [];
         for (const pool of pools) {
           try {

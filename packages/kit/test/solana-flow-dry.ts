@@ -85,10 +85,12 @@ const recorded = (rpc: SolanaRpc, at: string): SolanaRpc => async (method, param
 const a = recorded(patient(solanaJsonRpc(PROVIDER_A, { timeoutMs: 15_000 }), "A"), "A");
 const b = recorded(patient(solanaHelperRpc(HELPER, { timeoutMs: 15_000 }), "B"), "B");
 const providers = [a, b] as const;
-// Finding the stand-ins only (no check reads these): Solana's public RPC, then Solana Vibe Station's for
-// getTokenLargestAccounts, which PublicNode and the helper do not answer.
+// Finding the stand-ins only (no check reads these): Solana's public RPC, then the helper's for getTokenLargestAccounts,
+// which PublicNode refuses (403 "Indexed requests require a personal token") and Solana's public RPC rations (429 "Too
+// many requests for a specific RPC call"); the helper answered it with 20 accounts (26 Nov 07:38Z, card
+// solana-tools-drop-the-dead-provider: Solana Vibe Station, asked before, refuses every connection since 24 Nov).
 const find = patient(solanaJsonRpc("https://api.mainnet-beta.solana.com", { timeoutMs: 15_000 }), "find");
-const findLargest = patient(solanaJsonRpc("https://public.rpc.solanavibestation.com", { timeoutMs: 15_000 }), "find");
+const findLargest = patient(solanaHelperRpc(HELPER, { timeoutMs: 15_000 }), "find");
 type Info = { owner: string; lamports: number; data: [string, string] } | null;
 const many = async (keys: string[]) => ((await find("getMultipleAccounts", [keys, { encoding: "base64", commitment: "confirmed" }])) as { value: Info[] }).value;
 

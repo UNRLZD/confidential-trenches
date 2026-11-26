@@ -42,8 +42,7 @@ function fakeFetch(status: (url: string) => number = () => 200) {
 const call = (r: ReturnType<typeof createRpc>, chain: string, body: unknown) => r.handle(chain, "application/json", JSON.stringify(body));
 // card solana-marks-route-answers: route B's keyless providers (rpc.ts MARKS_KEYLESS), after its keyed names
 const FOUNDATION = "https://api.mainnet-beta.solana.com";
-const SVS = "https://public.rpc.solanavibestation.com";
-const KEYLESS = [FOUNDATION, SVS];
+const KEYLESS = [FOUNDATION];
 const ENV = { SOLANA_RPC_URL: A, SOLANA_RPC_URL_QUICKNODE: QN, SOLANA_RPC_URL_DRPC_1: DRPC, POOL_SOLANA_PROGRAM_MAINNET: PROGRAM };
 
 test("solana-marks is a route of its own whose only method is getProgramAccounts", () => {
@@ -263,8 +262,8 @@ test("a spent route A with no other keyed company left for route B: QuickNode ta
   const lines = await checkMarksRoute({ SOLANA_RPC_URL: A, SOLANA_RPC_URL_QUICKNODE: QN, POOL_SOLANA_PROGRAM_MAINNET: PROGRAM }, ok.f, t.sleep);
   assert.ok(lines.some((l) => /route A: SOLANA_RPC_URL_QUICKNODE; route B: SOLANA_MARKS_FOUNDATION/.test(l)), lines.join("\n"));
   const down = new Response("busy", { status: 503 });
-  const { f } = scripted({ [A]: () => SPENT_429(), [FOUNDATION]: () => down.clone(), [SVS]: () => down.clone() });
-  await assert.rejects(checkMarksRoute({ SOLANA_RPC_URL: A, SOLANA_RPC_URL_QUICKNODE: QN, POOL_SOLANA_PROGRAM_MAINNET: PROGRAM }, f, t.sleep), (e: Error) => secretsIn([e.message]).length === 0 && /SOLANA_RPC_URL size 13: HTTP 429, its plan spent/.test(e.message) && /SOLANA_RPC_URL_QUICKNODE's route B, marks: SOLANA_MARKS_SVS size 13: HTTP 503/.test(e.message));
+  const { f } = scripted({ [A]: () => SPENT_429(), [FOUNDATION]: () => down.clone() });
+  await assert.rejects(checkMarksRoute({ SOLANA_RPC_URL: A, SOLANA_RPC_URL_QUICKNODE: QN, POOL_SOLANA_PROGRAM_MAINNET: PROGRAM }, f, t.sleep), (e: Error) => secretsIn([e.message]).length === 0 && /SOLANA_RPC_URL size 13: HTTP 429, its plan spent/.test(e.message) && /SOLANA_RPC_URL_QUICKNODE's route B, marks: SOLANA_MARKS_FOUNDATION size 13: HTTP 503/.test(e.message));
 });
 
 test("a short throttle on route A (429, no spent plan) is waited out, never a switch: the start check asks A again after its Retry-After", async () => {

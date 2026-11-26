@@ -8,7 +8,7 @@
 // past the 319,370 every draw but a probe may reach: the day was out until 00:00Z, spent mostly by the walks.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createRpc, keyedPaces } from "./rpc.ts";
+import { createRpc, keyedPaces, MARKS_KEYLESS } from "./rpc.ts";
 import { providerHolds } from "../limits/limits.ts";
 
 const PROGRAM = "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF";
@@ -95,9 +95,10 @@ test("ruled out: Base's background reads on a dRPC key hold its pace, and a mark
 // reach (232,410 of it by a helper whose plain reads fell onto QuickNode while SOLANA_RPC_URL's plan was spent), while
 // QuickNode itself answered the same scan 200. Two keyless companies answered the restore's exact scan from the box then
 // (api.mainnet-beta.solana.com and public.rpc.solanavibestation.com, 14 and 26 accounts, as QuickNode and Helius), so
-// route B walks on to them (rpc.ts MARKS_KEYLESS), each off route A's company as its keyed names are.
+// route B walks on to them (rpc.ts MARKS_KEYLESS), each off route A's company as its keyed names are. Card
+// solana-tools-drop-the-dead-provider: Solana Vibe Station refuses every connection since 24 Nov and left the list; the
+// Foundation's endpoint is route B's one keyless provider (Pocket answered the scan 2 of 8 asks, 26 Nov 07:04Z).
 const FOUNDATION = "https://api.mainnet-beta.solana.com";
-const SVS = "https://public.rpc.solanavibestation.com";
 const timingName = (t: string[] | undefined) => /rpc;[^,]*desc="([^"]+)"/.exec((t ?? []).join(", "))?.[1];
 
 test("QuickNode's day spent by callers: route B's next scan is answered by a keyless company off route A's, named (red at e8ea676e3: 503 at 0 ms)", async () => {
@@ -117,10 +118,14 @@ test("QuickNode's day spent by callers: route B's next scan is answered by a key
   assert.equal(timingName(a.timing), "SOLANA_MARKS_FOUNDATION");
 });
 
-test("route B's keyless providers walk in turn: a 429 or a JSON-RPC error from one asks the next; all refusing is 503, never route A", async () => {
+test("route B's keyless list is the Foundation's alone (card solana-tools-drop-the-dead-provider; red at 0b954dfe7: Solana Vibe Station, which refuses every connection, listed second)", () => {
+  assert.deepEqual(MARKS_KEYLESS, [{ name: "SOLANA_MARKS_FOUNDATION", url: FOUNDATION }]);
+});
+
+test("route B's keyless provider refusing with no keyed name left: its 429 is the caller's throttle, a JSON-RPC error 503, never route A", async () => {
   const env = { SOLANA_RPC_URL: A, POOL_SOLANA_PROGRAM_MAINNET: PROGRAM };
   const c = clock();
-  for (const refusal of [() => new Response("{}", { status: 429, headers: { "retry-after": "10", "content-type": "application/json" } }), (id: unknown) => new Response(JSON.stringify({ jsonrpc: "2.0", id, error: { code: -32010, message: "excluded from account secondary indexes" } }), { status: 200, headers: { "content-type": "application/json" } })]) {
+  for (const [want, refusal] of [[429, () => new Response("{}", { status: 429, headers: { "retry-after": "10", "content-type": "application/json" } })], [503, (id: unknown) => new Response(JSON.stringify({ jsonrpc: "2.0", id, error: { code: -32010, message: "excluded from account secondary indexes" } }), { status: 200, headers: { "content-type": "application/json" } })]] as const) {
     const sent: string[] = [];
     const f = async (url: string, init: RequestInit) => {
       sent.push(url);
@@ -129,13 +134,7 @@ test("route B's keyless providers walk in turn: a 429 or a JSON-RPC error from o
     };
     const r = createRpc(env, { fetch: f as never, now: c.now, sleep: c.sleep, log: () => undefined });
     const a = await r.handle("solana-marks", "application/json", JSON.stringify(SCAN), "198.51.100.9");
-    assert.equal(a.status, 200, `${a.status} ${a.body}`);
-    assert.deepEqual(sent, [FOUNDATION, SVS]);
-    assert.equal(timingName(a.timing), "SOLANA_MARKS_SVS");
+    assert.equal(a.status, want, `${a.status} ${a.body}`);
+    assert.deepEqual(sent, [FOUNDATION], "never route A's provider");
   }
-  const sent: string[] = [];
-  const down = async (url: string) => (sent.push(url), new Response("busy", { status: 503 }));
-  const r = createRpc(env, { fetch: down as never, now: c.now, sleep: c.sleep, log: () => undefined });
-  assert.equal((await r.handle("solana-marks", "application/json", JSON.stringify(SCAN), "198.51.100.9")).status, 503);
-  assert.deepEqual(sent, [FOUNDATION, SVS], "never route A's provider");
 });
