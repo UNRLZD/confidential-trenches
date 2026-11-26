@@ -1360,15 +1360,17 @@ export const MUTANTS = [
   [QUOTE, "readBoth(rpcs, block.hash, heldFirst, v.reads, undefined, firstDown)", "readBoth(rpcs, block.parentHash, heldFirst, v.reads, undefined, firstDown)", R, "W6c "],
   [QUOTE, "const droppable = (k: EvmPoolKey) => k.hooks !== NATIVE && (v.called.has(k.hooks) ||", "const droppable = (k: EvmPoolKey) => k.hooks !== NATIVE && (false ||", R, "W6d "],
   // card evm-quote-no-30s-head-wait: a request handed to the chain's last scan provider waits EVM_SCAN_LAST_MS at most
-  // (L1), its throttle stops the scan (L2), and only the last with providers before it is so bound (L1, L2)
-  [QUOTE, "    if (handOff && hedge === undefined) return sendLast(", "    if (false && hedge === undefined) return sendLast(", "test/evm-scan-last-provider.test.ts", "L1 "],
+  // (L5), its throttle stops the scan (L6), and only the last with providers before it is so bound (L5, L6). Each is
+  // judged with the first failing the blocks too (L5, L6): in L1 and L2 the first takes back what it passed over
+  // (card base-warm-quote-rides-a-stalled-last-scan), and all three passed them (sweep 45726510072, parts 6 and 7)
+  [QUOTE, "    if (handOff && hedge === undefined) return sendLast(", "    if (false && hedge === undefined) return sendLast(", "test/evm-scan-last-provider.test.ts", "L5 "],
   // card rh-scan-last-provider-case: the last provider's bound runs from the post leaving the device, past the kit's own
   // pace wait (L3: from the ask, the warm tap ends rpc_error at 4 s as on main), and all a scan hands it ends by
   // EVM_SCAN_LAST_WHOLE_MS (L4: without it the warm tap grinds on to 33.4 s)
   [QUOTE, "      return await Promise.race([rpc(calls, stop.signal, sent), bound]);", "      sent();\n      return await Promise.race([rpc(calls, stop.signal), bound]);", "test/evm-scan-last-provider.test.ts", "L3 "],
   [QUOTE, "    const carry = handedAt + EVM_SCAN_LAST_WHOLE_MS - now;", "    const carry = Infinity;", "test/evm-scan-last-provider.test.ts", "L4 "],
-  [QUOTE, '        if (handOff) throw new ScanStop("rpc_error", "the last scan provider limited its rate");\n', "", "test/evm-scan-last-provider.test.ts", "L2 "],
-  [QUOTE, "next === undefined ? 0 : next.span * next.parallel, next === undefined && i > 0)", "next === undefined ? 0 : next.span * next.parallel, false)", "test/evm-scan-last-provider.test.ts", "L1 "],
+  [QUOTE, '        if (handOff) throw new ScanStop("rpc_error", "the last scan provider limited its rate");\n', "", "test/evm-scan-last-provider.test.ts", "L6 "],
+  [QUOTE, "next === undefined ? 0 : next.span * next.parallel, next === undefined && i > 0)", "next === undefined ? 0 : next.span * next.parallel, false)", "test/evm-scan-last-provider.test.ts", "L5 "],
 ];
 // every mutant's name, in the order the parts take them
 export const NAMES = MUTANTS.map(([, find, , , t]) => `${find.split("\n")[0].slice(0, 70)} -> "${t}"`);

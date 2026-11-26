@@ -197,3 +197,25 @@ test("L4 every tap's first two refuse every post: the warm tap still ends inside
   assert.notEqual(r.out[2]!.outcome, "stale_quote", "the warm tap ran out its deadline");
   assert.ok(r.out[2]!.ms <= ENDS_WITHIN_MS, `the warm tap took ${r.out[2]!.ms} ms (${r.out[2]!.outcome})`);
 });
+
+// L1 and L2 with the first provider failing the blocks too: since card base-warm-quote-rides-a-stalled-last-scan, a
+// request the first passed over unsent (held or paced) is asked of it again once the last fails it, so L1 and L2 end
+// inside the bound by that ride, and the last provider's own bounds (its post's EVM_SCAN_LAST_MS and the hand-off's
+// stop at its 429) went untested: the nightly sweep on main 465ecc471 (run 45726510072, parts 6 and 7) found mutants
+// of all three passing L1 and L2. Here the first answers 503 to every getLogs, so no request comes back to it, and only
+// the last provider's bounds end the quote: rpc_error at 4.4 s (L5) and 0.4 to 1.5 s (L6); with the post's bound gone,
+// 60.2 s each (L5), and with the stop at the handed 429 gone, 57.4 to 58.5 s (L6).
+for (const [name, act] of [
+  ["L5 the first and daybreak answer 503 to every getLogs and Pocket, the last, never answers one it is handed", on({ [RH]: "503", [DAYBREAK]: "503", [POCKET]: "hang" })],
+  ["L6 the first and daybreak answer 503 to every getLogs and Pocket, the last, answers 429 to every one it is handed", on({ [RH]: "503", [DAYBREAK]: "503", [POCKET]: "429" })],
+] as [string, Act][]) {
+  test(`${name}: every quote ends inside the last provider's bound, never stale_quote`, { timeout: 300_000 }, async () => {
+    const r = await run(act);
+    console.log(`${name.split(" ")[0]}: ${JSON.stringify(r.out)}`);
+    assert.ok(r.acted.some((x) => x.includes(POCKET)), "the scan never handed Pocket a request");
+    for (const [k, q] of r.out.entries()) {
+      assert.notEqual(q.outcome, "stale_quote", `quote ${k} ran out its deadline`);
+      assert.ok(q.ms <= ENDS_WITHIN_MS, `quote ${k} took ${q.ms} ms (${q.outcome})`);
+    }
+  });
+}
