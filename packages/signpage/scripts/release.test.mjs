@@ -412,9 +412,11 @@ test("planted: a cut refuses a Base or Robinhood snapshot past its bound behind 
   assert.deepEqual({ ...LIVE_HEAD_SPREAD_MAX }, { ...SNAPSHOT_HEAD_SPREAD_MAX });
   assert.deepEqual(snapshotProblems(FRESH_SNAPSHOTS), []);
   assert.deepEqual(snapshotProblems(STALE_SNAPSHOTS), [
-    "base: its pool index snapshot is 810234 blocks behind the head 58861782 (at most 216000, 12 hours): run node packages/signpage/scripts/evm-index-snapshot.mjs --chain base, commit packages/signpage/data/evm-index, then cut again",
-    "robinhood: its pool index snapshot is 1550613 blocks behind the head 117011529 (at most 410400, 12 hours): run node packages/signpage/scripts/evm-index-snapshot.mjs --chain robinhood, commit packages/signpage/data/evm-index, then cut again",
+    "base: its pool index snapshot is 810234 blocks behind the head 58861782 (at most 216000, 12 hours): run node packages/signpage/scripts/evm-index-snapshot.mjs --chain base, record scripts/live-checks/robinhood-quote-answers-cold's good run again on the new files (node scripts/live-checks/robinhood-quote-answers-cold.mjs --site <the folder of node packages/signpage/scripts/deploy.mjs --build> --record <file>, its run the answers' good run and its sha-256 their want), commit packages/signpage/data/evm-index and scripts/live-checks/robinhood-quote-answers-cold.answers.json, then cut again",
+    "robinhood: its pool index snapshot is 1550613 blocks behind the head 117011529 (at most 410400, 12 hours): run node packages/signpage/scripts/evm-index-snapshot.mjs --chain robinhood, record scripts/live-checks/robinhood-quote-answers-cold's good run again on the new files (node scripts/live-checks/robinhood-quote-answers-cold.mjs --site <the folder of node packages/signpage/scripts/deploy.mjs --build> --record <file>, its run the answers' good run and its sha-256 their want), commit packages/signpage/data/evm-index and scripts/live-checks/robinhood-quote-answers-cold.answers.json, then cut again",
   ]);
+  // card snapshot-refusal-names-the-cold-record: the check the refusal names exists and its test pins the snapshots
+  assert.match(readFileSync(new URL("../../../scripts/live-checks/robinhood-quote-answers-cold.test.mjs", import.meta.url), "utf8"), /the committed snapshots are what the good run read/);
   // one stale chain is enough
   assert.equal(snapshotProblems({ ...FRESH_SNAPSHOTS, robinhood: STALE_SNAPSHOTS.robinhood }).length, 1);
   // the bound itself passes, one block past it is refused
