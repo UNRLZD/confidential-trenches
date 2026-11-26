@@ -241,3 +241,38 @@ test("the summary: a not-yet answer is asked again when the same call goes to an
   // two not-yet answers, one read again: one of two answered
   assert.deepEqual(summarize([at(GS, 1, 2, NOT_YET), at(GS, 3, 4, NOT_YET), at("https://robinhood.api.pocket.network/", 5, 6, ROOT)], 6).lag, { [GS_KEY]: { asked: 2, answered: 1 } });
 });
+
+// card base-blastapi-paced-under-its-limit: release 206's sign run 45649477281 (job 139330020267, from a GitHub runner)
+// FAILed on one "base-mainnet.public.blastapi.io rpc error 429 eth_getBlockByNumber" in the page's 35 posts to it, with
+// no read of the rate it came at; from the Mac blastapi took 60 calls a second for 10 s, none refused (read-only sweep,
+// 2026-11-25 21:0xZ). A throttle's BAD line names the calls the page sent its host in the second before it and the
+// posts then in flight, as evm-buy-and-sell-on-mainnet's s429At, so a red names its root: the page's own rate, or a
+// limit the page does not set.
+test("a throttle's BAD line names its rate: the calls sent its host in the second before it and the posts then in flight (red at f1dd122cd)", () => {
+  const BLAST = "https://base-mainnet.public.blastapi.io/";
+  const blk = { method: "eth_getBlockByNumber", params: [], id: 0 };
+  const call = { method: "eth_call", params: [], id: 1, to: "0x4200000000000000000000000000000000000006", sel: "0x18160ddd" };
+  const p = (url, sentMs, backMs, calls, extra = {}) => ({ url, method: "POST", status: 200, load: 3, sentMs, backMs, calls, ...extra });
+  const limited = (code) => errorsOf(`[{"jsonrpc":"2.0","id":0,"error":{"code":${code},"message":"Too Many Requests"}},{"jsonrpc":"2.0","id":1,"result":"0x1"}]`);
+  const lines = (s) => judge({ ...ANSWERS.good, ...s, posts: ANSWERS.good.posts }).lines;
+  const walk = (last) => [
+    p(BLAST, 0, 300, [blk, call]), // sent more than 1 s before: not counted
+    p(BLAST, 1_200, 1_500, [blk, call, call]), // in the second before, back before it
+    p(BLAST, 1_900, 2_400, [blk]), // in the second before and still out: in flight
+    p("https://mainnet.base.org/", 1_950, 2_300, [blk, call]), // another host: not counted
+    last,
+  ];
+  // 3 + 1 + its own 2 calls in the second; in flight the post sent at 1,900 and its own: 2 posts, 3 calls
+  const s = summarize(walk(p(BLAST, 2_100, 2_200, [blk, call], { errors: limited(429) })), 6);
+  assert.deepEqual(s.refused, { "base-mainnet.public.blastapi.io rpc error 429 eth_getBlockByNumber": 1 });
+  assert.deepEqual(lines(s), ["BAD base-mainnet.public.blastapi.io rpc error 429 eth_getBlockByNumber: 1 EVM RPC answers refused (6 calls in 1 s, 2 posts (3 calls) in flight)"]);
+  // an HTTP 429 and a -32005 the same
+  assert.deepEqual(lines(summarize(walk(p(BLAST, 2_100, 2_200, [blk, call], { status: 429 })), 6)), [`BAD base-mainnet.public.blastapi.io 429 [eth_getBlockByNumber, eth_call ${call.to}:${call.sel}]: 1 EVM RPC answers refused (6 calls in 1 s, 2 posts (3 calls) in flight)`]);
+  assert.deepEqual(lines(summarize(walk(p(BLAST, 2_100, 2_200, [blk, call], { errors: limited(-32005) })), 6)), ["BAD base-mainnet.public.blastapi.io rpc error -32005 eth_getBlockByNumber: 1 EVM RPC answers refused (6 calls in 1 s, 2 posts (3 calls) in flight)"]);
+  // two throttles of one key: each its own rate, in the order sent
+  const two = summarize([p(BLAST, 0, 900, [blk], { errors: limited(429) }), p(BLAST, 500, 600, [blk, call], { errors: limited(429) })], 6);
+  assert.deepEqual(lines(two), ["BAD base-mainnet.public.blastapi.io rpc error 429 eth_getBlockByNumber: 2 EVM RPC answers refused (1 calls in 1 s, 1 posts (1 calls) in flight; 3 calls in 1 s, 2 posts (3 calls) in flight)"]);
+  // a refusal that is no throttle, and a throttle recorded with no times (an old recording's shape): as before
+  assert.deepEqual(lines(summarize(walk(p(BLAST, 2_100, 2_200, [blk], { status: 503 })), 6)), ["BAD base-mainnet.public.blastapi.io 503 [eth_getBlockByNumber]: 1 EVM RPC answers refused"]);
+  assert.deepEqual(lines(summarize([{ url: BLAST, method: "POST", status: 429, load: 3, calls: [blk] }], 6)), ["BAD base-mainnet.public.blastapi.io 429 [eth_getBlockByNumber]: 1 EVM RPC answers refused"]);
+});

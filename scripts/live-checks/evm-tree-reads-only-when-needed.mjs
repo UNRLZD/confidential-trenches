@@ -19,6 +19,10 @@
 // after the not-yet answer came back (card evm-lag-answered-on-another-seat, release 204's sign run 45518167089: the
 // wallet's pair walked a seat onto rpc-robinhood.globalstake.io, its not-yet tree views were read again 2 s on at a new
 // anchor on the pair's seats, by then another member); the round's other seat, sent before it came back, never counts.
+// A throttle (an HTTP 429, a JSON-RPC error of code 429 or -32005) names its rate on its BAD line: the calls the page sent
+// its host in the second before it and the posts then in flight (rateOf; card base-blastapi-paced-under-its-limit,
+// release 206's sign run 45649477281: one base-mainnet.public.blastapi.io 429 in the page's 35 posts to it, with no rate
+// to read it by, where blastapi took 60 calls a second from the Mac, none refused).
 //   --sign-dir <dir>: SIGN_HOST's files answered from a local build (packages/signpage/scripts/build-app.mjs --out),
 //   every other request live: how the good answer was recorded before the deploy. Its headers are not the host's.
 // After: sign
@@ -92,6 +96,10 @@ export function summarize(requests, loads, extra = {}) {
   // answered by the call sent to any provider of its chain after it came back; one with no order (an old recording's
   // entry), or of no named chain, only by its own provider later in the log
   const waiting = {};
+  // card base-blastapi-paced-under-its-limit: each throttle's rate by its refusal's key, read from the posts' times
+  // (`sentMs`, `backMs`) sent to its host before it, and those posts by host
+  const rates = {};
+  const sentTo = {};
   for (const r of requests) {
     const calls = (r.calls ?? []).filter((c) => typeof c?.method === "string" && c.method.startsWith("eth_"));
     if (r.method !== "POST" || calls.length === 0) continue;
@@ -112,7 +120,16 @@ export function summarize(requests, loads, extra = {}) {
         byLoad[ch][at - 1]++;
       }
     }
-    for (const bad of refusalsOf(r)) refused[`${host} ${bad}`] = (refused[`${host} ${bad}`] ?? 0) + 1;
+    const bads = refusalsOf(r);
+    for (const bad of bads) refused[`${host} ${bad}`] = (refused[`${host} ${bad}`] ?? 0) + 1;
+    if (Number.isFinite(r.sentMs)) {
+      const mine = (sentTo[host] ??= []);
+      if (bads.length > 0 && throttled(r)) {
+        const rate = rateOf(r, mine);
+        for (const bad of bads) (rates[`${host} ${bad}`] ??= []).push(rate);
+      }
+      mine.push(r);
+    }
     const answered = !r.failed && Number.isInteger(r.status) && r.status >= 200 && r.status < 300;
     const ordered = Number.isInteger(r.seq) && Number.isInteger(r.end);
     const chain = chainOf(r.url);
@@ -131,7 +148,18 @@ export function summarize(requests, loads, extra = {}) {
       }
     }
   }
-  return { ...extra, loads, posts, methods, logs, refused, byLoad, ...(Object.keys(lag).length > 0 ? { lag } : {}) };
+  return { ...extra, loads, posts, methods, logs, refused, byLoad, ...(Object.keys(lag).length > 0 ? { lag } : {}), ...(Object.keys(rates).length > 0 ? { rates } : {}) };
+}
+
+/** A provider's throttle: an HTTP 429, or a JSON-RPC error of code 429 or -32005 (limit exceeded). */
+const throttled = (r) => r.status === 429 || (Array.isArray(r.errors) && r.errors.some((e) => e?.code === 429 || e?.code === -32005));
+/** A throttled post's rate, read from `before`, the posts sent to its host ahead of it: the calls sent there in the second
+ *  before it, its own included, and the posts then in flight, its own included (evm-buy-and-sell-on-mainnet's s429At). */
+function rateOf(r, before) {
+  const n = (x) => (Array.isArray(x.calls) ? x.calls.length : 0);
+  const fly = before.filter((x) => !Number.isFinite(x.backMs) || x.backMs > r.sentMs);
+  const second = before.filter((x) => x.sentMs > r.sentMs - 1_000).reduce((a, x) => a + n(x), 0) + n(r);
+  return `${second} calls in 1 s, ${fly.length + 1} posts (${fly.reduce((a, x) => a + n(x), 0) + n(r)} calls) in flight`;
 }
 
 /** A page's own cancel of a request (a navigation between loads, or its AbortController): never a provider's refusal. */
@@ -220,7 +248,10 @@ export function judge(a) {
   const lines = [];
   if (!a || typeof a !== "object" || !Number.isInteger(a.loads) || a.loads < 1 || !a.logs || typeof a.logs !== "object") return { ok: false, lines: ["BAD the walk was not read"] };
   if (a.logs.index > 0) lines.push(`BAD the page read the pool index ${a.logs.index} times (the PoolManager's Initialize logs) for an account that holds nothing`);
-  for (const [k, n] of Object.entries(a.refused ?? {})) lines.push(`BAD ${k}: ${n} EVM RPC answers refused`);
+  for (const [k, n] of Object.entries(a.refused ?? {})) {
+    const rate = Array.isArray(a.rates?.[k]) && a.rates[k].length > 0 ? ` (${a.rates[k].join("; ")})` : "";
+    lines.push(`BAD ${k}: ${n} EVM RPC answers refused${rate}`);
+  }
   // card evm-lag-answer-read-again: a not-yet answer asked again and answered is a lag line; one never answered is BAD
   for (const [k, l] of Object.entries(a.lag ?? {})) {
     const asked = Number.isInteger(l?.asked) ? l.asked : 0;
@@ -285,13 +316,16 @@ export async function read({ signDir = null } = {}) {
     let loads = 1;
     if (signDir) await routeSign(ctx, path.resolve(signDir));
     const open = new Map();
-    // each post's order, sent and back, on one counter (summarize: a not-yet answer is asked again by a post sent after it)
+    // each post's order, sent and back, on one counter (summarize: a not-yet answer is asked again by a post sent after it),
+    // and its times in ms from the walk's start (summarize: a throttle's rate)
     let clock = 0;
+    const start = performance.now();
     ctx.on("request", (req) => {
       if (req.method() !== "POST") return;
       const r = { url: req.url(), method: "POST", load: loads, calls: shapeCalls(req.postData()) };
       if (r.calls.length === 0) return;
       r.seq = ++clock;
+      r.sentMs = Math.round(performance.now() - start);
       open.set(req, r);
       requests.push(r);
     });
@@ -300,6 +334,7 @@ export async function read({ signDir = null } = {}) {
       if (!r) return;
       open.delete(req);
       r.end = ++clock;
+      r.backMs = Math.round(performance.now() - start);
       if (failed) r.failed = req.failure()?.errorText ?? "failed";
       const res = await req.response().catch(() => null);
       if (res) {
