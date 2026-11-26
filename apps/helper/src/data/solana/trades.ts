@@ -221,10 +221,11 @@ export const BACK_SPAN_S = 86_400;
 export const BACK_TX_MAX = 3_000;
 /** Read back steps at once across every token (a signature page, or a chunk of TX_PARALLEL transactions), so a burst of
  *  listed coins (a deploy's live run opens 194 at once) never takes the public endpoints from the walks' and callers'
- *  reads. Every read back asked runs, its steps taking these lanes in the order asked (backLane), so a read back of a few
+ *  reads. Every read back asked runs, its steps taking these lanes a step at a time (backLane), so a read back of a few
  *  transactions never waits behind one of BACK_TX_MAX (card app-chart-check-inside-its-bound: live helper 207, 19 Nov
  *  17:26-17:30Z, two read backs ran to their end at once and the rest queued: ygq5gP...pump's 10 transactions said
- *  filling 3 min 18 s, EHFrCL...pump's empty page 4 min 21 s). [design: two of the walks' TX_PARALLEL] */
+ *  filling 3 min 18 s, EHFrCL...pump's empty page 4 min 21 s). A waiting step goes by backLane's rank, the shortest
+ *  remaining first. [design: two of the walks' TX_PARALLEL] */
 export const BACK_PARALLEL = 2;
 /** A read back's place in a slot: below the walks' and the stream's (a counter from 1), never a clash of order. */
 const BACK_INDEX = 1e12;
@@ -1876,15 +1877,22 @@ export function createSolanaTrades(deps: {
    *  asked again a second on, three times at most. */
   /** The read backs' lanes: BACK_PARALLEL steps at once, a free lane handed to the step that asked first. */
   let lanes = 0;
-  const laneWaits: (() => void)[] = [];
-  async function backLane<T>(step: () => Promise<T>): Promise<T> {
+  const laneWaits: { go: () => void; rank: number }[] = [];
+  /** Runs `step` on a BACK_PARALLEL lane. A waiting step goes by `rank`, the steps its read back still has to take (0 for
+   *  a signature page, which tells a read back's size in one call; Infinity while its pages still come back full), the
+   *  least first, in the order asked among equals: the shortest remaining first, as a read back that has listed the
+   *  mint's first signature knows its end (card sol-short-read-back-goes-first: helper 244, 26 Nov 01:16-01:19Z, 7 young
+   *  coins' read backs of a page and a chunk or two, in turn with up to OPEN_MAX long ones, left their charts filling
+   *  past the page's 73.5 s). A long read back still takes every lane left, and one ends in BACK_TX_MAX transactions. */
+  async function backLane<T>(step: () => Promise<T>, rank: number): Promise<T> {
     if (lanes < BACK_PARALLEL) lanes++;
-    else await new Promise<void>((go) => laneWaits.push(go));
+    else await new Promise<void>((go) => laneWaits.push({ go, rank }));
     try {
       return await step();
     } finally {
-      const next = laneWaits.shift();
-      if (next !== undefined) next();
+      let k = -1;
+      for (let i = 0; i < laneWaits.length; i++) if (k < 0 || laneWaits[i]!.rank < laneWaits[k]!.rank) k = i;
+      if (k >= 0) laneWaits.splice(k, 1)[0]!.go();
       else lanes--;
     }
   }
@@ -1896,7 +1904,7 @@ export function createSolanaTrades(deps: {
     while (entries.get(e.mint) === e && !b.done) {
       let page: unknown;
       try {
-        page = await backLane(() => rpc("getSignaturesForAddress", [e.mint, { limit: COLD_PAGE, commitment: "confirmed", ...(b.before === null ? {} : { before: b.before }) }]));
+        page = await backLane(() => rpc("getSignaturesForAddress", [e.mint, { limit: COLD_PAGE, commitment: "confirmed", ...(b.before === null ? {} : { before: b.before }) }]), 0);
       } catch {
         if (++fails >= 3) return;
         await new Promise((r) => setTimeout(r, 1_000).unref?.());
@@ -1926,11 +1934,14 @@ export function createSolanaTrades(deps: {
         return true;
       };
       let hole: number | null = null;
+      // a page shorter than asked listed the mint's first signature: this page's chunks are the read back's last steps
+      const last = sigs.length < COLD_PAGE;
       for (let k = 0; k < todo.length && b.txs < BACK_TX_MAX && entries.get(e.mint) === e && hole === null; k += TX_PARALLEL) {
         let chunk = todo.slice(k, Math.min(k + TX_PARALLEL, k + BACK_TX_MAX - b.txs));
         b.txs += chunk.length;
+        const rank = last ? Math.ceil((todo.length - k) / TX_PARALLEL) : Infinity;
         for (let attempt = 0; chunk.length > 0; attempt++) {
-          const read = await backLane(() => Promise.all(chunk.map(one)));
+          const read = await backLane(() => Promise.all(chunk.map(one)), rank);
           chunk = chunk.filter((_, j) => !read[j]);
           if (chunk.length === 0) break;
           if (attempt === 2) {
