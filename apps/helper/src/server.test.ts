@@ -19,7 +19,7 @@ import { heldPerClient, RETRY_AFTER_MAX_S, throttleOf, upstreamBudget } from "./
 import { nearRpc } from "./bind/send.ts";
 import type { BindSender } from "./bind/env.ts";
 import type { SolanaPoolSender } from "./pool/solana.ts";
-import { BIND_BODY_MAX, CONNECT_ATTEMPT_MS, HANDOVER_HEADER, handler, LISTEN_BACKLOG, listenAt, LOOP_HELD_MS, loopHeldLine, NEAR_PAIR_HEADER, start, STARTED_HEADER, UPSTREAM_RETRY_AFTER_S, WITHDRAW_BODY_MAX } from "./server.ts";
+import { BIND_BODY_MAX, CG_PACE_HEADER, CONNECT_ATTEMPT_MS, HANDOVER_HEADER, handler, LISTEN_BACKLOG, listenAt, LOOP_HELD_MS, loopHeldLine, NEAR_PAIR_HEADER, start, STARTED_HEADER, UPSTREAM_RETRY_AFTER_S, WITHDRAW_BODY_MAX } from "./server.ts";
 import { pairNames } from "./token-status/status.ts";
 import { agreedBlock, FeeReadRefused, type FeeQuoter } from "./withdraw/fee.ts";
 import type { WithdrawSender } from "./withdraw/send.ts";
@@ -82,6 +82,22 @@ test("GET /v1/health names mainnet NEAR's agreement pair in X-Helper-Near-Pair, 
   assert.equal(r.status, 200);
   assert.equal(r.headers[NEAR_PAIR_HEADER.toLowerCase()], "fastnear.com, drpc.live");
   assert.ok(!JSON.stringify(r.headers).includes("f".repeat(16)) && !JSON.stringify(r.headers).includes("d".repeat(16)) && !r.body.includes("f".repeat(16)), "no key in the answer");
+});
+
+// card helper-coingecko-pace-from-its-key: GET /v1/health names CoinGecko's pace and where it comes from in
+// X-Helper-Coingecko-Pace, as the start set it (data/coingecko.ts coingeckoNamed), so the live check reads that a deploy
+// paces from the key's plan; "none" with no key. Red at 0ba510633: no header.
+test("GET /v1/health names CoinGecko's pace and its source in X-Helper-Coingecko-Pace, never the key", async (t) => {
+  const none = await call("GET", "/v1/health", { origin: APP });
+  assert.equal(none.headers[CG_PACE_HEADER.toLowerCase()], "none", "this test's environment sets no CoinGecko key");
+  const named = "300 a minute, 3225 a day, from the key's plan Basic (the settings say 100)";
+  const u = undefined;
+  const helper = createServer(handler(COMMIT, u, u, u, u, u, u, u, u, u, u, u, u, u, u, u, u, u, u, u, u, u, u, u, u, u, u, named));
+  t.after(() => closeServer(helper));
+  await listening(helper.listen(0, "127.0.0.1"), "the helper");
+  const r = await call("GET", "/v1/health", { origin: APP }, undefined, (helper.address() as AddressInfo).port);
+  assert.equal(r.status, 200);
+  assert.equal(r.headers[CG_PACE_HEADER.toLowerCase()], named);
 });
 
 // card helper-tape-handover-judges-handed-books: GET /v1/health names, in X-Helper-Handover, what the warm file handed
@@ -450,11 +466,14 @@ test("POST /v1/withdraw: the body parsed and handed to the sender, its status an
   // card rpc-keyed-lists: with every keyed URL's company pace, and every keyed URL probed for /v1/health; each account's
   // daily spend in the store, shared with the helper this one replaces (review H1 of 424dce1e)
   // card helper-candles-keyed-gt: and CoinGecko's keyed account, whose reads every chart asks first (none with no key)
-  assert.equal(main.match(/const holds = providerHolds\(undefined, \{ \.\.\.PROVIDER_PACE, \.\.\.keyedPaces\(process\.env\), \.\.\.coingeckoPace\(process\.env\) \}, dayFiles\(storeDir, id\)\);/g)?.length, 1);
+  // card helper-coingecko-pace-from-its-key: paced at the key's plan as CoinGecko names it at start, that pace named on
+  // /v1/health
+  assert.match(main, /const cgPlan = await coingeckoPlan\(process\.env\);\n\s*const cgNamed = coingeckoNamed\(process\.env, cgPlan\);/);
+  assert.equal(main.match(/const holds = providerHolds\(undefined, \{ \.\.\.PROVIDER_PACE, \.\.\.keyedPaces\(process\.env\), \.\.\.coingeckoPace\(process\.env, cgPlan\) \}, dayFiles\(storeDir, id\)\);/g)?.length, 1);
   assert.match(main, /const keyed = createKeyed\(process\.env, holds\);/);
   assert.match(main, /const rpc = createRpc\(process\.env, \{ holds, pinned: SWAP_RPCS \}\);/);
   assert.match(main, /setInterval\(\(\) => void rpc\.probe\(\)\.catch\(\(\) => undefined\), KEYED_RETRY_MS\)\.unref\(\);/);
-  assert.match(main, /server = start\(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists, swaps, ready, senders\.held, \(\) => Object\.fromEntries\(\[\.\.\.slots\]\.map\(\(\[k, v\]\) => \[k, v\.state\(\)\]\)\), release, evmPools, evmTokens, held, near, poolIndexes \?\? undefined\);/);
+  assert.match(main, /server = start\(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists, swaps, ready, senders\.held, \(\) => Object\.fromEntries\(\[\.\.\.slots\]\.map\(\(\[k, v\]\) => \[k, v\.state\(\)\]\)\), release, evmPools, evmTokens, held, near, poolIndexes \?\? undefined, undefined, cgNamed\);/);
   // card helper-near-lists-and-token: chain=near's reads mounted, its lists warmed at the start; card
   // every-cell-shows-a-value: the engine's reads first, Rhea's the fallback, both warmed
   assert.match(main, /const near = engineFirst\(\{ lists: nearLists, token: createNearToken\(nearLists\), trades: createNearTrades\(nearLists\) \}, createEngineNear\(\)\);\n    nearLists\.warm\(\);\n    near\.warm\(\);/);

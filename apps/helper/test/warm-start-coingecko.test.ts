@@ -85,10 +85,16 @@ async function run(store: string, reads: readonly string[]): Promise<string[]> {
   return text.split("\n").filter((l) => l.startsWith(CG));
 }
 
+/** The start's read of the key's plan (card helper-coingecko-pace-from-its-key: coingecko.ts coingeckoPlan, GET
+ *  /api/v3/key once a start, warm or cold), counted apart from the market reads the bounds hold. */
+const PLAN = /\/api\/v3\/key$/;
+const planReads = (sends: string[]): number => sends.filter((l) => PLAN.test(l)).length;
+/** The market sends: every send but the plan read. */
+const market = (sends: string[]): string[] => sends.filter((l) => !PLAN.test(l));
 /** The sends as the paths' kinds: the Base quote seeds, and the Solana token, bars and trades reads. */
 const kinds = (sends: string[]): string => {
   const n = (re: RegExp) => sends.filter((l) => re.test(l)).length;
-  return `${sends.length} sends: base pools ${n(/\/networks\/base\//)}, solana token ${n(/\/networks\/solana\/tokens\//)}, bars ${n(/\/ohlcv\//)}, trades ${n(/\/trades$/)}`;
+  return `${sends.length} sends: plan ${n(PLAN)}, base pools ${n(/\/networks\/base\//)}, solana token ${n(/\/networks\/solana\/tokens\//)}, bars ${n(/\/ohlcv\//)}, trades ${n(/\/trades$/)}`;
 };
 
 test("a start on the warm file spends far fewer CoinGecko calls than a cold one for the same page reads", { timeout: 120_000 }, async (t) => {
@@ -99,9 +105,11 @@ test("a start on the warm file spends far fewer CoinGecko calls than a cold one 
   assert.ok(existsSync(join(store, "market", "warm.json")), "the stop wrote the warm file");
   const warm = await run(store, PAGE_READS);
   t.diagnostic(`warm: ${kinds(warm)}`);
-  assert.ok(cold.length <= COLD_MAX, `a cold start: ${kinds(cold)}, at most ${COLD_MAX}`);
-  assert.ok(warm.length <= WARM_MAX, `a warm start: ${kinds(warm)}, at most ${WARM_MAX}`);
-  assert.ok(warm.length < cold.length, `warm ${warm.length} against cold ${cold.length}`);
+  assert.equal(planReads(cold), 1, `a cold start reads the key's plan once: ${kinds(cold)}`);
+  assert.equal(planReads(warm), 1, `a warm start reads the key's plan once: ${kinds(warm)}`);
+  assert.ok(market(cold).length <= COLD_MAX, `a cold start: ${kinds(cold)}, at most ${COLD_MAX} market sends`);
+  assert.ok(market(warm).length <= WARM_MAX, `a warm start: ${kinds(warm)}, at most ${WARM_MAX} market sends`);
+  assert.ok(market(warm).length < market(cold).length, `warm ${market(warm).length} against cold ${market(cold).length}`);
 });
 
 test("the bound is not vacuous: a second start with the warm file gone spends past WARM_MAX", { timeout: 120_000 }, async (t) => {
@@ -110,5 +118,5 @@ test("the bound is not vacuous: a second start with the warm file gone spends pa
   await run(store, PAGE_READS);
   rmSync(join(store, "market", "warm.json"));
   const second = await run(store, PAGE_READS);
-  assert.ok(second.length > WARM_MAX, `a start with no warm file: ${kinds(second)}, past ${WARM_MAX}`);
+  assert.ok(market(second).length > WARM_MAX, `a start with no warm file: ${kinds(second)}, past ${WARM_MAX} market sends`);
 });

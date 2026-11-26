@@ -93,18 +93,72 @@ export const CG_THROTTLE_HOLD_S = 60;
 const ANSWER_MAX = 2 * 1024 * 1024;
 const KEY = /^[A-Za-z0-9_-]{16,64}$/;
 
+/** CoinGecko's own word on a key's plan (card helper-coingecko-pace-from-its-key): its name, its calls a minute and its
+ *  month's credits, as GET /api/v3/key answers them (docs.coingecko.com reference/api-usage: plan,
+ *  api_key_rate_limit_request_per_minute or rate_limit_request_per_minute, monthly_call_credit). COINGECKO_CALLS_PER_MIN
+ *  only copies the same read (research scripts/deploy/coingecko-key.sh, 13 Nov), so a pace set from it stays what the
+ *  plan was that day; read at every start, a plan's change reaches the pace at the next deploy. For the helper's key,
+ *  from the Mac 26 Nov 03:2xZ: Basic, 300 a minute, 100,000 a month (coingecko.com/en/api/pricing, read 03:2xZ: Basic
+ *  300 a minute, 100k credits). */
+export type CgPlan = { plan: string; perMin: number; month: number };
+/** How long the start waits for CoinGecko's /key before it paces from the settings. [design: 5 s, a cold vendor read's
+ *  TIMEOUT_MS less the helper's own; a start is never held past it] */
+export const CG_PLAN_TIMEOUT_MS = 5_000;
+/** The largest /key answer read (a few hundred bytes). */
+const PLAN_MAX = 64 * 1024;
+/** The settings' bound on a rate (COINGECKO_CALLS_PER_MIN's six digits), and a month's: what a plan answer may say. */
+const RATE_MAX = 999_999;
+const MONTH_MAX = 1_000_000_000;
+const whole = (v: unknown, max: number): v is number => Number.isSafeInteger(v) && (v as number) >= 1 && (v as number) <= max;
+
+/** The key's plan as CoinGecko names it, or null: no key, a key the settings refuse, an answer that is not 200, a
+ *  timeout (CG_PLAN_TIMEOUT_MS), or one with no whole rate and month inside the settings' bounds. The key is sent only
+ *  in the request's header to CG_URL, redirects refused, as every keyed read (createKeyed); nothing of it is kept. */
+export async function coingeckoPlan(env: Record<string, string | undefined>, deps: { fetch?: Fetch } = {}): Promise<CgPlan | null> {
+  const key = env.COINGECKO_API_KEY;
+  if (key === undefined || !KEY.test(key)) return null;
+  try {
+    const r = await (deps.fetch ?? fetch)(`${CG_URL}/api/v3/key`, { headers: { accept: "application/json", "x-cg-pro-api-key": key }, signal: AbortSignal.timeout(CG_PLAN_TIMEOUT_MS), redirect: "error" });
+    if (r.status !== 200) return await r.body?.cancel().catch(() => undefined), null;
+    const text = await r.text();
+    if (text.length > PLAN_MAX) return null;
+    const j = JSON.parse(text) as Record<string, unknown> | null;
+    const perMin = j?.api_key_rate_limit_request_per_minute ?? j?.rate_limit_request_per_minute;
+    const month = j?.monthly_call_credit;
+    if (!whole(perMin, RATE_MAX) || !whole(month, MONTH_MAX)) return null;
+    const plan = typeof j?.plan === "string" && /^[A-Za-z0-9 +_-]{1,32}$/.test(j.plan) ? j.plan : "?";
+    return { plan, perMin, month };
+  } catch {
+    // a timeout, a failed connection or a body that does not parse; its text is never kept (it may name the request)
+    return null;
+  }
+}
+
 /** CoinGecko's pace for the helper's holds: none when no key is set. Throws, naming the variable, on a value it refuses
- *  (the start stops, card helper-ready-without-gt), and never prints the key. */
-export function coingeckoPace(env: Record<string, string | undefined>): Record<string, Pace> {
+ *  (the start stops, card helper-ready-without-gt), and never prints the key. `plan`: the key's plan as CoinGecko named
+ *  it at start (coingeckoPlan), whose rate and month set the pace; null, the settings' rate and CG_DAY. */
+export function coingeckoPace(env: Record<string, string | undefined>, plan: CgPlan | null = null): Record<string, Pace> {
   const key = env.COINGECKO_API_KEY;
   if (key === undefined || key === "") return {};
   if (!KEY.test(key)) throw new Error("COINGECKO_API_KEY is not an API key (letters, digits, - and _, 16 to 64)");
   const v = env.COINGECKO_CALLS_PER_MIN;
   if (v === undefined || !/^[1-9][0-9]{0,5}$/.test(v)) throw new Error("COINGECKO_CALLS_PER_MIN must be the key's calls a minute, a whole number");
-  const usable = Math.max(1, Math.floor(Number(v) * (1 - CG_MARGIN)));
+  const usable = Math.max(1, Math.floor((plan?.perMin ?? Number(v)) * (1 - CG_MARGIN)));
   const burst = Math.max(1, Math.floor(usable / 10));
+  // the month over 31 days, the split limits.ts KEYED_DAY takes for every keyed plan
+  const day = plan === null ? CG_DAY : Math.floor(plan.month / 31);
   // at most `burst` at once and (usable - burst) more over a minute: never past `usable` in any 60 s
-  return { [CG_URL]: { perS: Math.max(usable - burst, 1) / 60, burst, unit: "call", group: "coingecko", day: CG_DAY } };
+  return { [CG_URL]: { perS: Math.max(usable - burst, 1) / 60, burst, unit: "call", group: "coingecko", day } };
+}
+
+/** The pace as GET /v1/health's CG_PACE_HEADER and the start line name it: the rate, the day and where they come from,
+ *  never the key; "none" with no key set. */
+export function coingeckoNamed(env: Record<string, string | undefined>, plan: CgPlan | null): string {
+  const p = coingeckoPace(env, plan)[CG_URL];
+  if (p === undefined) return "none";
+  const settings = Number(env.COINGECKO_CALLS_PER_MIN);
+  if (plan === null) return `${settings} a minute, ${p.day} a day, from the settings`;
+  return `${plan.perMin} a minute, ${p.day} a day, from the key's plan ${plan.plan}${plan.perMin === settings ? "" : ` (the settings say ${settings})`}`;
 }
 
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
