@@ -27,6 +27,8 @@ const Q = "test/evm-quote.test.ts";
 const R = "test/evm-quote-attacks.test.ts";
 const PR = "test/evm-pair-rank.test.ts";
 const HP = "test/evm-hung-post.test.ts";
+// the recorded PONS cold and warm tap on Robinhood, replayed (card evm-quote-fewer-rounds)
+const WT = "test/evm-warm-tap-calls.test.ts";
 const FH = "test/evm-quote-follow-hung.test.ts";
 const HC = "test/evm-hedge-clock.test.ts";
 const H = "test/evm-quote-head.test.ts";
@@ -285,6 +287,11 @@ export const MUTANTS = [
   [QUOTE, "      const cut = j.cut === undefined ? ended.signal : AbortSignal.any([j.cut, ended.signal]);", "      const cut = ended.signal;", R, "SL11 "],
   [QUOTE, "on.gate.ask(rpc, calls, tries, fast, h, f, cut)", "on.gate.ask(rpc, calls, tries, fast, h, f)", R, "SL11 "],
   [QUOTE, "one({ part, a: from, b: to, on, into, force, cut }, left)", "one({ part, a: from, b: to, on, into, force }, left)", R, "SL11 "],
+  // card evm-quote-fewer-rounds: the reads beside a warm tap's first round are sent behind the round's own (the kept
+  // swap fits sent at the block again, or never; routeSet's `beside` never called)
+  [QUOTE, "sendFits = () => void (fitsEarly = ", "void (fitsEarly = ", WT, "BS1 "],
+  [QUOTE, "    beside: () => sendFits?.(),", "    beside: () => {},", WT, "BS1 "],
+  [QUOTE, "  a.beside?.();\n", "", WT, "BS1 "],
   // re-anchored (card evm-unreachable-moves-on): the 5xx test is serverFault's since card evm-5xx-holds-the-provider-
   // for-the-round; SL1 passes on it (the request still reaches the next after its tries), SP5xx does not
   [QUOTE, "          if (spareNext && out5xx && !deepCall) {", "          if (false && out5xx && !deepCall) {", R, "SP5xx "],

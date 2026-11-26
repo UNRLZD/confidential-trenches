@@ -4007,6 +4007,7 @@ async function buyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: readonly EvmRpc
   // read beside the first round, never in it: a read only this quote's reuse asks never refuses the quote (an answer
   // that fails or differs leaves its fit unknown, and bestFits asks it as before)
   let fitsEarly: Promise<{ reads: Read[]; a: Answer[] } | null> = Promise.resolve(null);
+  let sendFits: (() => void) | undefined;
   // the routes whose fits this quote read or used, kept for the next quote (bestFits)
   const fitsUsed = new Map<string, EvmRoute>();
   const wethStart = !startsNative(route);
@@ -4055,9 +4056,11 @@ async function buyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: readonly EvmRpc
           sent.add(x.data);
           early.push(x);
         }
-        if (early.length > 0) fitsEarly = readBoth(rpcs, b.hash, early, v.reads, undefined, down).then((a) => ({ reads: early, a }), () => null);
+        // sent behind the round's own reads (routeSet's `beside`)
+        if (early.length > 0) sendFits = () => void (fitsEarly = readBoth(rpcs, b.hash, early, v.reads, undefined, down).then((a) => ({ reads: early, a }), () => null));
       }
     },
+    beside: () => sendFits?.(),
     beforeFound: () => {
       if (v.nativeFirst && wethStart && v.v4 !== undefined && lower(firstOut) !== lower(token)) {
         for (const key of V4_KEYS) {
@@ -4485,6 +4488,8 @@ async function routeSetOf(a: {
   beforeFound?: () => void;
   /** called once the block is agreed, before the first round's reads are sent: the caller's reads of that block */
   atBlock?: (block: Block, down: Set<EvmRpc>) => void;
+  /** called once the first round's own reads are sent: the caller's reads beside the round, sent behind them */
+  beside?: () => void;
   /** a follow's block (a buy request's `at`): a block the head watch confirmed, read at in place of a new agreement,
    *  under the same scan-lag rule as any (agreedAt) */
   pin?: Block;
@@ -4903,14 +4908,20 @@ async function routeSetOf(a: {
       if (!own.has(k) && !kept.has(k) && !earlyFirst.some((e) => readKey(e) === k) && !heldFirst.some((e) => readKey(e) === k)) heldFirst.push(r);
     }
   }
+  // the lower head's confirmation and the reads at its hash in one round; the confirmation is judged first
+  const reading = readAgreed(confirm, rpcs, block.hash, reads, v.reads, firstDown);
+  // card evm-quote-fewer-rounds: every read beside the first round (these, the pruned pools' below, the caller's
+  // `beside`) is sent once the round's own are, so at a provider's pace (first come, first served: pace.ts evmPaceTake)
+  // it waits behind the round, never ahead of it. Sent first, a warm Robinhood ANT tap's 17 kept swap fits took
+  // bloXroute's turns at 6 calls a second until 3.1 s, and the round's own posts left it from 3.6 s to 10.7 s while
+  // publicnode had answered them by 0.4 s (dRPC held after its own 429s, read only from the Mac, 2026-11-25 23:0xZ)
   const earlyReading = earlyFirst.length === 0 ? Promise.resolve(null) : readBoth(rpcs, block.hash, earlyFirst, v.reads, undefined, firstDown).catch(() => null);
   const heldReading = heldFirst.length === 0 ? Promise.resolve(null) : readBoth(rpcs, block.hash, heldFirst, v.reads, undefined, firstDown).catch(() => null);
   // the pools the last quote's X prune dropped that are unchanged since (unmovedSince), read beside the first round,
   // within the warm range; a failure proves none, and the prune asks them all as before
   const cutBefore = plan !== undefined && block.timestamp >= plan.ts && block.timestamp - plan.ts <= EVM_WARM_RANGE_S ? plan.cut : undefined;
   const unmoving = cutBefore === undefined || v.poolManager === undefined ? Promise.resolve(new Set<string>()) : unmovedSince(rpcs, chain, v.poolManager, cutBefore, block).catch(() => new Set<string>());
-  // the lower head's confirmation and the reads at its hash in one round; the confirmation is judged first
-  const reading = readAgreed(confirm, rpcs, block.hash, reads, v.reads, firstDown);
+  a.beside?.();
   if (spec !== null) {
     reading.catch(() => {});
     // the scan's own refusal ends the quote as before, whatever the round answered
