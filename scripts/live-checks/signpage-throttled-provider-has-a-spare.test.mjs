@@ -3,7 +3,9 @@
 // public seat read from the build Mac (the answers file's `good.at`): the pinned /app.js names both, each seat allows
 // the page's origin, and both answer the ten stable accounts with the same bytes. Bad: that run with the spare drifted
 // (another hash) and with the spare refusing the page (403, as api.mainnet-beta answers one), both planted; each fails.
-// Quiet: that run with the spare's read answered 429, planted: INCONCLUSIVE, never a pass.
+// Quiet: that run with the spare's read answered 429, planted: INCONCLUSIVE, never a pass. Served (card
+// solana-lists-drop-the-dead-provider): SIGN_HOST before the release that names Tatum's gateway: FAIL. Before: the 14 Nov
+// good run, its second spare Solana Vibe Station: FAIL.
 //   node --test scripts/live-checks/signpage-throttled-provider-has-a-spare.test.mjs
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -59,11 +61,23 @@ test("the bad answers fail: a spare that drifts, and a spare that refuses the pa
 test("(card move-sends-or-says-why) the second spare is held as the first: one that drifts fails, and one the run never read cannot pass", () => {
   const drift = check(A.bad3);
   assert.equal(drift.verdict, "FAIL");
-  assert.ok(drift.lines.some((l) => /^BAD the seats answer different bytes: .*public\.rpc\.solanavibestation\.com 0000/.test(l)), drift.lines.join("\n"));
+  assert.ok(drift.lines.some((l) => /^BAD the seats answer different bytes: .*solana-mainnet\.gateway\.tatum\.io 0000/.test(l)), drift.lines.join("\n"));
   // a run from before the second spare (its two seats only): the third is not named and not read
   const two = structuredClone(A.good);
   delete two.seats[SEATS[2]];
   two.app.names = SEATS.slice(0, 2);
   assert.equal(check(two).ok, false);
   assert.ok(check(two).lines.includes(`BAD the page's script names the seat ${SEATS[2]}`));
+});
+
+test("(card solana-lists-drop-the-dead-provider) SIGN_HOST before the release, and the run of the dead seat's day, fail", () => {
+  // the served page's every seat answers, but its script names no Tatum: FAIL on that line alone
+  const served = check(A.served);
+  assert.equal(served.verdict, "FAIL");
+  assert.deepEqual(served.lines.filter((l) => l.startsWith("BAD")), [`BAD the page's script names the seat ${SEATS[2]}`]);
+  // the 14 Nov good run names Solana Vibe Station, which today's seat no longer holds, and read none of Tatum
+  const before = check(A.before);
+  assert.equal(before.ok, false);
+  assert.ok(!SEATS.includes("https://public.rpc.solanavibestation.com"));
+  assert.ok(Object.keys(A.before.seats).includes("https://public.rpc.solanavibestation.com"));
 });

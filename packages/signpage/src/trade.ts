@@ -102,7 +102,14 @@ export const SOLANA_PROVIDER_A = "https://solana-rpc.publicnode.com";
  *  fail over as any member's, and with none open the seat waits the first to open. Read 2026-11-14 13:04Z with the
  *  page's Origin: getSlot 200, allow-origin *, three of three. api.mainnet-beta is no member: its preflight answers 200
  *  but every POST from the page's Origin 403 "Access forbidden" (the same read, three of three; 200 with no Origin). */
-export const SOLANA_PUBLIC_SEAT: readonly string[] = Object.freeze([SOLANA_PROVIDER_A, "https://solana.api.pocket.network", "https://public.rpc.solanavibestation.com"]);
+// Card solana-lists-drop-the-dead-provider: Tatum's keyless gateway third, in Solana Vibe Station's place, which refused
+// every connection (26 Nov 05:5xZ from the Mac; 24 Nov from the helper box and the Mac). Read 26 Nov 06:2xZ with SIGN_HOST's
+// Origin: preflight 204, allow-origin the page, content-type allowed; getAccountInfo, getMultipleAccounts,
+// getMinimumBalanceForRentExemption, getSignatureStatuses, getLatestBlockhash, getBlockTime and getTransaction 200;
+// keyless at 5 calls a minute (x-ttm-plan anonymous), then 429 with Retry-After 60 and allow-origin the page (06:36Z,
+// the sixth getSlot of seven), so the page reads it as a throttle: it pauses Tatum's lane and the read fails over as
+// from any member.
+export const SOLANA_PUBLIC_SEAT: readonly string[] = Object.freeze([SOLANA_PROVIDER_A, "https://solana.api.pocket.network", "https://solana-mainnet.gateway.tatum.io"]);
 
 /** The release's trade deps: provider A device-direct and provider B the helper's /v1/rpc/solana (LD1), E(A) from the
  * device's own pool reads on both, and the kit's send paths with the helper's. */

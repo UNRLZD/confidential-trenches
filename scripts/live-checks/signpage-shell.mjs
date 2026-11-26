@@ -101,8 +101,9 @@ export const PINNED_HOSTS = Object.freeze([
   "rpc-robinhood.globalstake.io",
   // Base's second pool seat (card first-sign-in-reads-fast-on-live), and a Base pool history source before it
   "base.rpc.blxrbdn.com",
-  // the Solana public seat's second spare, where provider A and Pocket both failing walk (card move-sends-or-says-why)
-  "public.rpc.solanavibestation.com",
+  // the Solana public seat's second spare, where provider A and Pocket both failing walk (card move-sends-or-says-why):
+  // Tatum's keyless gateway since card solana-lists-drop-the-dead-provider, where Solana Vibe Station stood
+  "solana-mainnet.gateway.tatum.io",
   "mainnet.base.org", "base.gateway.tenderly.co", "robinhood.drpc.org", "robinhood-rpc.publicnode.com",
 ]);
 /** The hosts a CSP's connect-src names (https sources only). */
@@ -174,8 +175,9 @@ function eventAfter(rec, t, want) {
   return m ? { state: m.data.state, ms: m.t - t } : null;
 }
 
-/** The verdict on one recorded run: { ok, lines }. */
-export function judge(rec) {
+/** The verdict on one recorded run: { ok, lines }. `pinnedHosts`: the hosts its page may reach (a recording replays on
+ *  its own day's list: signpage-shell.test.mjs). */
+export function judge(rec, pinnedHosts = PINNED_HOSTS) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
   const st = rec.steps ?? {};
@@ -329,7 +331,7 @@ export function judge(rec) {
     : [...(chrome ? [[st.created?.t, st.passkeyOut?.t]] : []), [st.words?.t, st.wordsOut?.t]];
   // each request at its send (sentAt: the browser's clock where the run matched it, as the new document's timeOrigin is)
   const signedIn = (x) => typeof sentAt(x) === "number" && held.some(([a, b]) => typeof a === "number" && typeof b === "number" && sentAt(x) >= a && sentAt(x) < b);
-  const pinned = (x) => PINNED_HOSTS.includes(x.host);
+  const pinned = (x) => pinnedHosts.includes(x.host);
   const stray = reqs.filter((x) => x.host !== SIGN_HOST && x.host !== APP_HOST && !pinned(x));
   say(stray.length === 0, `no request leaves SIGN_HOST and APP_HOST but for the pinned pool's hosts (${stray.length}${stray.length ? `: ${stray.slice(0, 4).map((x) => x.host).join(", ")}` : ""})`);
   const out = reqs.filter((x) => pinned(x) && !signedIn(x));

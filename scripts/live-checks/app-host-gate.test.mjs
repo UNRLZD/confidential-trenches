@@ -72,7 +72,7 @@ test("recorded bad answer: the good build before card verify-pools (no Solana pa
   const r = judge(await read(undefined, replay(ANSWERS.beforeSolana)));
   assert.equal(r.ok, false);
   assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")), [`BAD CSP connect-src: "${connectOf(ANSWERS.beforeSolana)}", want "${WANT_CONNECT}"`]);
-  assert.ok(WANT_CONNECT.includes(" https://solana-rpc.publicnode.com https://solana.api.pocket.network https://public.rpc.solanavibestation.com https://rpc.mainnet.fastnear.com "));
+  assert.ok(WANT_CONNECT.includes(" https://solana-rpc.publicnode.com https://solana.api.pocket.network https://solana-mainnet.gateway.tatum.io https://rpc.mainnet.fastnear.com "));
 });
 
 test("recorded bad answer: the good build before card verify-row-survives-one-provider (no Solana spare in connect-src): FAIL on connect-src alone", async () => {

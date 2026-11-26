@@ -26,10 +26,9 @@ import { EXIT, pageRefuses, preflight, preflightRefuses, rpcAnswer, verdictOf } 
 
 export const SIGN = "https://confidential.unrealized.trade";
 /** The seat, in its order (provider A, then its spares), as the page's source names it: the second spare since card
- *  move-sends-or-says-why (solanavibestation, the one where a page walks when provider A and Pocket both fail). */
-export const SEATS = ["https://solana-rpc.publicnode.com", "https://solana.api.pocket.network", "https://public.rpc.solanavibestation.com"];
-/** The pause between a seat's reads of one stable account each (see read()). */
-export const READ_GAP_MS = 1_200;
+ *  move-sends-or-says-why (where a page walks when provider A and Pocket both fail), Tatum's keyless gateway since card
+ *  solana-lists-drop-the-dead-provider, in the place of Solana Vibe Station, which refuses every connection. */
+export const SEATS = ["https://solana-rpc.publicnode.com", "https://solana.api.pocket.network", "https://solana-mainnet.gateway.tatum.io"];
 /** Ten accounts whose bytes never change: native and loader-held programs, and the mainnet pool program the page pins
  *  (packages/wallet/src/pool/solana.ts SOL_POOLS.mainnet). Ten is publicnode's cap for one getMultipleAccounts. None is
  *  one a seat declines as fat: Pocket refuses the associated token program's account (-32602, "shape targets a
@@ -105,19 +104,12 @@ export async function read(fetchFn = fetch) {
   const run = { at: new Date().toISOString(), index, app: { sha384: sha384(js), names: SEATS.filter((u) => ['"', "'", "`"].some((q) => js.includes(`${q}${u}${q}`))) }, seats: {} };
   for (const u of SEATS) {
     const pre = await preflight(u, SIGN, { fetchFn });
-    // one stable account a read, READ_GAP_MS apart, the values joined in STABLE's order: the same JSON as one read of all
-    // ten. solanavibestation answers 429 to all ten in one read, and to single reads close behind the ~240 KB of
-    // program bytes (read 14 Nov 14:05Z: each alone 200 at 1.2 s apart; back to back 200 200 200 200 429 429 200 429 429 429)
-    let a = null;
-    const value = [];
-    for (const k of STABLE) {
-      if (value.length > 0) await new Promise((r) => setTimeout(r, READ_GAP_MS));
-      a = await rpcAnswer(u, "getMultipleAccounts", [[k], { encoding: "base64", commitment: "finalized" }], { fetchFn, headers: { origin: SIGN }, redirect: "error" });
-      if (a.noAnswer !== undefined || a.error !== undefined || !Array.isArray(a.result?.value)) break;
-      value.push(...a.result.value);
-    }
-    if (a.noAnswer === undefined && a.error === undefined && Array.isArray(a.result?.value)) a = { ...a, result: { value } };
-    else if (a.noAnswer === undefined && a.error === undefined) a = { ...a, result: { value: null } };
+    // all ten in one read: Tatum's keyless gateway takes 5 calls a minute (x-ttm-plan anonymous), so one account a read
+    // (Solana Vibe Station's pace, which 429'd all ten in one) would meet its 429 by the sixth. Read 26 Nov 06:31Z from
+    // the Mac with the page's Origin: one getMultipleAccounts of STABLE, 200 on each seat, ten accounts, sha256 adc1db62
+    // on all three
+    let a = await rpcAnswer(u, "getMultipleAccounts", [STABLE, { encoding: "base64", commitment: "finalized" }], { fetchFn, headers: { origin: SIGN }, redirect: "error" });
+    if (a.noAnswer === undefined && a.error === undefined && !Array.isArray(a.result?.value)) a = { ...a, result: { value: null } };
     const post = { status: a.status ?? null, acao: a.acao ?? null };
     if (a.noAnswer !== undefined) post.noAnswer = a.noAnswer;
     else if (a.error !== undefined) post.error = a.error;

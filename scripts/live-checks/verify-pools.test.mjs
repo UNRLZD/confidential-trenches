@@ -91,9 +91,10 @@ test("planted on the good answer: dRPC answering 400 and the Robinhood row ok on
 // card verify-row-survives-one-provider: the 12 Nov app live runs (43314363472) failed on Pocket's 400 to the page's
 // getMultipleAccounts from GitHub's runners, the fixed pair drawing the Solana row Unverified; the page now walks
 // Solana's three operators as an EVM list, and the check holds the row to two operators of it, each read all 200
+// (the list's third Tatum's keyless gateway since card solana-lists-drop-the-dead-provider, where Solana Vibe Station stood)
 test("planted on the good answer: Pocket answering 400 and the Solana row ok on publicnode and the spare: PASS; ok on Pocket, one host twice, or the spare not all 200: FAIL", () => {
   const LIST = VERIFY_RELEASES.mainnet.pools.solana.rpcs;
-  assert.deepEqual(LIST, ["https://solana-rpc.publicnode.com", "https://solana.api.pocket.network", "https://public.rpc.solanavibestation.com"]);
+  assert.deepEqual(LIST, ["https://solana-rpc.publicnode.com", "https://solana.api.pocket.network", "https://solana-mainnet.gateway.tatum.io"]);
   const walked = (names, also = () => {}) =>
     mutate((r) => {
       r.release.solana.rpcs = LIST;
@@ -101,23 +102,23 @@ test("planted on the good answer: Pocket answering 400 and the Solana row ok on 
         run.pools.rows.solana.rpcs = names;
         const sol = run.requests.filter((x) => x.url.startsWith("https://solana-rpc.publicnode.com"));
         for (const x of run.requests) if (x.url.startsWith("https://solana.api.pocket.network")) x.status = 400;
-        run.requests.push(...sol.map((x) => ({ ...x, url: "https://public.rpc.solanavibestation.com/" })));
+        run.requests.push(...sol.map((x) => ({ ...x, url: "https://solana-mainnet.gateway.tatum.io/" })));
         run.errors = [...(run.errors ?? []), "Failed to load resource: the server responded with a status of 400 () (https://solana.api.pocket.network/)"];
         run.dom.verify.poolRpcs = { ...(run.dom.verify.poolRpcs ?? {}), solana: names };
         also(run);
       }
     });
-  const good = walked(["solana-rpc.publicnode.com", "public.rpc.solanavibestation.com"]);
+  const good = walked(["solana-rpc.publicnode.com", "solana-mainnet.gateway.tatum.io"]);
   assert.equal(judge(good).ok, true, judge(good).lines.filter((l) => l.startsWith("BAD")).join("\n"));
-  assert.ok(judge(good).lines.some((l) => /desktop \/verify solana: this page read solana-rpc\.publicnode\.com \d+ time\(s\), all 200 and public\.rpc\.solanavibestation\.com \d+ time\(s\), all 200; walked past or not asked: solana\.api\.pocket\.network \d+ time\(s\)/.test(l)));
+  assert.ok(judge(good).lines.some((l) => /desktop \/verify solana: this page read solana-rpc\.publicnode\.com \d+ time\(s\), all 200 and solana-mainnet\.gateway\.tatum\.io \d+ time\(s\), all 200; walked past or not asked: solana\.api\.pocket\.network \d+ time\(s\)/.test(l)));
   // before the spare: the same 400 with the row on the fixed pair fails (the row names the host that refused)
   assert.ok(bad(walked(["solana-rpc.publicnode.com", "solana.api.pocket.network"])).length > 0);
   // one host twice
   assert.ok(bad(walked(["solana-rpc.publicnode.com", "solana-rpc.publicnode.com"])).some((l) => /the row names .* want two operators of/.test(l)));
   // the spare with a read not 200
-  assert.ok(bad(walked(["solana-rpc.publicnode.com", "public.rpc.solanavibestation.com"], (run) => (run.requests.find((x) => x.url.startsWith("https://public.rpc.solanavibestation.com")).status = 502))).some((l) => /not all 200/.test(l)));
+  assert.ok(bad(walked(["solana-rpc.publicnode.com", "solana-mainnet.gateway.tatum.io"], (run) => (run.requests.find((x) => x.url.startsWith("https://solana-mainnet.gateway.tatum.io")).status = 502))).some((l) => /not all 200/.test(l)));
   // the DOM naming no hosts for the row: the outage judge cannot see the walk, FAIL
-  assert.ok(bad(walked(["solana-rpc.publicnode.com", "public.rpc.solanavibestation.com"], (run) => delete run.dom.verify.poolRpcs.solana)).length > 0);
+  assert.ok(bad(walked(["solana-rpc.publicnode.com", "solana-mainnet.gateway.tatum.io"], (run) => delete run.dom.verify.poolRpcs.solana)).length > 0);
 });
 
 test("pins: release.ts's pools are the deploy records' (mainnet), none on testnet; a pin off by one: FAIL", () => {

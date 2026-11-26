@@ -27,7 +27,8 @@ const RPCS = "https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org http
 const EVM = evmOrigins().join(" ");
 // the Solana list Verify reads the pool program on (card verify-pools; its spare since card
 // verify-row-survives-one-provider, apps/terminal/src/screens/verify/release.ts), after the EVM providers
-const SOLANA = "https://solana-rpc.publicnode.com https://solana.api.pocket.network https://public.rpc.solanavibestation.com";
+// (its second spare Tatum's keyless gateway since card solana-lists-drop-the-dead-provider, where Solana Vibe Station stood)
+const SOLANA = "https://solana-rpc.publicnode.com https://solana.api.pocket.network https://solana-mainnet.gateway.tatum.io";
 
 // the app paper's block (app.md 2.3) with HELPER_HOST, SIGN_HOST, the kit's EVM providers and RPC_A, RPC_B, RPC_C put in
 export const CSP = [

@@ -23,6 +23,9 @@
 // Card solana-send-browser-origin: the site's connect-src no longer names api.mainnet-beta.solana.com, which 403s every
 // POST from the page's Origin; the good answers' site CSP drops it, as the build's _headers now serves it; re-recorded
 // at the next sign deploy.
+// Card solana-lists-drop-the-dead-provider: the site's connect-src names Tatum's keyless gateway after Pocket's (the
+// public seat's second spare, where Solana Vibe Station stood); the good answers' site CSP has it added there, as the
+// build's _headers now serves it; re-recorded at the next sign deploy.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";

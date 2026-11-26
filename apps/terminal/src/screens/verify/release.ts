@@ -54,7 +54,9 @@ export const VERIFY_RELEASES: Readonly<Record<NearNetwork, VerifyRelease>> = {
     pools: {
       solana: {
         chain: "solana",
-        rpcs: ["https://solana-rpc.publicnode.com", "https://solana.api.pocket.network", "https://public.rpc.solanavibestation.com"],
+        // card solana-lists-drop-the-dead-provider: Tatum's keyless gateway third, where Solana Vibe Station stood until it
+        // refused every connection (26 Nov 05:5xZ from the Mac; app live run 45763638171: "Verify read the pool on no two")
+        rpcs: ["https://solana-rpc.publicnode.com", "https://solana.api.pocket.network", "https://solana-mainnet.gateway.tatum.io"],
         pin: {
           program: "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF", // gitleaks:allow (a public program id)
           programdata: "EuoumSLYMugNL6TsEKRby4bYXH4EcEgwASFdWhWNBQxM", // gitleaks:allow (a public account id)
