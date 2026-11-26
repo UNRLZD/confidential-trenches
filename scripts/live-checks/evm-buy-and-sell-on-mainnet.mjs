@@ -25,6 +25,8 @@
 // a pull request's own build.
 // After: sign
 // Bundle: read sign
+// Record: each tap's time, its posts by host and the request it waited on longest (a tap past 2 s: every request in
+// the order sent); a live run that fails keeps it beside its log
 //   node scripts/live-checks/evm-buy-and-sell-on-mainnet.mjs [--local] [--record <file>]
 //   PASS exit 0, FAIL 1, error 2. --local judges this tree's SIGN_HOST build (signBuilt) in SIGN_HOST's place;
 //   --record writes what the run read, which evm-buy-and-sell-on-mainnet.test.mjs replays.
@@ -104,7 +106,16 @@ function judgeQuotes(qs, say) {
       const most = Math.max(0, ...runs.map((u) => u.quotes ?? Infinity));
       // a refusal as much as a quote: the user waits on either
       const warm = runs.filter((u) => u.kind === "warm").map((u) => u.ms);
-      const ms = runs.map((u) => `${u.kind} ${u.ms}`).join(", ");
+      // each warm tap past the bound: the request it waited on longest, the time no request was out, its posts by host
+      // (card evm-tap-check-names-its-wait)
+      const slow = runs.flatMap((u, i) => {
+        if (u.kind !== "warm" || !(u.ms > WARM_MAX_MS)) return [];
+        const w = u.waited;
+        const wait = w ? `longest ${w.host} ${w.methods} ${w.ms} ms (${w.end}${w.spare ? ", a spare asked" : ""}), idle ${w.idle} ms` : "no wait recorded";
+        const posts = Object.entries(u.hosts ?? {}).map(([host, h]) => `${host} ${h.requests ?? "?"}`).join(", ") || "none";
+        return [`warm ${i} ${u.ms} ms: ${wait}, posts ${posts}`];
+      });
+      const ms = `${runs.map((u) => `${u.kind} ${u.ms}`).join(", ")}${slow.map((s) => `; ${s}`).join("")}`;
       say(runs.length === 1 + WARM_RUNS && runs.every((u) => u.ok === true || NAMED.includes(u.code)), `[${chain}] ${r.symbol} ${r.coin} ends in a quote or a true named refusal: ${ends || "no run"}`);
       say(most <= EVM_BUY_TAP_QUOTES, `[${chain}] ${r.symbol} asks ${most} kit quotes a tap at most (bound ${EVM_BUY_TAP_QUOTES})`);
       say(s429 === 0, `[${chain}] ${r.symbol} taps got ${s429} answers of 429${where.length > 0 ? `: ${where.join("; ")}` : ""}`);
