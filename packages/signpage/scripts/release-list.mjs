@@ -32,8 +32,9 @@
 //   1. cut release-<N> on a branch from origin/main's head (git worktree add -b card/<key> ... origin/main, a clean
 //      tree, pnpm install --frozen-lockfile): node packages/signpage/scripts/release-list.mjs release-<N>, N exactly one
 //      past the newest list (it refuses any other N, and a list whose Base or Robinhood pool index snapshot is past
-//      SNAPSHOT_BEHIND_MAX behind the lower of two providers' heads: run evm-index-snapshot.mjs for both chains and
-//      commit packages/signpage/data/evm-index first), then add the row it prints (add to RELEASED: "release-<N>":
+//      SNAPSHOT_BEHIND_MAX behind the lower of two providers' heads: run evm-index-snapshot.mjs for both chains, record
+//      robinhood-quote-answers-cold's good run again on the new files (its test pins their sha-256; the refusal names
+//      the command), and commit both first), then add the row it prints (add to RELEASED: "release-<N>":
 //      "<sha256 of the list>",) at the end of RELEASED below, run node --test packages/signpage/scripts/release.test.mjs,
 //      and commit both: git commit -m "Card <key>: signing page release-<N>" -- packages/signpage/releases/release-<N>.json packages/signpage/scripts/release-list.mjs
 //   2. push it with push-card (the team's push script, card/<key>);
@@ -522,6 +523,11 @@ export const SNAPSHOT_BEHIND_MAX = Object.freeze({ base: 216_000, robinhood: 410
 export const SNAPSHOT_HEAD_SPREAD_MAX = Object.freeze({ base: 600, robinhood: 1_140 });
 const SNAPSHOT_HEAD_MS = 10_000;
 const snapshotCommand = (chain) => `node packages/signpage/scripts/evm-index-snapshot.mjs --chain ${chain}`;
+/** The live check whose test pins each committed snapshot's sha-256 (its "the committed snapshots are what the good run
+ *  read"), so a refreshed snapshot needs its good run recorded again: PR 1288's release-205 cut left its merge queue
+ *  group on that test (card snapshot-refusal-names-the-cold-record). */
+const COLD_CHECK = "scripts/live-checks/robinhood-quote-answers-cold";
+const COLD_RECORD = `node ${COLD_CHECK}.mjs --site <the folder of node packages/signpage/scripts/deploy.mjs --build> --record <file>, its run the answers' good run and its sha-256 their want`;
 
 /** The refusals of a cut over each chain's snapshot read `read` ({ <chain>: { through, heads } }: the committed
  *  snapshot's last block, null when it does not read back, and the heads two providers named): none when every chain's
@@ -533,7 +539,7 @@ export function snapshotProblems(read) {
   for (const [chain, max] of Object.entries(SNAPSHOT_BEHIND_MAX)) {
     const r = read[chain];
     const heads = (r?.heads ?? []).filter((h) => Number.isSafeInteger(h) && h > 0);
-    const fix = `run ${snapshotCommand(chain)}, commit packages/signpage/data/evm-index, then cut again`;
+    const fix = `run ${snapshotCommand(chain)}, record ${COLD_CHECK}'s good run again on the new files (${COLD_RECORD}), commit packages/signpage/data/evm-index and ${COLD_CHECK}.answers.json, then cut again`;
     if (!Number.isSafeInteger(r?.through)) problems.push(`${chain}: its pool index snapshot does not read back: ${fix}`);
     else if (heads.length < 2) problems.push(`${chain}: the head was read on ${heads.length} of 2 providers, so the snapshot's age is not known: cut again`);
     else if (Math.max(...heads) - Math.min(...heads) > SNAPSHOT_HEAD_SPREAD_MAX[chain]) problems.push(`${chain}: the providers' heads ${heads[0]} and ${heads[1]} are ${Math.max(...heads) - Math.min(...heads)} blocks apart (at most ${SNAPSHOT_HEAD_SPREAD_MAX[chain]}), so the snapshot's age is not known: cut again`);
