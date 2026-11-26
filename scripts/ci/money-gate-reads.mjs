@@ -11,7 +11,12 @@ export const RPCS = {
   // while one stalls past the rounds. It keeps recent history only (its first available block 471,786,675, 20 Nov
   // 15:25Z, read 21 Nov 21:12Z; the oldest recorded tx, 5wGExGur at slot 466,032,982, reads null there and ok on the two
   // others): its null counts only where its history reaches the tx (solanaAbsent)
-  solana: ["https://api.mainnet-beta.solana.com", "https://public.rpc.solanavibestation.com", "https://solana-rpc.publicnode.com"],
+  // card money-gate-solana-reads-on-two-operators: Tatum's keyless gateway in Solana Vibe Station's place, which refused
+  // every connection (24 Nov from the helper box and the Mac; 26 Nov 05:5xZ from the Mac), so an old tx read ok on
+  // api.mainnet-beta alone and run 45748862432's --all left 28 Solana txs unread. Tatum read 26 Nov 05:5xZ from the Mac:
+  // getTransaction of 58Z69tiM (slot 468,415,987) ok, the same slot as api.mainnet-beta, which PublicNode answers null;
+  // keyless, 5 calls a minute (x-ttm-plan anonymous, then HTTP 429 with Retry-After 60, which rpc() waits out)
+  solana: ["https://api.mainnet-beta.solana.com", "https://solana-mainnet.gateway.tatum.io", "https://solana-rpc.publicnode.com"],
   base: ["https://mainnet.base.org", "https://base.drpc.org"],
   robinhood: ["https://rpc.mainnet.chain.robinhood.com", "https://robinhood-rpc.publicnode.com"],
   // NEAR testnet, read 2026-10-31 at 16:16Z: the same two operators on three hosts, as for mainnet.

@@ -1,0 +1,487 @@
+{
+ "note": "Recorded 2026-11-26 from the Mac by scripts/ci/money-gate-solana-reads.mjs --record (then at scripts/live-checks/money-gate-solana-reads-on-two-operators.mjs). bad: --solana with the list before the card (main 21d4995a7): Solana Vibe Station refused every connection (fetch failed), PublicNode answered null before its first block, so each tx read ok on api.mainnet-beta alone: FAIL. good: the gate list after the card: api.mainnet-beta and Tatum read each ok at the same slot: PASS.",
+ "bad": {
+  "solana": [
+   "https://api.mainnet-beta.solana.com",
+   "https://public.rpc.solanavibestation.com",
+   "https://solana-rpc.publicnode.com"
+  ],
+  "answers": [
+   {
+    "url": "https://api.mainnet-beta.solana.com",
+    "method": "getTransaction",
+    "params": [
+     "58Z69tiMh8sNoExBX1ih8wDRYnEYE7mazSr5ntH3z7krXdrpjTj4brwmf6vwkzQi7W4cE5ZfEbKtbMnyu6oCgUR7",
+     {
+      "encoding": "json",
+      "maxSupportedTransactionVersion": 0,
+      "commitment": "finalized"
+     }
+    ],
+    "status": 200,
+    "text": "{\"jsonrpc\":\"2.0\",\"result\":{\"blockTime\":1794463012,\"meta\":{\"computeUnitsConsumed\":24665,\"costUnits\":26265,\"err\":null,\"fee\":45300,\"innerInstructions\":[{\"index\":1,\"instructions\":[{\"accounts\":[0,1],\"data\":\"3Bxs4Bc5gXtaEbdR\",\"programIdIndex\":3,\"stackHeight\":2},{\"accounts\":[1],\"data\":\"9krTD9nufgTDYdLB\",\"programIdIndex\":3,\"stackHeight\":2},{\"accounts\":[1],\"data\":\"SYXsB9ErF8mwKqNWn7ffFhinTDcH3vCFHnpcVye5XuDq3iLX\",\"programIdIndex\":3,\"stackHeight\":2}]},{\"index\":2,\"instructions\":[{\"accounts\":[0,1],\"data\":\"3Bxs3zw4oaQEQe4P\",\"programIdIndex\":3,\"stackHeight\":2}]}],\"loadedAddresses\":{\"readonly\":[],\"writable\":[]},\"logMessages\":[\"Program ComputeBudget111111111111111111111111111111 invoke [1]\",\"Program ComputeBudget111111111111111111111111111111 success\",\"Program AddressLookupTab1e1111111111111111111111111 invoke [1]\",\"Program log: Instruction: CreateLookupTable\",\"Program 11111111111111111111111111111111 invoke [2]\",\"Program 11111111111111111111111111111111 success\",\"Program 11111111111111111111111111111111 invoke [2]\",\"Program 11111111111111111111111111111111 success\",\"Program 11111111111111111111111111111111 invoke [2]\",\"Program 11111111111111111111111111111111 success\",\"Program AddressLookupTab1e1111111111111111111111111 consumed 10505 of 402850 compute units\",\"Program AddressLookupTab1e1111111111111111111111111 success\",\"Program AddressLookupTab1e1111111111111111111111111 invoke [1]\",\"Program log: Instruction: ExtendLookupTable\",\"Program 11111111111111111111111111111111 invoke [2]\",\"Program 11111111111111111111111111111111 success\",\"Program AddressLookupTab1e1111111111111111111111111 consumed 14010 of 392345 compute units\",\"Program AddressLookupTab1e1111111111111111111111111 success\"],\"postBalances\":[37943620,5486400,1,1,1141440],\"postTokenBalances\":[],\"preBalances\":[43475320,0,1,1,1141440],\"preTokenBalances\":[],\"rewards\":[],\"status\":{\"Ok\":null}},\"slot\":468415987,\"transaction\":{\"message\":{\"accountKeys\":[\"Bzi6GZ1pNEaCevxmwpMLaLqLkEYm6tXuat3UWSwBRCbA\",\"4PyMCJPKZQvrLsj8DKCG2Yddh3vDmTf1EWnjCL1Bk3Pc\",\"ComputeBudget111111111111111111111111111111\",\"11111111111111111111111111111111\",\"AddressLookupTab1e1111111111111111111111111\"],\"header\":{\"numReadonlySignedAccounts\":0,\"numReadonlyUnsignedAccounts\":3,\"numRequiredSignatures\":1},\"instructions\":[{\"accounts\":[],\"data\":\"3gJqkocMWaMm\",\"programIdIndex\":2,\"stackHeight\":1},{\"accounts\":[1,0,0,3],\"data\":\"11113cgghKPnSJq7B\",\"programIdIndex\":4,\"stackHeight\":1},{\"accounts\":[1,0,0,3],\"data\":\"VEm8f22atYD9N1kCzFhg6AWjFALbztmxdY7oXGg9SAwxLg2JnqRVhQ8bbKJtWEHjE6veoke4PqUDd4HwFQNQ4n9dQ2QdnhGGWYmKt74VvVMciWfWhrnqQeKdDM19taPhfs3oRZpGMQUK8obchhhhbyVZdhrMcuJMq7Qirq1CsnW97V9rueF5Qm3HDust1cXC1FWWFBXWnTweC4seywGCTqAuv8LiVtgQNtAixSUs1KkLEzPbive89Xpyo3g17xvX9CHwL5NquF9cbJcZ4qbhTGFWaAC9FDuMCQfxTmygzkSbo2x8xaUZQkKAWJy2KsBjGSgDiZE8bLmR1QKhmxPec27h7Xe721ZC39mSa6Y4oEKkwzkADxjd63GDtSaCz2t3xWAvsKYWUZs9Ps4P7qADvZRkGAfqRdnEzCDsaATCS1KBDv7R8T89JsEW5RzKb1zUbDD6SM2hZx6PaYabLAXtMoUjAuVRgqejgcV4HvPCSH2d9Cspg8jNS9fu6JvTbSuapG7GJ5ykCCSo78rqq13gKhbvpUxZTz8dj9qLjE4cTPJ1LPHRdgLvMChZ83JukmfecWW6uVmPcNAJHWDJVmoSL9YEEQtewUhVasgT1PmSuDS2tM9GXRwCLY8iD7NdjxQ53nzqKDxzgLRnUrj4iBNy3YnsRueB5GukqVWqmS1sKSjYcgipwE66ZtoLDB9ha2gPRPskCMWEBLAourChDbyQi2VSqjWvedk3VMM1v14SKGgDe3qmEXePF1ZBtg5Uo9tRU5kFrBAXiSJwNMeSupxqvRM9of3mXiF22j7jMqgcr7toJTKJDPwDgdp4UDsHrSdBgvHmmcEhgK3YMPm5tUMJednMntc7iPJvFNoJ33ngShjFE6X8Si5NuATm6DqXqbrowM6bJcf9vb25BY5ddhRcy5WkwAnFoheSZiDDk5HL9jaZrfyYWCToumA4dtnf7ovYchWAeRJ3GWegvjRCXEw4qkEdSeajPeJ1nRAGWocynkH31sbMNJFtufuCH3hGnkbVNvSiWDV16bmD68K1eRhZNodBwcQVZq4EmY4dDa2gvSUCdQivoA7FbbWPdH4wxEaLDEm9iZN3omuvK5jpNaYrgVkM6v7xXW4sYoQTDvGTcdRXQHtBNGH4VtSgct8FecAujFuT7tRx2nTXp7LEWkNNTBMT8mbftBfCjxEF3ajL6464K4abm1kcNsnGbpycXzREeJ5KFVLSv8XkkQJjGKU1R6R\",\"programIdIndex\":4,\"stackHeight\":1}],\"recentBlockhash\":\"aFk8W5vQdK61GTFJRYhUdXi2EGycUnMinH6saUuMYkg\"},\"signatures\":[\"58Z69tiMh8sNoExBX1ih8wDRYnEYE7mazSr5ntH3z7krXdrpjTj4brwmf6vwkzQi7W4cE5ZfEbKtbMnyu6oCgUR7\"]},\"transactionIndex\":300,\"version\":\"legacy\"},\"id\":1}\n"
+   },
+   {
+    "url": "https://public.rpc.solanavibestation.com",
+    "method": "getTransaction",
+    "params": [
+     "58Z69tiMh8sNoExBX1ih8wDRYnEYE7mazSr5ntH3z7krXdrpjTj4brwmf6vwkzQi7W4cE5ZfEbKtbMnyu6oCgUR7",
+     {
+      "encoding": "json",
+      "maxSupportedTransactionVersion": 0,
+      "commitment": "finalized"
+     }
+    ],
+    "error": "fetch failed"
+   },
+   {
+    "url": "https://public.rpc.solanavibestation.com",
+    "method": "getTransaction",
+    "params": [
+     "58Z69tiMh8sNoExBX1ih8wDRYnEYE7mazSr5ntH3z7krXdrpjTj4brwmf6vwkzQi7W4cE5ZfEbKtbMnyu6oCgUR7",
+     {
+      "encoding": "json",
+      "maxSupportedTransactionVersion": 0,
+      "commitment": "finalized"
+     }
+    ],
+    "error": "fetch failed"
+   },
+   {
+    "url": "https://public.rpc.solanavibestation.com",
+    "method": "getTransaction",
+    "params": [
+     "58Z69tiMh8sNoExBX1ih8wDRYnEYE7mazSr5ntH3z7krXdrpjTj4brwmf6vwkzQi7W4cE5ZfEbKtbMnyu6oCgUR7",
+     {
+      "encoding": "json",
+      "maxSupportedTransactionVersion": 0,
+      "commitment": "finalized"
+     }
+    ],
+    "error": "fetch failed"
+   },
+   {
+    "url": "https://solana-rpc.publicnode.com",
+    "method": "getTransaction",
+    "params": [
+     "58Z69tiMh8sNoExBX1ih8wDRYnEYE7mazSr5ntH3z7krXdrpjTj4brwmf6vwkzQi7W4cE5ZfEbKtbMnyu6oCgUR7",
+     {
+      "encoding": "json",
+      "maxSupportedTransactionVersion": 0,
+      "commitment": "finalized"
+     }
+    ],
+    "status": 200,
+    "text": "{\"jsonrpc\":\"2.0\",\"result\":null,\"id\":1}\n"
+   },
+   {
+    "url": "https://solana-rpc.publicnode.com",
+    "method": "getFirstAvailableBlock",
+    "params": [],
+    "status": 200,
+    "text": "{\"jsonrpc\":\"2.0\",\"result\":473606561,\"id\":1}\n"
+   },
+   {
+    "url": "https://api.mainnet-beta.solana.com",
+    "method": "getTransaction",
+    "params": [
+     "2GRmRhU6MkDUQ4ndChjun27d7GEjRLEkpAyKCJZW9FuxUA65zDwHjddHasiCdr7aYJUL2BLtcBAwK5ppzRyWnsWS",
+     {
+      "encoding": "json",
+      "maxSupportedTransactionVersion": 0,
+      "commitment": "finalized"
+     }
+    ],
+    "status": 200,
+    "text": "{\"jsonrpc\":\"2.0\",\"result\":{\"blockTime\":1794468036,\"meta\":{\"computeUnitsConsumed\":14458,\"costUnits\":16063,\"err\":null,\"fee\":25300,\"innerInstructions\":[{\"index\":1,\"instructions\":[{\"accounts\":[0,1],\"data\":\"3Bxs411jAgDbBLyu\",\"programIdIndex\":3,\"stackHeight\":2}]}],\"loadedAddresses\":{\"readonly\":[],\"writable\":[]},\"logMessages\":[\"Program ComputeBudget111111111111111111111111111111 invoke [1]\",\"Program ComputeBudget111111111111111111111111111111 success\",\"Program AddressLookupTab1e1111111111111111111111111 invoke [1]\",\"Program log: Instruction: ExtendLookupTable\",\"Program 11111111111111111111111111111111 invoke [2]\",\"Program 11111111111111111111111111111111 success\",\"Program AddressLookupTab1e1111111111111111111111111 consumed 14308 of 202850 compute units\",\"Program AddressLookupTab1e1111111111111111111111111 success\"],\"postBalances\":[33204380,10200640,1,1,1141440],\"postTokenBalances\":[],\"preBalances\":[37943920,5486400,1,1,1141440],\"preTokenBalances\":[],\"rewards\":[],\"status\":{\"Ok\":null}},\"slot\":468439361,\"transaction\":{\"message\":{\"accountKeys\":[\"Bzi6GZ1pNEaCevxmwpMLaLqLkEYm6tXuat3UWSwBRCbA\",\"4PyMCJPKZQvrLsj8DKCG2Yddh3vDmTf1EWnjCL1Bk3Pc\",\"ComputeBudget111111111111111111111111111111\",\"11111111111111111111111111111111\",\"AddressLookupTab1e1111111111111111111111111\"],\"header\":{\"numReadonlySignedAccounts\":0,\"numReadonlyUnsignedAccounts\":3,\"numRequiredSignatures\":1},\"instructions\":[{\"accounts\":[],\"data\":\"3gJqkocMWaMm\",\"programIdIndex\":2,\"stackHeight\":1},{\"accounts\":[1,0,0,3],\"data\":\"9PWxsZjeaqnP4if61zuoEkrysebhqe9iBzNQXDAp2i2qVUjferacpubDX1wR2mDoYc4ms8ZPHpugNhCgZ9NE2e9u67CtXFcb5KfQvmj5jcoQZaR6J6Rj7qaYA2qW1xiF16YEcMA38gZpeiuFE93CZ1C59bG34VSu9FaeWu6TnA3gdihw6dFmk34vC9e6wxhRusUJqExeca7zdzQmFTWhBZPqgz4moqbd4MWhNEMcD9kEMqAvxMywNgWArDHe3F6s7y8V2P81P47Bcy2cDZGVjdMS6bgE5Rg43hJEZbtfjrNZMpaoLV5zH9gkq8Vj5PaoHUYNTiyeE5MfUbHsfeabnFp2geYvRAfniac7fdgrfHsFH6GR9qmZHcnGrY65BBh1fohYwLUEwY2ENtNakqZSdLFcHd71FjeJskT8btCqxHcsamhqFX68ejiXLEtVAjQT4hDq8tDP3RVG3QRr5Kikvk5pyDHVMUZ1SKxbdg1vKMm6wwTtFJDjECVyfuv2JAYntweLykSEa6vqWwWp9y9BHNAN4y2jPCgRQfGcAqzJEnz9HrDcB2XwoSLket1Vnq7A8qpoChUchfnji4gaWRYkLxBHsJQCBiwrRanNo8fbLPNXB3ycg4m9e8nuivN4Z9V89AQSo2GXdhei8EYAvSbyYu2TM3xsPmKHUXC8pUB2s2C5wKnVox66e3mZCPX7JENrEdRDzDvS7x5bM7zpfJZKiBVzAfnWg4qvduHSQAZs4nLxpDQo2wFLF2TRtbkhzNALfKFWmRKiUMZLw1asYbBBV9pdU4TDKsnptnaQxxafPkUxbtdANrrE5yWQyo7NCLrMweg84epbBB9PEoHGxFq7Ggr5UpnDS46vc4q9nCN8PX8ajudcaME1XF9RJ9dep7d46KmHvLXn7nY4Tbd2k3vFHuve7M6zHmhtoppxeKm9hq45o21HBTaKKFAtRJSArhfV7aaR6uFfsWfXVTGLsp1LRrNbGpnPLhrwHa91dV1KKQ3XfYv1ZCTnRfEAcTs8SNjiWrSXBqS51LRQqFm3b2maQWta9wNfBw7EQrRThfjeCneQPAUknKXyft6MX7XmEiQdBkoExX8LPRUP1CD1FZWcwDpQgRH8yQj5xtPRHmyLMDqN7BTtwmf2LM4dNwekryG9s3gG2eVNUSsNf9aj2heCddk5jvApiGaT31pbEmBXDsgUFk14NxMKVZMyXQhgbCYdCrjvWDjjgfEAf7J8h1pBxmZf67H9FKm4W3bqaSis3hxB4CJYaFwTBhQ4pUNFpptwcdk\",\"programIdIndex\":4,\"stackHeight\":1}],\"recentBlockhash\":\"G8iV6Qz9ukBA3h4pZfhBuTVT6yfiyZytftNuKT1gnes2\"},\"signatures\":[\"2GRmRhU6MkDUQ4ndChjun27d7GEjRLEkpAyKCJZW9FuxUA65zDwHjddHasiCdr7aYJUL2BLtcBAwK5ppzRyWnsWS\"]},\"transactionIndex\":26,\"version\":\"legacy\"},\"id\":1}\n"
+   },
+   {
+    "url": "https://public.rpc.solanavibestation.com",
+    "method": "getTransaction",
+    "params": [
+     "2GRmRhU6MkDUQ4ndChjun27d7GEjRLEkpAyKCJZW9FuxUA65zDwHjddHasiCdr7aYJUL2BLtcBAwK5ppzRyWnsWS",
+     {
+      "encoding": "json",
+      "maxSupportedTransactionVersion": 0,
+      "commitment": "finalized"
+     }
+    ],
+    "error": "fetch failed"
+   },
+   {
+    "url": "https://public.rpc.solanavibestation.com",
+    "method": "getTransaction",
+    "params": [
+     "2GRmRhU6MkDUQ4ndChjun27d7GEjRLEkpAyKCJZW9FuxUA65zDwHjddHasiCdr7aYJUL2BLtcBAwK5ppzRyWnsWS",
+     {
+      "encoding": "json",
+      "maxSupportedTransactionVersion": 0,
+      "commitment": "finalized"
+     }
+    ],
+    "error": "fetch failed"
+   },
+   {
+    "url": "https://public.rpc.solanavibestation.com",
+    "method": "getTransaction",
+    "params": [
+     "2GRmRhU6MkDUQ4ndChjun27d7GEjRLEkpAyKCJZW9FuxUA65zDwHjddHasiCdr7aYJUL2BLtcBAwK5ppzRyWnsWS",
+     {
+      "encoding": "json",
+      "maxSupportedTransactionVersion": 0,
+      "commitment": "finalized"
+     }
+    ],
+    "error": "fetch failed"
+   },
+   {
+    "url": "https://solana-rpc.publicnode.com",
+    "method": "getTransaction",
+    "params": [
+     "2GRmRhU6MkDUQ4ndChjun27d7GEjRLEkpAyKCJZW9FuxUA65zDwHjddHasiCdr7aYJUL2BLtcBAwK5ppzRyWnsWS",
+     {
+      "encoding": "json",
+      "maxSupportedTransactionVersion": 0,
+      "commitment": "finalized"
+     }
+    ],
+    "status": 200,
+    "text": "{\"jsonrpc\":\"2.0\",\"result\":null,\"id\":1}\n"
+   },
+   {
+    "url": "https://public.rpc.solanavibestation.com",
+    "method": "getTransaction",
+    "params": [
+     "58Z69tiMh8sNoExBX1ih8wDRYnEYE7mazSr5ntH3z7krXdrpjTj4brwmf6vwkzQi7W4cE5ZfEbKtbMnyu6oCgUR7",
+     {
+      "encoding": "json",
+      "maxSupportedTransactionVersion": 0,
+      "commitment": "finalized"
+     }
+    ],
+    "error": "fetch failed"
+   },
+   {
+    "url": "https://public.rpc.solanavibestation.com",
+    "method": "getTransaction",
+    "params": [
+     "58Z69tiMh8sNoExBX1ih8wDRYnEYE7mazSr5ntH3z7krXdrpjTj4brwmf6vwkzQi7W4cE5ZfEbKtbMnyu6oCgUR7",
+     {
+      "encoding": "json",
+      "maxSupportedTransactionVersion": 0,
+      "commitment": "finalized"
+     }
+    ],
+    "error": "fetch failed"
+   },
+   {
+    "url": "https://public.rpc.solanavibestation.com",
+    "method": "getTransaction",
+    "params": [
+     "58Z69tiMh8sNoExBX1ih8wDRYnEYE7mazSr5ntH3z7krXdrpjTj4brwmf6vwkzQi7W4cE5ZfEbKtbMnyu6oCgUR7",
+     {
+      "encoding": "json",
+      "maxSupportedTransactionVersion": 0,
+      "commitment": "finalized"
+     }
+    ],
+    "error": "fetch failed"
+   },
+   {
+    "url": "https://public.rpc.solanavibestation.com",
+    "method": "getTransaction",
+    "params": [
+     "2GRmRhU6MkDUQ4ndChjun27d7GEjRLEkpAyKCJZW9FuxUA65zDwHjddHasiCdr7aYJUL2BLtcBAwK5ppzRyWnsWS",
+     {
+      "encoding": "json",
+      "maxSupportedTransactionVersion": 0,
+      "commitment": "finalized"
+     }
+    ],
+    "error": "fetch failed"
+   },
+   {
+    "url": "https://public.rpc.solanavibestation.com",
+    "method": "getTransaction",
+    "params": [
+     "2GRmRhU6MkDUQ4ndChjun27d7GEjRLEkpAyKCJZW9FuxUA65zDwHjddHasiCdr7aYJUL2BLtcBAwK5ppzRyWnsWS",
+     {
+      "encoding": "json",
+      "maxSupportedTransactionVersion": 0,
+      "commitment": "finalized"
+     }
+    ],
+    "error": "fetch failed"
+   },
+   {
+    "url": "https://public.rpc.solanavibestation.com",
+    "method": "getTransaction",
+    "params": [
+     "2GRmRhU6MkDUQ4ndChjun27d7GEjRLEkpAyKCJZW9FuxUA65zDwHjddHasiCdr7aYJUL2BLtcBAwK5ppzRyWnsWS",
+     {
+      "encoding": "json",
+      "maxSupportedTransactionVersion": 0,
+      "commitment": "finalized"
+     }
+    ],
+    "error": "fetch failed"
+   },
+   {
+    "url": "https://public.rpc.solanavibestation.com",
+    "method": "getTransaction",
+    "params": [
+     "58Z69tiMh8sNoExBX1ih8wDRYnEYE7mazSr5ntH3z7krXdrpjTj4brwmf6vwkzQi7W4cE5ZfEbKtbMnyu6oCgUR7",
+     {
+      "encoding": "json",
+      "maxSupportedTransactionVersion": 0,
+      "commitment": "finalized"
+     }
+    ],
+    "error": "fetch failed"
+   },
+   {
+    "url": "https://public.rpc.solanavibestation.com",
+    "method": "getTransaction",
+    "params": [
+     "58Z69tiMh8sNoExBX1ih8wDRYnEYE7mazSr5ntH3z7krXdrpjTj4brwmf6vwkzQi7W4cE5ZfEbKtbMnyu6oCgUR7",
+     {
+      "encoding": "json",
+      "maxSupportedTransactionVersion": 0,
+      "commitment": "finalized"
+     }
+    ],
+    "error": "fetch failed"
+   },
+   {
+    "url": "https://public.rpc.solanavibestation.com",
+    "method": "getTransaction",
+    "params": [
+     "58Z69tiMh8sNoExBX1ih8wDRYnEYE7mazSr5ntH3z7krXdrpjTj4brwmf6vwkzQi7W4cE5ZfEbKtbMnyu6oCgUR7",
+     {
+      "encoding": "json",
+      "maxSupportedTransactionVersion": 0,
+      "commitment": "finalized"
+     }
+    ],
+    "error": "fetch failed"
+   },
+   {
+    "url": "https://public.rpc.solanavibestation.com",
+    "method": "getTransaction",
+    "params": [
+     "2GRmRhU6MkDUQ4ndChjun27d7GEjRLEkpAyKCJZW9FuxUA65zDwHjddHasiCdr7aYJUL2BLtcBAwK5ppzRyWnsWS",
+     {
+      "encoding": "json",
+      "maxSupportedTransactionVersion": 0,
+      "commitment": "finalized"
+     }
+    ],
+    "error": "fetch failed"
+   },
+   {
+    "url": "https://public.rpc.solanavibestation.com",
+    "method": "getTransaction",
+    "params": [
+     "2GRmRhU6MkDUQ4ndChjun27d7GEjRLEkpAyKCJZW9FuxUA65zDwHjddHasiCdr7aYJUL2BLtcBAwK5ppzRyWnsWS",
+     {
+      "encoding": "json",
+      "maxSupportedTransactionVersion": 0,
+      "commitment": "finalized"
+     }
+    ],
+    "error": "fetch failed"
+   },
+   {
+    "url": "https://public.rpc.solanavibestation.com",
+    "method": "getTransaction",
+    "params": [
+     "2GRmRhU6MkDUQ4ndChjun27d7GEjRLEkpAyKCJZW9FuxUA65zDwHjddHasiCdr7aYJUL2BLtcBAwK5ppzRyWnsWS",
+     {
+      "encoding": "json",
+      "maxSupportedTransactionVersion": 0,
+      "commitment": "finalized"
+     }
+    ],
+    "error": "fetch failed"
+   },
+   {
+    "url": "https://public.rpc.solanavibestation.com",
+    "method": "getTransaction",
+    "params": [
+     "58Z69tiMh8sNoExBX1ih8wDRYnEYE7mazSr5ntH3z7krXdrpjTj4brwmf6vwkzQi7W4cE5ZfEbKtbMnyu6oCgUR7",
+     {
+      "encoding": "json",
+      "maxSupportedTransactionVersion": 0,
+      "commitment": "finalized"
+     }
+    ],
+    "error": "fetch failed"
+   },
+   {
+    "url": "https://public.rpc.solanavibestation.com",
+    "method": "getTransaction",
+    "params": [
+     "58Z69tiMh8sNoExBX1ih8wDRYnEYE7mazSr5ntH3z7krXdrpjTj4brwmf6vwkzQi7W4cE5ZfEbKtbMnyu6oCgUR7",
+     {
+      "encoding": "json",
+      "maxSupportedTransactionVersion": 0,
+      "commitment": "finalized"
+     }
+    ],
+    "error": "fetch failed"
+   },
+   {
+    "url": "https://public.rpc.solanavibestation.com",
+    "method": "getTransaction",
+    "params": [
+     "58Z69tiMh8sNoExBX1ih8wDRYnEYE7mazSr5ntH3z7krXdrpjTj4brwmf6vwkzQi7W4cE5ZfEbKtbMnyu6oCgUR7",
+     {
+      "encoding": "json",
+      "maxSupportedTransactionVersion": 0,
+      "commitment": "finalized"
+     }
+    ],
+    "error": "fetch failed"
+   },
+   {
+    "url": "https://public.rpc.solanavibestation.com",
+    "method": "getTransaction",
+    "params": [
+     "2GRmRhU6MkDUQ4ndChjun27d7GEjRLEkpAyKCJZW9FuxUA65zDwHjddHasiCdr7aYJUL2BLtcBAwK5ppzRyWnsWS",
+     {
+      "encoding": "json",
+      "maxSupportedTransactionVersion": 0,
+      "commitment": "finalized"
+     }
+    ],
+    "error": "fetch failed"
+   },
+   {
+    "url": "https://public.rpc.solanavibestation.com",
+    "method": "getTransaction",
+    "params": [
+     "2GRmRhU6MkDUQ4ndChjun27d7GEjRLEkpAyKCJZW9FuxUA65zDwHjddHasiCdr7aYJUL2BLtcBAwK5ppzRyWnsWS",
+     {
+      "encoding": "json",
+      "maxSupportedTransactionVersion": 0,
+      "commitment": "finalized"
+     }
+    ],
+    "error": "fetch failed"
+   },
+   {
+    "url": "https://public.rpc.solanavibestation.com",
+    "method": "getTransaction",
+    "params": [
+     "2GRmRhU6MkDUQ4ndChjun27d7GEjRLEkpAyKCJZW9FuxUA65zDwHjddHasiCdr7aYJUL2BLtcBAwK5ppzRyWnsWS",
+     {
+      "encoding": "json",
+      "maxSupportedTransactionVersion": 0,
+      "commitment": "finalized"
+     }
+    ],
+    "error": "fetch failed"
+   }
+  ]
+ },
+ "good": {
+  "solana": [
+   "https://api.mainnet-beta.solana.com",
+   "https://solana-mainnet.gateway.tatum.io",
+   "https://solana-rpc.publicnode.com"
+  ],
+  "answers": [
+   {
+    "url": "https://api.mainnet-beta.solana.com",
+    "method": "getTransaction",
+    "params": [
+     "58Z69tiMh8sNoExBX1ih8wDRYnEYE7mazSr5ntH3z7krXdrpjTj4brwmf6vwkzQi7W4cE5ZfEbKtbMnyu6oCgUR7",
+     {
+      "encoding": "json",
+      "maxSupportedTransactionVersion": 0,
+      "commitment": "finalized"
+     }
+    ],
+    "status": 200,
+    "text": "{\"jsonrpc\":\"2.0\",\"result\":{\"blockTime\":1794463012,\"meta\":{\"computeUnitsConsumed\":24665,\"costUnits\":26265,\"err\":null,\"fee\":45300,\"innerInstructions\":[{\"index\":1,\"instructions\":[{\"accounts\":[0,1],\"data\":\"3Bxs4Bc5gXtaEbdR\",\"programIdIndex\":3,\"stackHeight\":2},{\"accounts\":[1],\"data\":\"9krTD9nufgTDYdLB\",\"programIdIndex\":3,\"stackHeight\":2},{\"accounts\":[1],\"data\":\"SYXsB9ErF8mwKqNWn7ffFhinTDcH3vCFHnpcVye5XuDq3iLX\",\"programIdIndex\":3,\"stackHeight\":2}]},{\"index\":2,\"instructions\":[{\"accounts\":[0,1],\"data\":\"3Bxs3zw4oaQEQe4P\",\"programIdIndex\":3,\"stackHeight\":2}]}],\"loadedAddresses\":{\"readonly\":[],\"writable\":[]},\"logMessages\":[\"Program ComputeBudget111111111111111111111111111111 invoke [1]\",\"Program ComputeBudget111111111111111111111111111111 success\",\"Program AddressLookupTab1e1111111111111111111111111 invoke [1]\",\"Program log: Instruction: CreateLookupTable\",\"Program 11111111111111111111111111111111 invoke [2]\",\"Program 11111111111111111111111111111111 success\",\"Program 11111111111111111111111111111111 invoke [2]\",\"Program 11111111111111111111111111111111 success\",\"Program 11111111111111111111111111111111 invoke [2]\",\"Program 11111111111111111111111111111111 success\",\"Program AddressLookupTab1e1111111111111111111111111 consumed 10505 of 402850 compute units\",\"Program AddressLookupTab1e1111111111111111111111111 success\",\"Program AddressLookupTab1e1111111111111111111111111 invoke [1]\",\"Program log: Instruction: ExtendLookupTable\",\"Program 11111111111111111111111111111111 invoke [2]\",\"Program 11111111111111111111111111111111 success\",\"Program AddressLookupTab1e1111111111111111111111111 consumed 14010 of 392345 compute units\",\"Program AddressLookupTab1e1111111111111111111111111 success\"],\"postBalances\":[37943620,5486400,1,1,1141440],\"postTokenBalances\":[],\"preBalances\":[43475320,0,1,1,1141440],\"preTokenBalances\":[],\"rewards\":[],\"status\":{\"Ok\":null}},\"slot\":468415987,\"transaction\":{\"message\":{\"accountKeys\":[\"Bzi6GZ1pNEaCevxmwpMLaLqLkEYm6tXuat3UWSwBRCbA\",\"4PyMCJPKZQvrLsj8DKCG2Yddh3vDmTf1EWnjCL1Bk3Pc\",\"ComputeBudget111111111111111111111111111111\",\"11111111111111111111111111111111\",\"AddressLookupTab1e1111111111111111111111111\"],\"header\":{\"numReadonlySignedAccounts\":0,\"numReadonlyUnsignedAccounts\":3,\"numRequiredSignatures\":1},\"instructions\":[{\"accounts\":[],\"data\":\"3gJqkocMWaMm\",\"programIdIndex\":2,\"stackHeight\":1},{\"accounts\":[1,0,0,3],\"data\":\"11113cgghKPnSJq7B\",\"programIdIndex\":4,\"stackHeight\":1},{\"accounts\":[1,0,0,3],\"data\":\"VEm8f22atYD9N1kCzFhg6AWjFALbztmxdY7oXGg9SAwxLg2JnqRVhQ8bbKJtWEHjE6veoke4PqUDd4HwFQNQ4n9dQ2QdnhGGWYmKt74VvVMciWfWhrnqQeKdDM19taPhfs3oRZpGMQUK8obchhhhbyVZdhrMcuJMq7Qirq1CsnW97V9rueF5Qm3HDust1cXC1FWWFBXWnTweC4seywGCTqAuv8LiVtgQNtAixSUs1KkLEzPbive89Xpyo3g17xvX9CHwL5NquF9cbJcZ4qbhTGFWaAC9FDuMCQfxTmygzkSbo2x8xaUZQkKAWJy2KsBjGSgDiZE8bLmR1QKhmxPec27h7Xe721ZC39mSa6Y4oEKkwzkADxjd63GDtSaCz2t3xWAvsKYWUZs9Ps4P7qADvZRkGAfqRdnEzCDsaATCS1KBDv7R8T89JsEW5RzKb1zUbDD6SM2hZx6PaYabLAXtMoUjAuVRgqejgcV4HvPCSH2d9Cspg8jNS9fu6JvTbSuapG7GJ5ykCCSo78rqq13gKhbvpUxZTz8dj9qLjE4cTPJ1LPHRdgLvMChZ83JukmfecWW6uVmPcNAJHWDJVmoSL9YEEQtewUhVasgT1PmSuDS2tM9GXRwCLY8iD7NdjxQ53nzqKDxzgLRnUrj4iBNy3YnsRueB5GukqVWqmS1sKSjYcgipwE66ZtoLDB9ha2gPRPskCMWEBLAourChDbyQi2VSqjWvedk3VMM1v14SKGgDe3qmEXePF1ZBtg5Uo9tRU5kFrBAXiSJwNMeSupxqvRM9of3mXiF22j7jMqgcr7toJTKJDPwDgdp4UDsHrSdBgvHmmcEhgK3YMPm5tUMJednMntc7iPJvFNoJ33ngShjFE6X8Si5NuATm6DqXqbrowM6bJcf9vb25BY5ddhRcy5WkwAnFoheSZiDDk5HL9jaZrfyYWCToumA4dtnf7ovYchWAeRJ3GWegvjRCXEw4qkEdSeajPeJ1nRAGWocynkH31sbMNJFtufuCH3hGnkbVNvSiWDV16bmD68K1eRhZNodBwcQVZq4EmY4dDa2gvSUCdQivoA7FbbWPdH4wxEaLDEm9iZN3omuvK5jpNaYrgVkM6v7xXW4sYoQTDvGTcdRXQHtBNGH4VtSgct8FecAujFuT7tRx2nTXp7LEWkNNTBMT8mbftBfCjxEF3ajL6464K4abm1kcNsnGbpycXzREeJ5KFVLSv8XkkQJjGKU1R6R\",\"programIdIndex\":4,\"stackHeight\":1}],\"recentBlockhash\":\"aFk8W5vQdK61GTFJRYhUdXi2EGycUnMinH6saUuMYkg\"},\"signatures\":[\"58Z69tiMh8sNoExBX1ih8wDRYnEYE7mazSr5ntH3z7krXdrpjTj4brwmf6vwkzQi7W4cE5ZfEbKtbMnyu6oCgUR7\"]},\"transactionIndex\":300,\"version\":\"legacy\"},\"id\":1}\n"
+   },
+   {
+    "url": "https://solana-mainnet.gateway.tatum.io",
+    "method": "getTransaction",
+    "params": [
+     "58Z69tiMh8sNoExBX1ih8wDRYnEYE7mazSr5ntH3z7krXdrpjTj4brwmf6vwkzQi7W4cE5ZfEbKtbMnyu6oCgUR7",
+     {
+      "encoding": "json",
+      "maxSupportedTransactionVersion": 0,
+      "commitment": "finalized"
+     }
+    ],
+    "status": 200,
+    "text": "{\"result\":{\"blockTime\":1794463012,\"meta\":{\"computeUnitsConsumed\":24665,\"costUnits\":26265,\"err\":null,\"fee\":45300,\"innerInstructions\":[{\"index\":1,\"instructions\":[{\"accounts\":[0,1],\"data\":\"3Bxs4Bc5gXtaEbdR\",\"programIdIndex\":3,\"stackHeight\":2},{\"accounts\":[1],\"data\":\"9krTD9nufgTDYdLB\",\"programIdIndex\":3,\"stackHeight\":2},{\"accounts\":[1],\"data\":\"SYXsB9ErF8mwKqNWn7ffFhinTDcH3vCFHnpcVye5XuDq3iLX\",\"programIdIndex\":3,\"stackHeight\":2}]},{\"index\":2,\"instructions\":[{\"accounts\":[0,1],\"data\":\"3Bxs3zw4oaQEQe4P\",\"programIdIndex\":3,\"stackHeight\":2}]}],\"loadedAddresses\":{\"readonly\":[],\"writable\":[]},\"logMessages\":[\"Program ComputeBudget111111111111111111111111111111 invoke [1]\",\"Program ComputeBudget111111111111111111111111111111 success\",\"Program AddressLookupTab1e1111111111111111111111111 invoke [1]\",\"Program log: Instruction: CreateLookupTable\",\"Program 11111111111111111111111111111111 invoke [2]\",\"Program 11111111111111111111111111111111 success\",\"Program 11111111111111111111111111111111 invoke [2]\",\"Program 11111111111111111111111111111111 success\",\"Program 11111111111111111111111111111111 invoke [2]\",\"Program 11111111111111111111111111111111 success\",\"Program AddressLookupTab1e1111111111111111111111111 consumed 10505 of 402850 compute units\",\"Program AddressLookupTab1e1111111111111111111111111 success\",\"Program AddressLookupTab1e1111111111111111111111111 invoke [1]\",\"Program log: Instruction: ExtendLookupTable\",\"Program 11111111111111111111111111111111 invoke [2]\",\"Program 11111111111111111111111111111111 success\",\"Program AddressLookupTab1e1111111111111111111111111 consumed 14010 of 392345 compute units\",\"Program AddressLookupTab1e1111111111111111111111111 success\"],\"postBalances\":[37943620,5486400,1,1,1141440],\"postTokenBalances\":[],\"preBalances\":[43475320,0,1,1,1141440],\"preTokenBalances\":[],\"rewards\":[],\"status\":{\"Ok\":null}},\"slot\":468415987,\"transaction\":{\"message\":{\"accountKeys\":[\"Bzi6GZ1pNEaCevxmwpMLaLqLkEYm6tXuat3UWSwBRCbA\",\"4PyMCJPKZQvrLsj8DKCG2Yddh3vDmTf1EWnjCL1Bk3Pc\",\"ComputeBudget111111111111111111111111111111\",\"11111111111111111111111111111111\",\"AddressLookupTab1e1111111111111111111111111\"],\"header\":{\"numReadonlySignedAccounts\":0,\"numReadonlyUnsignedAccounts\":3,\"numRequiredSignatures\":1},\"instructions\":[{\"accounts\":[],\"data\":\"3gJqkocMWaMm\",\"programIdIndex\":2,\"stackHeight\":1},{\"accounts\":[1,0,0,3],\"data\":\"11113cgghKPnSJq7B\",\"programIdIndex\":4,\"stackHeight\":1},{\"accounts\":[1,0,0,3],\"data\":\"VEm8f22atYD9N1kCzFhg6AWjFALbztmxdY7oXGg9SAwxLg2JnqRVhQ8bbKJtWEHjE6veoke4PqUDd4HwFQNQ4n9dQ2QdnhGGWYmKt74VvVMciWfWhrnqQeKdDM19taPhfs3oRZpGMQUK8obchhhhbyVZdhrMcuJMq7Qirq1CsnW97V9rueF5Qm3HDust1cXC1FWWFBXWnTweC4seywGCTqAuv8LiVtgQNtAixSUs1KkLEzPbive89Xpyo3g17xvX9CHwL5NquF9cbJcZ4qbhTGFWaAC9FDuMCQfxTmygzkSbo2x8xaUZQkKAWJy2KsBjGSgDiZE8bLmR1QKhmxPec27h7Xe721ZC39mSa6Y4oEKkwzkADxjd63GDtSaCz2t3xWAvsKYWUZs9Ps4P7qADvZRkGAfqRdnEzCDsaATCS1KBDv7R8T89JsEW5RzKb1zUbDD6SM2hZx6PaYabLAXtMoUjAuVRgqejgcV4HvPCSH2d9Cspg8jNS9fu6JvTbSuapG7GJ5ykCCSo78rqq13gKhbvpUxZTz8dj9qLjE4cTPJ1LPHRdgLvMChZ83JukmfecWW6uVmPcNAJHWDJVmoSL9YEEQtewUhVasgT1PmSuDS2tM9GXRwCLY8iD7NdjxQ53nzqKDxzgLRnUrj4iBNy3YnsRueB5GukqVWqmS1sKSjYcgipwE66ZtoLDB9ha2gPRPskCMWEBLAourChDbyQi2VSqjWvedk3VMM1v14SKGgDe3qmEXePF1ZBtg5Uo9tRU5kFrBAXiSJwNMeSupxqvRM9of3mXiF22j7jMqgcr7toJTKJDPwDgdp4UDsHrSdBgvHmmcEhgK3YMPm5tUMJednMntc7iPJvFNoJ33ngShjFE6X8Si5NuATm6DqXqbrowM6bJcf9vb25BY5ddhRcy5WkwAnFoheSZiDDk5HL9jaZrfyYWCToumA4dtnf7ovYchWAeRJ3GWegvjRCXEw4qkEdSeajPeJ1nRAGWocynkH31sbMNJFtufuCH3hGnkbVNvSiWDV16bmD68K1eRhZNodBwcQVZq4EmY4dDa2gvSUCdQivoA7FbbWPdH4wxEaLDEm9iZN3omuvK5jpNaYrgVkM6v7xXW4sYoQTDvGTcdRXQHtBNGH4VtSgct8FecAujFuT7tRx2nTXp7LEWkNNTBMT8mbftBfCjxEF3ajL6464K4abm1kcNsnGbpycXzREeJ5KFVLSv8XkkQJjGKU1R6R\",\"programIdIndex\":4,\"stackHeight\":1}],\"recentBlockhash\":\"aFk8W5vQdK61GTFJRYhUdXi2EGycUnMinH6saUuMYkg\"},\"signatures\":[\"58Z69tiMh8sNoExBX1ih8wDRYnEYE7mazSr5ntH3z7krXdrpjTj4brwmf6vwkzQi7W4cE5ZfEbKtbMnyu6oCgUR7\"]},\"transactionIndex\":300,\"version\":\"legacy\"},\"id\":1,\"jsonrpc\":\"2.0\"}"
+   },
+   {
+    "url": "https://solana-rpc.publicnode.com",
+    "method": "getTransaction",
+    "params": [
+     "58Z69tiMh8sNoExBX1ih8wDRYnEYE7mazSr5ntH3z7krXdrpjTj4brwmf6vwkzQi7W4cE5ZfEbKtbMnyu6oCgUR7",
+     {
+      "encoding": "json",
+      "maxSupportedTransactionVersion": 0,
+      "commitment": "finalized"
+     }
+    ],
+    "status": 200,
+    "text": "{\"jsonrpc\":\"2.0\",\"result\":null,\"id\":1}\n"
+   },
+   {
+    "url": "https://solana-rpc.publicnode.com",
+    "method": "getFirstAvailableBlock",
+    "params": [],
+    "status": 200,
+    "text": "{\"jsonrpc\":\"2.0\",\"result\":473607913,\"id\":1}\n"
+   },
+   {
+    "url": "https://api.mainnet-beta.solana.com",
+    "method": "getTransaction",
+    "params": [
+     "2GRmRhU6MkDUQ4ndChjun27d7GEjRLEkpAyKCJZW9FuxUA65zDwHjddHasiCdr7aYJUL2BLtcBAwK5ppzRyWnsWS",
+     {
+      "encoding": "json",
+      "maxSupportedTransactionVersion": 0,
+      "commitment": "finalized"
+     }
+    ],
+    "status": 200,
+    "text": "{\"jsonrpc\":\"2.0\",\"result\":{\"blockTime\":1794468036,\"meta\":{\"computeUnitsConsumed\":14458,\"costUnits\":16063,\"err\":null,\"fee\":25300,\"innerInstructions\":[{\"index\":1,\"instructions\":[{\"accounts\":[0,1],\"data\":\"3Bxs411jAgDbBLyu\",\"programIdIndex\":3,\"stackHeight\":2}]}],\"loadedAddresses\":{\"readonly\":[],\"writable\":[]},\"logMessages\":[\"Program ComputeBudget111111111111111111111111111111 invoke [1]\",\"Program ComputeBudget111111111111111111111111111111 success\",\"Program AddressLookupTab1e1111111111111111111111111 invoke [1]\",\"Program log: Instruction: ExtendLookupTable\",\"Program 11111111111111111111111111111111 invoke [2]\",\"Program 11111111111111111111111111111111 success\",\"Program AddressLookupTab1e1111111111111111111111111 consumed 14308 of 202850 compute units\",\"Program AddressLookupTab1e1111111111111111111111111 success\"],\"postBalances\":[33204380,10200640,1,1,1141440],\"postTokenBalances\":[],\"preBalances\":[37943920,5486400,1,1,1141440],\"preTokenBalances\":[],\"rewards\":[],\"status\":{\"Ok\":null}},\"slot\":468439361,\"transaction\":{\"message\":{\"accountKeys\":[\"Bzi6GZ1pNEaCevxmwpMLaLqLkEYm6tXuat3UWSwBRCbA\",\"4PyMCJPKZQvrLsj8DKCG2Yddh3vDmTf1EWnjCL1Bk3Pc\",\"ComputeBudget111111111111111111111111111111\",\"11111111111111111111111111111111\",\"AddressLookupTab1e1111111111111111111111111\"],\"header\":{\"numReadonlySignedAccounts\":0,\"numReadonlyUnsignedAccounts\":3,\"numRequiredSignatures\":1},\"instructions\":[{\"accounts\":[],\"data\":\"3gJqkocMWaMm\",\"programIdIndex\":2,\"stackHeight\":1},{\"accounts\":[1,0,0,3],\"data\":\"9PWxsZjeaqnP4if61zuoEkrysebhqe9iBzNQXDAp2i2qVUjferacpubDX1wR2mDoYc4ms8ZPHpugNhCgZ9NE2e9u67CtXFcb5KfQvmj5jcoQZaR6J6Rj7qaYA2qW1xiF16YEcMA38gZpeiuFE93CZ1C59bG34VSu9FaeWu6TnA3gdihw6dFmk34vC9e6wxhRusUJqExeca7zdzQmFTWhBZPqgz4moqbd4MWhNEMcD9kEMqAvxMywNgWArDHe3F6s7y8V2P81P47Bcy2cDZGVjdMS6bgE5Rg43hJEZbtfjrNZMpaoLV5zH9gkq8Vj5PaoHUYNTiyeE5MfUbHsfeabnFp2geYvRAfniac7fdgrfHsFH6GR9qmZHcnGrY65BBh1fohYwLUEwY2ENtNakqZSdLFcHd71FjeJskT8btCqxHcsamhqFX68ejiXLEtVAjQT4hDq8tDP3RVG3QRr5Kikvk5pyDHVMUZ1SKxbdg1vKMm6wwTtFJDjECVyfuv2JAYntweLykSEa6vqWwWp9y9BHNAN4y2jPCgRQfGcAqzJEnz9HrDcB2XwoSLket1Vnq7A8qpoChUchfnji4gaWRYkLxBHsJQCBiwrRanNo8fbLPNXB3ycg4m9e8nuivN4Z9V89AQSo2GXdhei8EYAvSbyYu2TM3xsPmKHUXC8pUB2s2C5wKnVox66e3mZCPX7JENrEdRDzDvS7x5bM7zpfJZKiBVzAfnWg4qvduHSQAZs4nLxpDQo2wFLF2TRtbkhzNALfKFWmRKiUMZLw1asYbBBV9pdU4TDKsnptnaQxxafPkUxbtdANrrE5yWQyo7NCLrMweg84epbBB9PEoHGxFq7Ggr5UpnDS46vc4q9nCN8PX8ajudcaME1XF9RJ9dep7d46KmHvLXn7nY4Tbd2k3vFHuve7M6zHmhtoppxeKm9hq45o21HBTaKKFAtRJSArhfV7aaR6uFfsWfXVTGLsp1LRrNbGpnPLhrwHa91dV1KKQ3XfYv1ZCTnRfEAcTs8SNjiWrSXBqS51LRQqFm3b2maQWta9wNfBw7EQrRThfjeCneQPAUknKXyft6MX7XmEiQdBkoExX8LPRUP1CD1FZWcwDpQgRH8yQj5xtPRHmyLMDqN7BTtwmf2LM4dNwekryG9s3gG2eVNUSsNf9aj2heCddk5jvApiGaT31pbEmBXDsgUFk14NxMKVZMyXQhgbCYdCrjvWDjjgfEAf7J8h1pBxmZf67H9FKm4W3bqaSis3hxB4CJYaFwTBhQ4pUNFpptwcdk\",\"programIdIndex\":4,\"stackHeight\":1}],\"recentBlockhash\":\"G8iV6Qz9ukBA3h4pZfhBuTVT6yfiyZytftNuKT1gnes2\"},\"signatures\":[\"2GRmRhU6MkDUQ4ndChjun27d7GEjRLEkpAyKCJZW9FuxUA65zDwHjddHasiCdr7aYJUL2BLtcBAwK5ppzRyWnsWS\"]},\"transactionIndex\":26,\"version\":\"legacy\"},\"id\":1}\n"
+   },
+   {
+    "url": "https://solana-mainnet.gateway.tatum.io",
+    "method": "getTransaction",
+    "params": [
+     "2GRmRhU6MkDUQ4ndChjun27d7GEjRLEkpAyKCJZW9FuxUA65zDwHjddHasiCdr7aYJUL2BLtcBAwK5ppzRyWnsWS",
+     {
+      "encoding": "json",
+      "maxSupportedTransactionVersion": 0,
+      "commitment": "finalized"
+     }
+    ],
+    "status": 200,
+    "text": "{\"result\":{\"blockTime\":1794468036,\"meta\":{\"computeUnitsConsumed\":14458,\"costUnits\":16063,\"err\":null,\"fee\":25300,\"innerInstructions\":[{\"index\":1,\"instructions\":[{\"accounts\":[0,1],\"data\":\"3Bxs411jAgDbBLyu\",\"programIdIndex\":3,\"stackHeight\":2}]}],\"loadedAddresses\":{\"readonly\":[],\"writable\":[]},\"logMessages\":[\"Program ComputeBudget111111111111111111111111111111 invoke [1]\",\"Program ComputeBudget111111111111111111111111111111 success\",\"Program AddressLookupTab1e1111111111111111111111111 invoke [1]\",\"Program log: Instruction: ExtendLookupTable\",\"Program 11111111111111111111111111111111 invoke [2]\",\"Program 11111111111111111111111111111111 success\",\"Program AddressLookupTab1e1111111111111111111111111 consumed 14308 of 202850 compute units\",\"Program AddressLookupTab1e1111111111111111111111111 success\"],\"postBalances\":[33204380,10200640,1,1,1141440],\"postTokenBalances\":[],\"preBalances\":[37943920,5486400,1,1,1141440],\"preTokenBalances\":[],\"rewards\":[],\"status\":{\"Ok\":null}},\"slot\":468439361,\"transaction\":{\"message\":{\"accountKeys\":[\"Bzi6GZ1pNEaCevxmwpMLaLqLkEYm6tXuat3UWSwBRCbA\",\"4PyMCJPKZQvrLsj8DKCG2Yddh3vDmTf1EWnjCL1Bk3Pc\",\"ComputeBudget111111111111111111111111111111\",\"11111111111111111111111111111111\",\"AddressLookupTab1e1111111111111111111111111\"],\"header\":{\"numReadonlySignedAccounts\":0,\"numReadonlyUnsignedAccounts\":3,\"numRequiredSignatures\":1},\"instructions\":[{\"accounts\":[],\"data\":\"3gJqkocMWaMm\",\"programIdIndex\":2,\"stackHeight\":1},{\"accounts\":[1,0,0,3],\"data\":\"9PWxsZjeaqnP4if61zuoEkrysebhqe9iBzNQXDAp2i2qVUjferacpubDX1wR2mDoYc4ms8ZPHpugNhCgZ9NE2e9u67CtXFcb5KfQvmj5jcoQZaR6J6Rj7qaYA2qW1xiF16YEcMA38gZpeiuFE93CZ1C59bG34VSu9FaeWu6TnA3gdihw6dFmk34vC9e6wxhRusUJqExeca7zdzQmFTWhBZPqgz4moqbd4MWhNEMcD9kEMqAvxMywNgWArDHe3F6s7y8V2P81P47Bcy2cDZGVjdMS6bgE5Rg43hJEZbtfjrNZMpaoLV5zH9gkq8Vj5PaoHUYNTiyeE5MfUbHsfeabnFp2geYvRAfniac7fdgrfHsFH6GR9qmZHcnGrY65BBh1fohYwLUEwY2ENtNakqZSdLFcHd71FjeJskT8btCqxHcsamhqFX68ejiXLEtVAjQT4hDq8tDP3RVG3QRr5Kikvk5pyDHVMUZ1SKxbdg1vKMm6wwTtFJDjECVyfuv2JAYntweLykSEa6vqWwWp9y9BHNAN4y2jPCgRQfGcAqzJEnz9HrDcB2XwoSLket1Vnq7A8qpoChUchfnji4gaWRYkLxBHsJQCBiwrRanNo8fbLPNXB3ycg4m9e8nuivN4Z9V89AQSo2GXdhei8EYAvSbyYu2TM3xsPmKHUXC8pUB2s2C5wKnVox66e3mZCPX7JENrEdRDzDvS7x5bM7zpfJZKiBVzAfnWg4qvduHSQAZs4nLxpDQo2wFLF2TRtbkhzNALfKFWmRKiUMZLw1asYbBBV9pdU4TDKsnptnaQxxafPkUxbtdANrrE5yWQyo7NCLrMweg84epbBB9PEoHGxFq7Ggr5UpnDS46vc4q9nCN8PX8ajudcaME1XF9RJ9dep7d46KmHvLXn7nY4Tbd2k3vFHuve7M6zHmhtoppxeKm9hq45o21HBTaKKFAtRJSArhfV7aaR6uFfsWfXVTGLsp1LRrNbGpnPLhrwHa91dV1KKQ3XfYv1ZCTnRfEAcTs8SNjiWrSXBqS51LRQqFm3b2maQWta9wNfBw7EQrRThfjeCneQPAUknKXyft6MX7XmEiQdBkoExX8LPRUP1CD1FZWcwDpQgRH8yQj5xtPRHmyLMDqN7BTtwmf2LM4dNwekryG9s3gG2eVNUSsNf9aj2heCddk5jvApiGaT31pbEmBXDsgUFk14NxMKVZMyXQhgbCYdCrjvWDjjgfEAf7J8h1pBxmZf67H9FKm4W3bqaSis3hxB4CJYaFwTBhQ4pUNFpptwcdk\",\"programIdIndex\":4,\"stackHeight\":1}],\"recentBlockhash\":\"G8iV6Qz9ukBA3h4pZfhBuTVT6yfiyZytftNuKT1gnes2\"},\"signatures\":[\"2GRmRhU6MkDUQ4ndChjun27d7GEjRLEkpAyKCJZW9FuxUA65zDwHjddHasiCdr7aYJUL2BLtcBAwK5ppzRyWnsWS\"]},\"transactionIndex\":26,\"version\":\"legacy\"},\"id\":1,\"jsonrpc\":\"2.0\"}"
+   },
+   {
+    "url": "https://solana-rpc.publicnode.com",
+    "method": "getTransaction",
+    "params": [
+     "2GRmRhU6MkDUQ4ndChjun27d7GEjRLEkpAyKCJZW9FuxUA65zDwHjddHasiCdr7aYJUL2BLtcBAwK5ppzRyWnsWS",
+     {
+      "encoding": "json",
+      "maxSupportedTransactionVersion": 0,
+      "commitment": "finalized"
+     }
+    ],
+    "status": 200,
+    "text": "{\"jsonrpc\":\"2.0\",\"result\":null,\"id\":1}\n"
+   }
+  ]
+ }
+}

@@ -83,8 +83,7 @@ async function read(fetchFn, url, method, params) {
  *  reader with no answer, or whose null its history does not reach (its first available block above the tx's slot from
  *  another reader; with no slot read, that block's time after FLOOR), is left out; when that leaves fewer than two
  *  operators holding it, NoAnswer (the row is quiet, never passed). */
-async function readBack(fetchFn, cluster, sig) {
-  const urls = TX_RPCS[cluster];
+async function readBack(fetchFn, urls, sig) {
   const got = await Promise.allSettled(urls.map((url) => read(fetchFn, url, "getTransaction", [sig, { encoding: "base64", commitment: "finalized", maxSupportedTransactionVersion: 0 }])));
   for (const g of got) if (g.status === "rejected" && !(g.reason instanceof NoAnswer)) throw g.reason;
   const held = got.map((g) => (g.status === "fulfilled" ? g.value : undefined)); // undefined: no answer
@@ -189,7 +188,7 @@ function entryProblems(rec, cluster, g) {
 }
 
 /** One deployed generation: its table, list and txs read on the cluster's two RPCs and judged. */
-async function checkRow({ cluster, venue, k, newest, rec, fetchFn, call }) {
+async function checkRow({ cluster, venue, k, newest, rec, fetchFn, call, txUrls }) {
   const { rpcs } = CLUSTERS[cluster];
   const at = `${cluster} ${venue} g${k + 1}`;
   const lines = [];
@@ -229,8 +228,8 @@ async function checkRow({ cluster, venue, k, newest, rec, fetchFn, call }) {
       }
     }
     for (const t of g.txs) {
-      const landed = await readBack(fetchFn, cluster, t.signature);
-      say(landed, `${String(t.step ?? "tx").slice(0, 60)} ${t.signature.slice(0, 12)}... reads back succeeded at finalized on two operators of ${TX_RPCS[cluster].join(" and ")}: ${landed}`);
+      const landed = await readBack(fetchFn, txUrls, t.signature);
+      say(landed, `${String(t.step ?? "tx").slice(0, 60)} ${t.signature.slice(0, 12)}... reads back succeeded at finalized on two operators of ${txUrls.join(" and ")}: ${landed}`);
     }
   } catch (e) {
     // the kit's reader wraps a provider's throw in its own words: a no-answer is found by its class on the chain
@@ -251,7 +250,7 @@ async function checkRow({ cluster, venue, k, newest, rec, fetchFn, call }) {
  * schedule), the tree alarm alone: the pins against the record, each cluster's genesis and its pool's tree sizes, and
  * no table or tx read.
  */
-export async function checkTables({ records, pins, fetchFn = fetch, alarm = false }) {
+export async function checkTables({ records, pins, fetchFn = fetch, alarm = false, txRpcs = TX_RPCS }) {
   const lines = [];
   let deployed = 0, failed = 0, notDeployed = 0, unanswered = 0, notPinned = 0;
   for (const cluster of Object.keys(CLUSTERS)) {
@@ -318,7 +317,7 @@ export async function checkTables({ records, pins, fetchFn = fetch, alarm = fals
               notPinned++;
             }
             if (alarm) continue;
-            const c = await checkRow({ cluster, venue, k, newest: k === gens.length - 1, rec, fetchFn, call: r.call });
+            const c = await checkRow({ cluster, venue, k, newest: k === gens.length - 1, rec, fetchFn, call: r.call, txUrls: txRpcs[cluster] });
             row.push(...c.lines);
             ok &&= c.ok;
             quiet ||= c.quiet;
@@ -359,7 +358,8 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     const pins = parsePins(readFileSync(PINS_SOURCE, "utf8"));
     const rec = recorder();
     const r = await checkTables({ records, pins, fetchFn: opt("--record") ? rec.fetchFn : fetch, alarm: args.includes("--alarm") });
-    if (opt("--record")) writeFileSync(opt("--record"), JSON.stringify({ records, pins, answers: rec.answers }) + "\n");
+    // the readers the run read its txs on, so a replay reads on the same list after the gate's changes
+    if (opt("--record")) writeFileSync(opt("--record"), JSON.stringify({ records, pins, txRpcs: TX_RPCS, answers: rec.answers }) + "\n");
     for (const l of r.lines) console.log(`live-check ${KEY}: ${l}`);
     console.log(`live-check ${KEY}: ${r.summary}`);
     process.exit(EXIT[r.verdict]);
