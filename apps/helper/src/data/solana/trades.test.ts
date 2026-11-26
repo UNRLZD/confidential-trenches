@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
 import { fromLogs } from "./decode.ts";
 import { joinBars } from "../candles.ts";
-import { BACK_SPAN_S, BACK_TX_MAX, COLD_SIGS, createSolanaTrades, FAILED_OPEN_MS, PYTH_RECEIVER, PYTH_SOL_USD, pythSolUsd, SHORT_PAGE, SYSVAR_CLOCK, TRADES_RPCS, wsSource, type Note, type SourceEvents } from "./trades.ts";
+import { BACK_PARALLEL, BACK_SPAN_S, BACK_TX_MAX, COLD_SIGS, createSolanaTrades, FAILED_OPEN_MS, PYTH_RECEIVER, PYTH_SOL_USD, pythSolUsd, SHORT_PAGE, SYSVAR_CLOCK, TRADES_RPCS, wsSource, type Note, type SourceEvents } from "./trades.ts";
 import { createRpc } from "../../rpc/rpc.ts";
 import { b58decode, b58encode } from "./lists.ts";
 import { turnSlicer } from "../../limits/turn.ts";
@@ -1541,6 +1541,84 @@ test("card app-chart-check-inside-its-bound: a small read back asked behind BACK
   t.stop();
   assert.equal(s.filling, undefined, "the small read back done");
   assert.deepEqual(bigs.map((x) => x.filling), [true, true], "while both large ones still read");
+});
+
+// card sol-short-read-back-goes-first: helper 244 (465ecc471), 26 Nov 01:16:51-01:19:05Z, the every-coin chart check
+// (helper-candles-never-refuse-a-listed-coin --chains solana, 187 listed): 7 young pump.fun coins, src chain, 0 or 1 bars,
+// were still filling after the page's 7 reads over 73.5 s while their history was refused; reopened at 01:26Z with the
+// lanes quiet, two of them drew their whole chart 7 to 14 s on (BgBSNABD...pump, 28BpggnQ...pump). In turn, each of the
+// burst's read backs (up to OPEN_MAX) took one step of the BACK_PARALLEL lanes a round, so a read back of one page and a
+// chunk waited behind a step of every long one for each of its own. A read back whose page ran short (the mint's first
+// signature listed) knows its end: its chunks now go before the chunks of read backs still paging, the fewest left first,
+// and every signature page goes before either, as a page is one call that tells a read back's size.
+test("card sol-short-read-back-goes-first: two short read backs asked behind 20 long ones are done while the long ones read only the chunks on the lanes at each of their steps (red at 2c84829f4: 205 of the long ones' transactions read before the first's last)", async () => {
+  const remint = (body: typeof BUY.result, mint: Buffer) => {
+    const m = Buffer.from(b58decode(MINT)!);
+    const logMessages = body.meta.logMessages.map((l) => {
+      if (!l.startsWith("Program data: ")) return l;
+      const b = Buffer.from(l.slice(14), "base64");
+      const i = b.indexOf(m);
+      if (i >= 0) mint.copy(b, i);
+      return `Program data: ${b.toString("base64")}`;
+    });
+    return { ...body, meta: { ...body.meta, logMessages } };
+  };
+  const coin = (mint: Buffer, n: number, tag: string) => {
+    const list = Array.from({ length: n }, (_, i) => ({ signature: `${tag}${String(i).padStart(5, "0")}`, slot: 465_000_000 - i, err: null }));
+    return { mint: b58encode(mint), list, txs: Object.fromEntries(list.map((x) => [x.signature, remint(BUY.result, mint)])) };
+  };
+  // the long ones: 1,030 signatures, so their first page back is full (COLD_PAGE) and more may follow; the short ones:
+  // 36, so the walk reads the newest 30 and the read back's one page lists the 6 before them, the mint's first included
+  const long = Array.from({ length: 20 }, (_, k) => coin(Buffer.alloc(32, k + 10), 1_030, `long${String(k).padStart(2, "0")}`));
+  const short = [0, 1].map((k) => coin(Buffer.alloc(32, k + 40), 36, `short${k}`));
+  const coins = [...long, ...short];
+  const by = new Map(coins.map((c) => [c.mint, c]));
+  const txs = Object.assign({}, ...coins.map((c) => c.txs)) as Record<string, unknown>;
+  const base = rpcFetch({ sigs: () => [], txs, price: 9_342_267_796n, pub: TS, slot: 100 }, Object.fromEntries(coins.map((c) => [c.mint, 6])));
+  // the long ones' transactions read past their walks' newest COLD_SIGS (their read backs'), counted when each short
+  // read back asks for its mint's first signature's transaction (its last)
+  let longBack = 0;
+  const atLast = new Map<string, number>();
+  const t = createSolanaTrades({
+    fetch: async (url: string, init: RequestInit) => {
+      const req = JSON.parse(String(init.body)) as { method: string; params: [string, Record<string, unknown>] };
+      if (req.method === "getSignaturesForAddress") {
+        const c = by.get(req.params[0])!;
+        const q = req.params[1];
+        const from = q.before === undefined ? 0 : c.list.findIndex((s) => s.signature === q.before) + 1;
+        return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: c.list.slice(from, from + (q.limit as number)) }), { status: 200 });
+      }
+      if (req.method === "getTransaction") {
+        const sig = String(req.params[0]);
+        if (sig.startsWith("long") && Number(sig.slice(6)) >= COLD_SIGS) longBack++;
+        for (const c of short) if (sig === c.list.at(-1)!.signature) atLast.set(c.mint, longBack);
+        // a transaction takes a few ms, as an RPC's does
+        await new Promise((r) => setTimeout(r, 2));
+      }
+      return base(url, init);
+    },
+    now: () => TS * 1000,
+    listed: async (m) => by.has(m),
+    rpcs: ["https://rpc.test"],
+    source: () => ({ watch: async () => undefined, unwatch: () => undefined, close: () => undefined }),
+    history: async () => ({ status: 404, body: '{"error":{"code":"not_found"}}' }),
+    tickMs: 0,
+  });
+  const chart = async (m: string) => JSON.parse((await t.candles(m, "1m", null, 300)).body) as { filling?: boolean };
+  for (const c of coins) await t.trades(c.mint, 50);
+  await settle();
+  // the long read backs asked first, then the short ones, as a burst of listed charts asks them
+  for (const c of coins) assert.equal((await chart(c.mint)).filling, true, "a read back asked");
+  const done = async () => (await Promise.all(short.map((c) => chart(c.mint)))).every((x) => x.filling === undefined);
+  for (let i = 0; i < 500 && !(await done()); i++) await settle();
+  const shortDone = await done();
+  t.stop();
+  assert.equal(shortDone, true, "both short read backs done");
+  // each of a short read back's own steps (its page, a chunk of 5 and one of 1) waits at most for the steps on the lanes
+  // (a lane freed between two of its steps goes to the next waiting step before its next one is asked): BACK_PARALLEL
+  // chunks of TX_PARALLEL (5) a step of its own
+  const onLanes = 3 * BACK_PARALLEL * 5;
+  for (const c of short) assert.ok((atLast.get(c.mint) ?? Infinity) <= onLanes, `${c.list[0]!.signature.slice(0, 6)}: ${atLast.get(c.mint)} of the long read backs' transactions read before its last (at most ${onLanes})`);
 });
 
 // card helper-listed-charts-own-reads round 3: a listed coin with no vendor bars charts from its own signatures read back.
