@@ -9589,7 +9589,10 @@ test("card evm-quote-reads-need-no-old-state (buy, Robinhood) the evidence's rea
   };
   const rh = builder.evmPoolVenues().robinhood!;
   const keeps = new Set(["rpc.mainnet.chain.robinhood.com", "robinhood.api.pocket.network"]);
-  const hosts = [...new Set([...rh.providers!, ...builder.evmReadProvidersOf(rh)!])].map(hostOf);
+  // the evidence asks the venue's seat too, our helper's keyed route ranked with the quote list (card
+  // robinhood-warm-tap-inside-2s, quote.ts venue): one operator more, here one that drops the old state, so the two that
+  // keep it still decide alone
+  const hosts = [...new Set([...(rh.seat === undefined ? [] : [rh.seat]), ...rh.providers!, ...builder.evmReadProvidersOf(rh)!])].map(hostOf);
   assert.ok(hosts.includes("robinhood.api.pocket.network") && !rh.providers!.map(hostOf).includes("robinhood.api.pocket.network"), "Pocket keeps the state and is on the read list, not the quote list");
   const asked = new Map<string, number>();
   const { f } = hosted(Object.fromEntries(hosts.map((h) => {
