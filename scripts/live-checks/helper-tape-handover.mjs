@@ -11,7 +11,10 @@
 //     GET /v1/market/trades?chain=<chain>&token=<t>&limit=50 with Origin APP, every POLL_MS until it is not filling or
 //     FILLED_MS (tape-read.mjs) from its first read has passed, each answer's Server-Timing kept (2,000 chars at most);
 //     while the chain's books were restored and no coin read answered as handed, the next coin of its lists, up to
-//     COINS_MAX (the lists' top coins are what the old helper held open).
+//     COINS_MAX. The old helper read these very coins just before its stop (card helper-tape-handover-reads-a-handed-book:
+//     apps/helper/deploy/redeploy.sh runs prime-books.mjs on it, as an app on the lists would), so their books were
+//     handed over; before that card a helper with no user on its lists had read none of them, and the check failed on how
+//     long ago the last deploy was (helpers 245 and 247: 0 of 8 coins read as handed).
 // Judged: the helper names its start; a coin's first answer is short when its last answer holds a row its first did not
 // at or before the first answer's newest row (and, a first answer under 50 rows, anywhere below it): rows the first
 // answer should have held, filled in after it. Rows newer than its newest are the blocks since (a book at rest reads them

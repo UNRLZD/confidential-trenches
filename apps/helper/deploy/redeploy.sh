@@ -29,7 +29,8 @@
 #   3. swaps the helper with no gap, with those two values: with no helper running (a first deploy) docker compose up
 #      -d --wait brings the stack up; otherwise starts the new helper beside the old one (docker compose up --no-deps
 #      --no-recreate --scale helper=<old + 1> --wait), waits for its healthcheck (compose.yaml: /v1/health says ready),
-#      and only then stops (30 s) and removes each old container. Past the bound (REDEPLOY_READY_S seconds, default
+#      and only then has each old container read the lists' first coins (prime-books.mjs, so its warm file hands their
+#      books over), stops (30 s) and removes it. Past the bound (REDEPLOY_READY_S seconds, default
 #      300) the new container is removed, the old one keeps serving, and it exits 1;
 #   4. reloads Caddy with this checkout's Caddyfile through its admin socket inside the container (Caddyfile: admin
 #      unix//config/caddy-admin.sock): Caddy swaps to the new config with no gap and skips a config that is unchanged. The
@@ -203,6 +204,18 @@ swap_helper() {
     echo "redeploy: no new helper from ct-helper:$sha is running; the old one keeps serving" >&2
     exit 1
   fi
+  # card helper-tape-handover-reads-a-handed-book: each old helper first reads the lists' first coins' trades (this
+  # checkout's prime-books.mjs on its own node, bounded, counts printed), as an app on the lists would, so the warm file
+  # it writes at its stop hands their books to the new one and the handover live check reads books the old one held. A
+  # read that fails is named and the swap goes on: the live check judges what was handed.
+  local said
+  for id in $old; do
+    if said="$(docker exec -i "$id" node --input-type=module - < prime-books.mjs 2>/dev/null)"; then
+      echo "redeploy: the old helper $id $said"
+    else
+      echo "redeploy: the old helper $id could not read the lists' first coins before its stop"
+    fi
+  done
   for id in $old; do
     docker stop -t 60 "$id" >/dev/null
     docker rm "$id" >/dev/null
