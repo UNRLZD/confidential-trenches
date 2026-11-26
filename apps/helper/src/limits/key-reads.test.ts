@@ -6,7 +6,8 @@ import { mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { KEY_READS_DIR, keyReads, NEAR_KEY_DAY_DEFAULT, nearKeyDayOf } from "./key-reads.ts";
+import { KEY_READS_DIR, keyReads, NEAR_KEY_DAY_DEFAULT, nearKeyDayOf, SYNC_MS } from "./key-reads.ts";
+import { DAY_SYNC_MS } from "./limits.ts";
 
 const DAY = 86_400_000;
 /** 2026-11-26 12:00Z, a still clock the tests move by hand. */
@@ -93,4 +94,8 @@ test("NEAR_KEY_DAY: unset or empty is 300,000; a whole number above 0 is taken; 
   assert.equal(nearKeyDayOf({ NEAR_KEY_DAY: "" }), 300_000);
   assert.equal(nearKeyDayOf({ NEAR_KEY_DAY: "120000" }), 120_000);
   for (const v of ["0", "-5", "1.5", "1e5", "abc", " 5"]) assert.throws(() => nearKeyDayOf({ NEAR_KEY_DAY: v }), (e: Error) => e.message === "NEAR_KEY_DAY must be a whole number above 0", v);
+});
+
+test("the counts are written and re-read as often as the keyed day files (limits.ts DAY_SYNC_MS)", () => {
+  assert.equal(SYNC_MS, DAY_SYNC_MS);
 });

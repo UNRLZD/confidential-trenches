@@ -245,7 +245,13 @@ function keyAnswers(answer: number | "throw" | "hang") {
     asked.push(`${String(url)} ${String(init?.body)}`);
     if (String(url) !== FASTNEAR) return new Response('{"result":1}', { status: 200 });
     if (answer === "throw") throw new TypeError("fetch failed");
-    if (answer === "hang") return new Promise<Response>((_, no) => init?.signal?.addEventListener("abort", () => no(init.signal!.reason)));
+    if (answer === "hang") {
+      const signal = init?.signal;
+      return new Promise<Response>((_, no) => {
+        if (signal?.aborted) return no(signal.reason);
+        signal?.addEventListener("abort", () => no(signal.reason), { once: true });
+      });
+    }
     return new Response("busy", { status: answer });
   }) as typeof globalThis.fetch;
   return { asked, fetchFn };

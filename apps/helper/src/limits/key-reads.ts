@@ -8,15 +8,18 @@
 // reads its free endpoints first, the seat answers 503 so the page reads its keyless spare, the plain route walks on.
 // The counts are kept as the keyed day files are (limits/day-spend.ts): each helper (`id`, a random UUID per start)
 // writes its own file under HELPER_STORE_DIR (the volume a handover's two helpers both mount), whole (a temp file, fsync,
-// one rename), and sums every other helper's, re-read at most every DAY_SYNC_MS; a stopped helper's file counts until its
+// one rename), and sums every other helper's, re-read at most every SYNC_MS; a stopped helper's file counts until its
 // days pass, so a restart or a deploy resumes the day. Today and yesterday are kept, so the header names a whole day.
 // Every file is hostile input: a name that is not a helper's, a file past FILE_MAX, one that does not parse, or a count
 // that is not a whole number at or above 0 counts nothing; a file holding no kept day is removed.
 import { closeSync, fsyncSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeSync } from "node:fs";
 import { join } from "node:path";
-import { DAY_SYNC_MS } from "./limits.ts";
 
 export const KEY_READS_DIR = "near-key-reads";
+/** How often a helper writes its counts and reads the others': limits.ts DAY_SYNC_MS (1 s), held equal by
+ *  key-reads.test.ts. Its own constant: the NEAR pair imports this file (token-status/status.ts), and limits.ts would
+ *  bring the proxy and its vendors into every reader of the pair (scripts/ci/vault-sandbox.mjs PATHS). */
+export const SYNC_MS = 1_000;
 /** GET /v1/health's header naming today's and yesterday's counts, the ceiling and whether today's reached it. */
 export const NEAR_KEY_READS_HEADER = "X-Helper-Near-Key-Reads";
 /** The settings name of the daily ceiling, helper and seat together. */
@@ -89,12 +92,12 @@ export function keyReads(now: () => number = Date.now, ceiling = NEAR_KEY_DAY_DE
   const sync = () => {
     if (dir === undefined) return;
     const since = now() - wroteAt;
-    if (since >= DAY_SYNC_MS) return write();
+    if (since >= SYNC_MS) return write();
     if (timer !== undefined) return;
     timer = setTimeout(() => {
       timer = undefined;
       write();
-    }, DAY_SYNC_MS - since);
+    }, SYNC_MS - since);
     timer.unref?.();
   };
   const readPeers = (): Map<number, Counts> => {
@@ -131,7 +134,7 @@ export function keyReads(now: () => number = Date.now, ceiling = NEAR_KEY_DAY_DE
     return sum;
   };
   const totals = (d: number): Counts => {
-    if (now() - peersAt >= DAY_SYNC_MS) {
+    if (now() - peersAt >= SYNC_MS) {
       peers = readPeers();
       peersAt = now();
     }

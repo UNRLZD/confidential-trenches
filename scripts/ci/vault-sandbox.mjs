@@ -36,6 +36,8 @@ export const PATHS = [
   "apps/helper/src/token-status/",
   // the token watch's provider companies (card near-pair-on-keyed-providers: its pair is two companies)
   "apps/helper/src/rpc/operator.ts",
+  // the NEAR pair's count of the FastNEAR key's reads and its daily ceiling (card near-off-the-fastnear-key)
+  "apps/helper/src/limits/key-reads.ts",
   "apps/helper/test/bind-send/",
   // the relayer's withdraw send, which sandbox tests will drive as bind-send is driven
   "apps/helper/src/withdraw/",
