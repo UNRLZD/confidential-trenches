@@ -484,7 +484,14 @@ export const evmMainnetVenues = () =>
       // ask it for 12 reads a request, 16 times the posts, for the slowest operator here (its 64-read batches p50/p95
       // 916/3,298 ms against publicnode's 466/941, 23:2xZ), so it is not asked; the pool list keeps it for log pages.
       // Live check rh-provider-fails-64-read-batch reads every one of this list at the batch after each app deploy.
-      providers: Object.freeze(["https://robinhood-rpc.publicnode.com", "https://robinhood.drpc.org", "https://rpc.mainnet.chain.robinhood.com", "https://robinhood.rpc.blxrbdn.com"]),
+      // Card robinhood-warm-tap-inside-2s: our helper's seat first, POST /v1/rpc/robinhood?keyed=alchemy, one company's
+      // key under a share sized to three taps (apps/helper/src/rpc/rpc.ts SEAT_SHARE), as NEAR's seat is (near/networks.ts).
+      // The keyless four were the gap: publicnode 0.6 to 5.7 s a post, Robinhood's own and bloXroute paced at 6 calls a
+      // second, dRPC held after a 429, so a warm tap took 2.7 to 24 s on mainnet from the Mac (26 Nov 15:0xZ); with the
+      // seat first (a local helper on the same key, 15:5xZ) 0.36 to 1.6 s, 364 seat posts all answered. Every read still
+      // needs two operators that agree: a lying helper meets another's answer and the quote is refused, never signed; a
+      // helper down or past its day leaves the four as before.
+      providers: Object.freeze([`${EVM_HELPER_ORIGIN}/v1/rpc/robinhood?keyed=alchemy`, "https://robinhood-rpc.publicnode.com", "https://robinhood.drpc.org", "https://rpc.mainnet.chain.robinhood.com", "https://robinhood.rpc.blxrbdn.com"]),
       // the warm tap's cut logs (card evm-cut-logs-only-where-served), read from the Mac 2026-11-24 20:46Z over the
       // newest 100 blocks as Base's: dRPC and Robinhood's own answered (67, 72 and 90 logs on both); publicnode -32602
       // "Archive requests require a personal token" and bloXroute -32601 "Method not available on this endpoint" every
@@ -507,8 +514,9 @@ export const evmMainnetVenues = () =>
       // served every post at 8 and the helper's pace records 2 at once for it (a fourth quick read refused 429): 2.
       // publicnode, blxrbdn and globalstake served every post at 8, none refused, and the helper names none of them: 8,
       // the measurement alone. One limit of 2 for every provider (the scan's) held a cold USDG quote's 173 posts in the
-      // queue: 12.2 s, against 7.0 s at 6 (05:0xZ the same day)
-      inflight: bare<Record<string, number>>({ "https://robinhood-rpc.publicnode.com": 8, "https://robinhood.drpc.org": 5, "https://rpc.mainnet.chain.robinhood.com": 2, "https://robinhood.rpc.blxrbdn.com": 8 }),
+      // queue: 12.2 s, against 7.0 s at 6 (05:0xZ the same day). The seat 8, as publicnode: 364 posts at up to 8 at once
+      // all answered through a local helper on the same key (card robinhood-warm-tap-inside-2s, 26 Nov 15:5xZ)
+      inflight: bare<Record<string, number>>({ [`${EVM_HELPER_ORIGIN}/v1/rpc/robinhood?keyed=alchemy`]: 8, "https://robinhood-rpc.publicnode.com": 8, "https://robinhood.drpc.org": 5, "https://rpc.mainnet.chain.robinhood.com": 2, "https://robinhood.rpc.blxrbdn.com": 8 }),
       // 64 reads a call (card evm-buy-quote-in-window): a cold WETH-USDG quote's 2,303 reads at 6 a call were 128 batches,
       // which ran past the 10-13 s that three of these five keep a block's state. Its exact-out reads cost about 100,000
       // gas each, about 6.4M a call against the 50M caps; all five answered 3 calls of 64 alike (review of 2c02f7df) and
