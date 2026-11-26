@@ -34,7 +34,12 @@ function replay(answers) {
     return new Response(a.json === null ? "" : JSON.stringify(a.json), { status: a.status });
   };
 }
-const run = (answers = A.answers, records = REC, pins = PINS) => checkTables({ records, pins, fetchFn: replay(answers) });
+/** The readers the recording read its txs on: the gate's list of 12 Nov (api.mainnet-beta and Solana Vibe Station; PublicNode
+ *  third since card money-gate-solana-reads-past-one-stall, its answers planted below), before card
+ *  money-gate-solana-reads-on-two-operators put Tatum in Vibe Station's place; a recording that names its own (txRpcs,
+ *  written by --record) is replayed on those. */
+const READ_ON = A.txRpcs ?? { mainnet: ["https://api.mainnet-beta.solana.com", "https://public.rpc.solanavibestation.com", "https://solana-rpc.publicnode.com"], devnet: TX_RPCS.devnet };
+const run = (answers = A.answers, records = REC, pins = PINS) => checkTables({ records, pins, fetchFn: replay(answers), txRpcs: READ_ON });
 const failLines = (r) => r.lines.filter((l) => l.startsWith("FAIL")).join("\n");
 const nowhere = async () => {
   throw new Error("no read");

@@ -24,7 +24,9 @@ RETRY.ms = 0;
 const A = JSON.parse(readFileSync(new URL("./pool-sol-mainnet-run.answers.json", import.meta.url), "utf8"));
 const R = JSON.parse(readFileSync(new URL("./pool-sol-mainnet-run.record-answers.json", import.meta.url), "utf8"));
 const R3 = JSON.parse(readFileSync(new URL("./pool-sol-mainnet-run.record-mainnet-answers.json", import.meta.url), "utf8"));
-const [MB, SVS, PN] = RPCS.solana;
+// the hosts the three-operator recordings read on (their own rpcs: the gate's list of their day, Solana Vibe Station
+// second, before card money-gate-solana-reads-on-two-operators put Tatum in its place)
+const [MB, SVS, PN] = A.good_mainnet_three_operators.rpcs;
 
 /** Each recorded answer once, in the order read (a provider's 429 then its retry's answer, as recorded). */
 function replay(answers) {
@@ -104,9 +106,12 @@ test("the RPCs are the money gate's own list, for both clusters: one list, impor
     assert.ok(ops.every((o, i) => o !== RPCS[chain][i]), `${chain}: every host is in rpc-operators.mjs`);
     assert.equal(new Set(RPCS[chain].map((u) => operatorOf(chain, u))).size, RPCS[chain].length);
   }
-  // the three-operator recordings were read on the gate's list as it is
-  assert.deepEqual(A.good_mainnet_three_operators.rpcs, RPCS.solana);
-  assert.deepEqual(R3.rpcs, RPCS.solana);
+  // the three-operator recordings were read on the gate's list of their day, which is today's with Solana Vibe Station in
+  // Tatum's place (card money-gate-solana-reads-on-two-operators: Vibe Station refused every connection), and are
+  // replayed on their own rpcs
+  const ofTheirDay = RPCS.solana.map((u) => (u === "https://solana-mainnet.gateway.tatum.io" ? "https://public.rpc.solanavibestation.com" : u));
+  assert.deepEqual(A.good_mainnet_three_operators.rpcs, ofTheirDay);
+  assert.deepEqual(R3.rpcs, ofTheirDay);
 });
 
 test("three operators: the mainnet pool after the owner's run passes, PublicNode left out of the marks it serves only with a key", async () => {

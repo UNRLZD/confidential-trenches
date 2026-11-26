@@ -1993,7 +1993,7 @@ test("planted: absent on two Solana operators is still refused with PublicNode s
   const s = flaky((url, method) => (url === PN ? "a transport error" : missingOn("solana", method)));
   const r = await moneyGate(oneTx("solana"), s.fetchFn, { solana: REAL_RPCS.solana }, { sleep: s.sleep });
   assert.deepEqual(r.unread, []);
-  assert.match(r.refusals.join("\n"), /missing on https:\/\/api\.mainnet-beta\.solana\.com, missing on https:\/\/public\.rpc\.solanavibestation\.com, /);
+  assert.match(r.refusals.join("\n"), /missing on https:\/\/api\.mainnet-beta\.solana\.com, missing on https:\/\/solana-mainnet\.gateway\.tatum\.io, /);
   assert.equal(outcome(r), 1);
   // a tx inside PublicNode's history that one full-history host reads ok and PublicNode and the other read null: absent
   // on two operators, refused
@@ -2002,6 +2002,6 @@ test("planted: absent on two Solana operators is still refused with PublicNode s
   );
   const q = await moneyGate(oneTx("solana"), inside.fetchFn, { solana: REAL_RPCS.solana }, { sleep: inside.sleep });
   assert.deepEqual(q.unread, []);
-  assert.match(q.refusals.join("\n"), /ok on https:\/\/api\.mainnet-beta\.solana\.com, missing on https:\/\/public\.rpc\.solanavibestation\.com, missing on https:\/\/solana-rpc\.publicnode\.com$/);
+  assert.match(q.refusals.join("\n"), /ok on https:\/\/api\.mainnet-beta\.solana\.com, missing on https:\/\/solana-mainnet\.gateway\.tatum\.io, missing on https:\/\/solana-rpc\.publicnode\.com$/);
   assert.equal(outcome(q), 1);
 });

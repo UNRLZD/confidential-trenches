@@ -3,8 +3,12 @@
 // operator's own page, read 2026-11-01 between 09:05 and 09:10Z:
 //  - api.mainnet-beta.solana.com: the Solana cluster's public RPC (docs.anza.xyz/clusters/available, "RPC URL for
 //    Mainnet Beta: https://api.mainnet-beta.solana.com").
+//  - solana-mainnet.gateway.tatum.io: Tatum (tatum.io/chain/solana names it the Solana mainnet gateway; read 2026-11-26
+//    05:5xZ, its answers carry x-ttm-plan anonymous). It stands where public.rpc.solanavibestation.com (Solana Vibe
+//    Station) stood until it refused every connection (card money-gate-solana-reads-on-two-operators).
 //  - public.rpc.solanavibestation.com: Solana Vibe Station, "on hardware we run ourselves" (solanavibestation.com,
-//    "curl https://public.rpc.solanavibestation.com").
+//    "curl https://public.rpc.solanavibestation.com"). No longer in the gate's list (money-gate-reads.mjs); kept here so
+//    a recording read on it (the live checks' answers files) still names its operator.
 //  - solana-rpc.publicnode.com: PublicNode (solana.publicnode.com, "Endpoint Link ... https://solana-rpc.publicnode.com",
 //    read 2026-11-21 at 21:16Z; its page says "Archive data available", but its getFirstAvailableBlock answered
 //    471,786,675, 20 Nov 15:25Z, at 21:12Z, so the money gate counts its null only where that block reaches the tx:
@@ -29,7 +33,7 @@
 //    Testnet").
 /** chain -> host -> operator */
 export const RPC_OPERATORS = Object.freeze({
-  solana: Object.freeze({ "api.mainnet-beta.solana.com": "solana", "public.rpc.solanavibestation.com": "solanavibestation", "solana-rpc.publicnode.com": "publicnode" }),
+  solana: Object.freeze({ "api.mainnet-beta.solana.com": "solana", "solana-mainnet.gateway.tatum.io": "tatum", "public.rpc.solanavibestation.com": "solanavibestation", "solana-rpc.publicnode.com": "publicnode" }),
   base: Object.freeze({ "mainnet.base.org": "base", "base.drpc.org": "drpc" }),
   robinhood: Object.freeze({ "rpc.mainnet.chain.robinhood.com": "robinhood", "robinhood-rpc.publicnode.com": "publicnode" }),
   "solana-devnet": Object.freeze({ "api.devnet.solana.com": "solana", "solana-devnet.api.onfinality.io": "onfinality" }),
